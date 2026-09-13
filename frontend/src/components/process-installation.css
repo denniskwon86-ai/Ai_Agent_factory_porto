@@ -1,0 +1,54 @@
+.process-installation { color: var(--surface-text); max-width: 1100px; min-width: 0; }
+.process-installation h3 { margin: 4px 0 8px; font-size: 20px; }
+.process-installation h4 { margin: 0 0 12px; font-size: 16px; }
+.process-installation h5 { margin: 0 0 10px; font-size: 14px; }
+.process-installation p { line-height: 1.6; font-size: 14px; margin: 8px 0; }
+.process-kicker, .process-muted { color: var(--surface-text-muted); font-size: 13px; }
+.process-scope, .process-field { display: grid; gap: 7px; margin: 14px 0; font-size: 14px; }
+.process-installation select, .process-installation textarea { padding: 9px; font: inherit; min-width: 0; max-width: 100%; }
+.process-installation button { padding: 9px 13px; font: inherit; font-size: 14px; cursor: pointer; }
+.process-installation button:disabled { cursor: default; opacity: .6; }
+.process-installation :focus-visible { outline: 3px solid var(--ls-blue, #2563eb); outline-offset: 3px; }
+.process-status { font-size: 13px; min-height: 22px; margin: 8px 0; }
+.process-error, .process-safety, .process-context, .process-operation { padding: 12px 14px; border-radius: 8px; margin: 12px 0; overflow-wrap: anywhere; }
+.process-error { border: 1px solid var(--state-error-fg); background: var(--state-error-bg); }
+.process-safety { background: var(--state-warn-bg); border-left: 3px solid var(--state-warn-fg); font-size: 14px; }
+.process-context { display: flex; flex-wrap: wrap; gap: 12px; background: var(--surface-raised); border: 1px solid var(--surface-border); }
+.process-step { padding: 18px 0; border-top: 1px solid var(--surface-border); }
+.process-pack { display: flex; align-items: flex-start; gap: 12px; padding: 14px; border: 1px solid var(--surface-border); border-radius: 8px; }
+.process-pack small, .process-operation-list small { display: block; margin-top: 5px; font-size: 12px; color: var(--surface-text-muted); overflow-wrap: anywhere; }
+.process-installation fieldset { margin: 14px 0; border: 1px solid var(--surface-border); border-radius: 6px; }
+.process-kit { display: inline-flex; align-items: center; gap: 6px; padding: 8px 12px 8px 0; }
+.process-register, .process-actions { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
+.process-register span { font-size: 13px; }
+.process-tree { border: 1px solid var(--surface-border); padding: 16px; border-radius: 8px; margin: 16px 0; }
+.process-tree-columns { display: grid; grid-template-columns: minmax(150px, .7fr) minmax(0, 1.5fr); gap: 20px; }
+.process-root-list { display: flex; flex-direction: column; gap: 6px; align-items: stretch; }
+.process-root-list button { text-align: left; }
+.process-root-list button[aria-pressed="true"] { border: 2px solid var(--ls-blue, #2563eb); font-weight: 700; }
+.process-tree ol { padding-left: 24px; }
+.process-tree li { padding: 6px 0; overflow-wrap: anywhere; }
+.process-operation { border: 1px solid var(--surface-border); }
+.process-review { padding: 16px; margin-top: 16px; border: 1px solid var(--surface-border); border-radius: 8px; overflow-wrap: anywhere; }
+.process-review-columns { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.process-review-columns .process-tree-columns { grid-template-columns: 1fr; }
+.process-review details { margin: 12px 0; }
+.process-review summary { cursor: pointer; padding: 8px 0; }
+.process-review pre { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; }
+.process-success { background: var(--state-success-bg); border-left: 3px solid var(--state-success-fg); padding: 12px 14px; margin: 12px 0; }
+.process-edit-columns { display: grid; grid-template-columns: minmax(230px, .8fr) minmax(0, 1.5fr); gap: 24px; }
+.process-edit-list { padding: 0; list-style: none; margin: 0 0 20px; }
+.process-edit-list li { display: flex; align-items: center; gap: 4px; margin: 6px 0; }
+.process-edit-list li > button { flex: 1; text-align: left; overflow-wrap: anywhere; }
+.process-edit-list button[aria-pressed="true"] { border: 2px solid var(--ls-blue, #2563eb); font-weight: 700; }
+.process-edit-order { display: inline-flex; gap: 2px; }
+.process-edit-order button { padding: 8px; }
+.process-editor input:not([type="checkbox"]) { padding: 9px; font: inherit; min-width: 0; width: 100%; box-sizing: border-box; }
+.process-editor fieldset { margin-top: 0; }
+.process-edit-preview { padding: 12px; border: 1px solid var(--surface-border); border-radius: 8px; overflow-wrap: anywhere; }
+.process-install-more > summary { cursor: pointer; padding: 16px 0; font-weight: 600; }
+@media (max-width: 800px) { .process-edit-columns { grid-template-columns: 1fr; } }
+@media (max-width: 800px) { .process-review-columns { grid-template-columns: 1fr; } }
+.process-operation-list { list-style: none; padding: 0; }
+.process-operation-list li { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--surface-border); }
+@media (max-width: 640px) { .process-tree-columns { grid-template-columns: 1fr; } .process-operation-list li { align-items: flex-start; flex-direction: column; } }

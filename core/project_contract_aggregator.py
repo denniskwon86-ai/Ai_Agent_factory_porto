@@ -36,6 +36,7 @@ WBS 에서 사라진 태스크의 데이터셋은 **새 합산에서 즉시 제�
   다르다고 막으면 사람이 문구를 맞추느라 의미를 안 보게 된다.
 """
 import re
+import copy
 from typing import Any, Dict, List, NamedTuple, Tuple
 
 from core import app_runtime_contract as arc
@@ -142,7 +143,8 @@ def _coverage_errors(tasks_in_scope: Any, intents: Any) -> list:
     return out
 
 
-def aggregate(tasks: Any, drafts: Any) -> AggregateResult:
+def aggregate(tasks: Any, drafts: Any, *, document_version: str = "1.0",
+              process_context: Any = None) -> AggregateResult:
     """WBS 와 태스크별 초안에서 **프로젝트 초안 하나**를 만든다. 던지지 않는다.
 
     · `tasks` — WBS 태스크 목록(정규화 전이어도 된다. 여기서 정규화해 판정한다)
@@ -158,6 +160,7 @@ def aggregate(tasks: Any, drafts: Any) -> AggregateResult:
 
     draft_map = drafts if isinstance(drafts, dict) else {}
     errors: List[str] = []
+    errors.extend(arc.runtime_document_errors(document_version, process_context))
     conflicts: List[Dict[str, Any]] = []
     missing: List[str] = []
     included: List[str] = []
@@ -273,13 +276,18 @@ def aggregate(tasks: Any, drafts: Any) -> AggregateResult:
         "datasets": [datasets[k][1] for k in sorted(datasets)],
         "capability_intents": [intents[k][1] for k in sorted(intents)],
     }
+    if document_version == arc.PROCESS_DOCUMENT_VERSION:
+        # 태스크 초안끼리 문맥을 합치거나 LLM이 준 문맥으로 덮지 않는다.
+        draft["schema_version"] = document_version
+        draft["process_context"] = copy.deepcopy(process_context)
     return AggregateResult(draft=draft, errors=errors, conflicts=conflicts,
                            included_task_ids=included, excluded_task_ids=sorted(excluded),
                            missing_task_ids=missing)
 
 
 def compile_project_contract(tasks: Any, drafts: Any, *, project_id: str,
-                             previous: Any = None):
+                             previous: Any = None, document_version: str = "1.0",
+                             process_context: Any = None):
     """합산 → 컴파일. 합산이 막히면 **컴파일하지 않는다.**
 
     ⚠️ 막힌 채로 컴파일하면 「일부 태스크만 담긴 계약」이 `COMPILED` 상태로 나오고,
@@ -289,13 +297,15 @@ def compile_project_contract(tasks: Any, drafts: Any, *, project_id: str,
     막히면 `errors` 에 사유가 담긴 `DRAFT` 계약을 돌려준다."""
     from core import host_contract_compiler as hcc
 
-    agg = aggregate(tasks, drafts)
+    agg = aggregate(tasks, drafts, document_version=document_version, process_context=process_context)
     if agg.blocked:
         reasons = list(agg.errors) + [c["detail"] for c in agg.conflicts]
-        empty = hcc.compile_contract({}, project_id=project_id, task_id="")
+        empty = hcc.compile_contract({}, project_id=project_id, task_id="",
+                                     document_version=document_version, process_context=process_context)
         return hcc.CompileResult(contract=empty.contract, errors=reasons,
                                  pending_decisions=[], fingerprint_changed=False), agg
 
     #: `task_id=""` — 이 계약의 주인은 태스크가 아니라 **프로젝트**다.
     return hcc.compile_contract(agg.draft, project_id=project_id, task_id="",
-                                previous=previous if isinstance(previous, dict) else None), agg
+                                previous=previous if isinstance(previous, dict) else None,
+                                document_version=document_version, process_context=process_context), agg

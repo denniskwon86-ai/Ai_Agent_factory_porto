@@ -1240,3 +1240,35 @@
   border-color: var(--action-danger-bg);
   color: var(--action-danger-fg); background: var(--action-danger-bg);
 }
+
+/* B5: 기존 토큰을 유지하고 현재 행동과 상세 조작의 위계를 나눈다. */
+.afs-studio .project-head { flex-wrap: wrap; }
+.afs-studio .studio-next-action { display: flex; align-items: center; gap: 12px; padding: 12px 18px; flex-wrap: wrap; }
+.afs-studio .studio-next-action > div { flex: 1; min-width: 220px; }
+.afs-studio .studio-next-action strong { font-size: 16px; }
+.afs-studio .studio-next-action p { margin: 5px 0 0; color: var(--surface-text-muted); font-size: 13px; }
+.afs-studio .studio-next-action button,
+.afs-studio .studio-stop-confirm button,
+.afs-studio.studio-context-block button { min-height: 38px; padding: 8px 14px; border-radius: 6px; border: 1px solid var(--surface-border-strong); color: var(--surface-text); background: var(--surface-card); font: inherit; cursor: pointer; }
+.afs-studio .studio-next-action button.primary { color: var(--action-primary-fg); background: var(--action-primary-bg); border-color: var(--action-primary-bg); font-weight: 700; }
+.afs-studio .studio-more-actions { padding: 0 18px 8px; }
+.afs-studio summary { cursor: pointer; font-size: 13px; padding: 8px 0; }
+.afs-studio .run-buttons { grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); padding: 6px 0; }
+.afs-studio .studio-command-message, .afs-studio .studio-stop-confirm { flex-basis: 100%; margin: 0; padding: 8px; border: 1px solid var(--surface-border); }
+.afs-studio .run-controls { max-height: 46vh; overflow-y: auto; }
+.afs-studio.studio-context-block { display: block; padding: 24px; }
+.afs-studio .run-form input { color: var(--surface-text); background: var(--surface-card); }
+.afs-studio button:focus-visible, .afs-studio summary:focus-visible, .afs-studio textarea:focus-visible { outline: 2px solid var(--ls-navy); outline-offset: 3px; }
+@media (max-width: 800px) {
+  .afs-studio .project-title { min-width: 160px; }
+  .afs-studio .head-metric { display: none; }
+  .afs-studio .project-head { gap: 8px; padding: 8px; }
+  .afs-studio .studio-next-action { padding: 10px; }
+  .afs-studio .head-actions { flex-wrap: wrap; }
+}
+.studio-leave-confirm {
+  position: fixed; z-index: 10000; inset: 0; margin: auto; max-width: 650px; width: calc(100% - 40px);
+  padding: 24px; border: 2px solid #526be8; border-radius: 16px; background: white; color: #182337;
+  box-shadow: 0 16px 48px #0004;
+}
+.studio-leave-confirm::backdrop { background: #18233799; }

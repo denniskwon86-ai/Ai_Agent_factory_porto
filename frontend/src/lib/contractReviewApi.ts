@@ -19,10 +19,16 @@ const BASE = '/api/v1/factory';
 
 async function unwrap<T>(res: Response, what: string): Promise<T> {
   if (!res.ok) {
-    let detail = '';
+    let detail: unknown = '';
     try { detail = (await res.json())?.detail || ''; } catch { /* JSON 이 아닐 수 있다 */ }
     // ⚠️ 실패를 «없음» 으로 바꾸지 않는다 — 409(상태 불일치)와 403(권한)은 할 일이 다르다.
-    throw Object.assign(new Error(detail || `${what}에 실패했습니다.`), { status: res.status });
+    const fields = detail && typeof detail === 'object' ? detail as Record<string, unknown> : {};
+    const message = typeof detail === 'string' ? detail
+      : typeof fields.message === 'string' ? fields.message : '';
+    throw Object.assign(new Error(message || `${what}에 실패했습니다.`), {
+      status: res.status, detail, reasonCode: fields.reason_code,
+      event_id: fields.event_id, request_event_id: fields.request_event_id,
+    });
   }
   return (await res.json())?.data as T;
 }
@@ -57,7 +63,7 @@ export type ContractDecisionResult = {
   request_event_id: string;
   contract_fingerprint: string;
   /** ⚠️ `false` 면 **결정은 원장에 남았지만** 파이프라인 상태 반영이 안 됐다.
-   *  다시 승인하면 안 된다 — 재개만 다시 시도한다. */
+   *  다시 승인하면 안 된다 — 기존 사건의 반영 복구와 실행 재개는 별개다. */
   state_applied: boolean;
   note?: string;
 };
@@ -71,4 +77,21 @@ export async function decideContractReview(
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     }), '계약 검토 결정');
+}
+
+export type ContractReconcileInput = {
+  task_id: string; request_event_id: string; event_id: string; compiled_fingerprint: string;
+};
+
+export type ContractReconcileResult = {
+  event_id: string; request_event_id: string; contract_fingerprint: string;
+  state_applied: boolean; execution_started: false; reason_code: string; note?: string;
+};
+
+/** 원장에 기록된 동일 승인 사건만 반영한다. 새 승인이나 실행 재개가 아니다. */
+export async function reconcileContractReview(projectId: string, body: ContractReconcileInput) {
+  return unwrap<ContractReconcileResult>(
+    await apiFetch(`${BASE}/${encodeURIComponent(projectId)}/contract-review/reconcile`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+    }), '기존 승인 반영 복구');
 }

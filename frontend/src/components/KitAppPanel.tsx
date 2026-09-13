@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import {
   approveAppContract, buildKitApp, DataPrepError, draftAppContract, listKitApps,
   promoteKitApp, type AppContractStatus, type KitAppRow,
@@ -11,6 +11,8 @@ import {
   datasetDisplayName, KitBusinessView, preferredDatasetName,
 } from './KitBusinessView';
 import { apiFetch } from '../lib/api';
+import { studioIdentityKey } from '../factory/studioInputMemory';
+import { KitContractReview, type KitContractReviewProps } from './KitContractReview';
 
 // [2026-08-23] 키트로 앱 만들기 — **여정의 빈 칸.**
 //
@@ -73,6 +75,9 @@ function lifecycleView(row: KitAppRow): { label: string; tone: string; bg: strin
   if (row.contract_status === 'DRAFT') {
     return { label: '승인 대기', tone: 'var(--state-warn-fg)', bg: '#fffbeb' };
   }
+  if (row.contract_status === 'REJECTED') {
+    return { label: '계약 반려', tone: 'var(--state-error-fg)', bg: 'var(--state-error-bg)' };
+  }
   if (row.built_datasets === 0 || row.built_datasets === null) {
     return { label: '제작 전', tone: 'var(--surface-text-muted)', bg: 'var(--surface-sunken)' };
   }
@@ -104,6 +109,7 @@ function contractView(status: AppContractStatus): { label: string; tone: string 
   if (status === 'DRAFT') return { label: '승인 대기', tone: 'var(--state-warn-fg)' };
   if (status === 'APPROVED') return { label: '승인됨', tone: 'var(--state-success-fg)' };
   if (status === 'SUPERSEDED') return { label: '이전 판(대체됨)', tone: 'var(--surface-text-muted)' };
+  if (status === 'REJECTED') return { label: '반려됨', tone: 'var(--state-error-fg)' };
   // ⚠️ 모르는 상태를 «승인됨» 으로 떨어뜨리지 않는다.
   return { label: `알 수 없음(${status})`, tone: 'var(--state-error-fg)' };
 }
@@ -178,7 +184,7 @@ function AppViewer({
   //:   네 칸만 떴다 — 「데이터가 없다」보다 나쁘다(있는데 엉뚱한 것을 보여 준다).
   //: ★ 봉투가 있으면 **벗겨서** 합친다. 봉투 칸은 뒤로 민다.
   const flat = (rows?.records || []).map((r) => {
-    const pay = (r as any).payload;
+    const pay = r.payload;
     return (pay && typeof pay === 'object') ? { ...pay, ...stripEnvelope(r) } : r;
   });
   //: ★ 원본 열은 버리지 않는다. 다만 사용자의 첫 화면은 앱 계약에 선언한 **업무 열**을
@@ -254,12 +260,14 @@ function AppViewer({
 }
 
 function AppRow({
-  row, instanceId, onChanged, notice, setNotice, mode, currentUser, onOpenSimulation,
+  row, instanceId, onChanged, onVisibilityLost, notice, setNotice, mode, currentUser, onOpenSimulation, reviewApiFactory,
 }: {
   row: KitAppRow; instanceId: string; onChanged: () => void;
+  onVisibilityLost: () => void;
   mode: 'build' | 'operate';
   currentUser: string;
   onOpenSimulation?: (instanceId: string, appId: string) => void;
+  reviewApiFactory?: KitContractReviewProps['apiFactory'];
   //: ★★★ [2026-08-23 실측] **알림은 부모가 들고 있어야 한다.**
   //:
   //: ⚠️⚠️ 종전에는 이 행의 지역 상태였다. 그런데 성공하면 `onChanged()` 가 목록을
@@ -279,12 +287,16 @@ function AppRow({
   const cv = contractView(row.contract_status);
   const lv = lifecycleView(row);
   const blocked = row.readiness_state === 'BLOCKED';
+  const isV2 = row.contract_schema_version === '2.0';
+  const isLegacy = !row.contract_schema_version || row.contract_schema_version === '1.0';
   const draftedByCurrentUser = Boolean(currentUser && row.drafted_by
     && currentUser === row.drafted_by);
 
   // ★ 서버 문구를 **그대로** 옮긴다. 여기서 새 문구를 지으면 같은 사실이 두 가지로
   //   설명되고, 사용자는 어느 쪽을 믿을지 모른다.
   const run = useCallback(async (what: string, fn: () => Promise<unknown>) => {
+    // v2 또는 미지원 판본을 v1 writer로 보내지 않는다.
+    if (!isLegacy) return;
     setBusy(what);
     setNotice(null);
     try {
@@ -300,7 +312,7 @@ function AppRow({
     } finally {
       setBusy('');
     }
-  }, [onChanged, setNotice]);
+  }, [isLegacy, onChanged, setNotice]);
 
   return (
     <li style={{
@@ -345,10 +357,38 @@ function AppRow({
         <div style={{ fontSize: 13, marginTop: 2 }}>→ {row.next_action}</div>
       )}
 
-      {/* ★★★ 막힌 것에는 **버튼을 그리지 않는다.** 「일부라도 열어 주자」가 위험하다 —
-          열린 앱은 빈 화면을 보여 주고, 사용자는 그것을 「우리 회사에 자료가 없다」로
-          읽는다. 실제로는 우리가 아직 준비하지 못한 것이다. */}
-      {blocked ? (
+      {/* v2 계약 검토는 데이터 읽기/제작 권한과 별개다. BLOCKED여도 계약 reader를 연다. */}
+      {isV2 && <div style={{ marginTop: 12, display: 'grid', gap: 10 }}>
+        {row.contract_status !== null ? <KitContractReview instanceId={instanceId} appId={row.app_id}
+          onChanged={onChanged} onVisibilityLost={onVisibilityLost} apiFactory={reviewApiFactory} />
+          : <p className="run-hint">아직 검토할 계약 초안이 없습니다. 새 2.0 계약 초안의 화면 연결이 필요합니다.</p>}
+        <div className="process-safety">
+          <p className="run-hint">2.0 계약 검토·승인과 데이터 준비·앱 제작은 별개입니다.
+            이 화면의 2.0 새 계약 초안 작성과 앱 제작 연결은 아직 준비되지 않았습니다.</p>
+          <div className="run-form-actions">
+            <button type="button" disabled>2.0 계약 초안 작성 · 준비 필요</button>
+            <button type="button" disabled>2.0 앱 만들기 · 준비 필요</button>
+          </div>
+        </div>
+        {/* 이미 운영 중인 v2 앱의 조회는 보존한다. 계약 검토만으로 조회 조건을 완화하지 않는다. */}
+        {!blocked && row.contract_status === 'APPROVED' && row.lifecycle_state === 'active'
+          && row.built_datasets !== null && row.built_datasets > 0 && (
+          <div style={{ display: 'grid', gap: 8 }}>
+            <span style={{ fontSize: 13, color: 'var(--state-success-fg)' }}>운영 중 · 데이터셋 {row.built_datasets}개</span>
+            <AppViewer releaseId={row.release_id} appId={row.app_id} appLabel={appLabel(row)} />
+            {mode === 'operate' && onOpenSimulation && SIMULATION_ACTION[row.app_id] && (
+              <button type="button" className="primary-button" onClick={() => onOpenSimulation(instanceId, row.app_id)}>
+                {SIMULATION_ACTION[row.app_id]}
+              </button>
+            )}
+          </div>
+        )}
+      </div>}
+      {!isV2 && !isLegacy && <p role="alert">현재 계약 형식은 이 화면에서 지원하지 않습니다.
+        이전 형식으로 생성·승인·제작하지 않습니다.</p>}
+
+      {/* ★★★ 기존 v1 제작 경로는 그대로 유지한다. 막힌 것에는 버튼을 그리지 않는다. */}
+      {isLegacy && (blocked ? (
         <div style={{ marginTop: 8, fontSize: 13, color: 'var(--state-error-fg)' }}>
           데이터가 준비되면 만들 수 있습니다.
         </div>
@@ -532,9 +572,9 @@ function AppRow({
             </div>
           )}
         </div>
-      )}
+      ))}
 
-      {notice && (
+      {notice && isLegacy && (
         <div style={{
           marginTop: 8, padding: '6px 10px', fontSize: 13, borderRadius: 6,
           background: NOTICE_STYLE[notice.tone].bg,
@@ -554,15 +594,36 @@ function AppRow({
   );
 }
 
-export function KitAppPanel({
-  instanceId, mode = 'build', statusFilter = 'all', appKind = 'all', onOpenSimulation,
-}: {
+export interface KitAppPanelProps {
   instanceId: string;
+  onVisibilityLost?: () => void;
   mode?: 'build' | 'operate';
   statusFilter?: 'all' | 'active' | 'candidate' | 'pending';
   appKind?: KitAppKind;
   onOpenSimulation?: (instanceId: string, appId: string) => void;
-}) {
+  reviewApiFactory?: KitContractReviewProps['apiFactory'];
+}
+
+function subscribeKitContext(listener: () => void) {
+  window.addEventListener('factory:enterprise-context-changed', listener);
+  window.addEventListener('factory:session-changed', listener);
+  window.addEventListener('factory:acting-user-changed', listener);
+  return () => {
+    window.removeEventListener('factory:enterprise-context-changed', listener);
+    window.removeEventListener('factory:session-changed', listener);
+    window.removeEventListener('factory:acting-user-changed', listener);
+  };
+}
+
+export function KitAppPanel(props: KitAppPanelProps) {
+  const identity = useSyncExternalStore(subscribeKitContext, studioIdentityKey, studioIdentityKey);
+  return <KitAppPanelContent key={JSON.stringify([identity, props.instanceId])} {...props} identity={identity} />;
+}
+
+function KitAppPanelContent({
+  instanceId, mode = 'build', statusFilter = 'all', appKind = 'all', onOpenSimulation,
+  reviewApiFactory, onVisibilityLost, identity,
+}: KitAppPanelProps & { identity: string }) {
   const [rows, setRows] = useState<KitAppRow[] | null>(null);
   const [error, setError] = useState<{ message: string; status: number } | null>(null);
   const [loading, setLoading] = useState(true);
@@ -571,42 +632,42 @@ export function KitAppPanel({
   const [selectedAppId, setSelectedAppId] = useState('');
   //: ★ 앱별 알림. 목록을 다시 불러도 **행이 아니라 여기** 있으므로 살아남는다.
   const [notices, setNotices] = useState<Record<string, Notice | null>>({});
+  const reload = () => { setLoading(true); setError(null); setTick(value => value + 1); };
+  const hideUnavailable = useCallback(() => {
+    setRows(null); setNotices({}); setSelectedAppId(''); setCurrentUser('');
+    setLoading(true); setError(null); setTick(value => value + 1);
+    onVisibilityLost?.();
+  }, [onVisibilityLost]);
 
   useEffect(() => {
     let alive = true;
-    setLoading(true);
-    setError(null);
     listKitApps(instanceId)
-      .then((d) => { if (alive) setRows(d.apps); })
+      .then((d) => {
+        if (!alive || identity !== studioIdentityKey()) return;
+        if (d.instance_id !== instanceId || !Array.isArray(d.apps)
+            || d.apps.some(row => !row || typeof row.app_id !== 'string' || !row.app_id.trim()))
+          throw new Error('현재 적용본의 앱 목록 응답을 확인하지 못했습니다.');
+        setRows(d.apps);
+      })
       .catch((e: unknown) => {
-        if (!alive) return;
+        if (!alive || identity !== studioIdentityKey()) return;
         const err = e as DataPrepError;
         setError({ message: err?.message || '불러오지 못했습니다.', status: err?.status || 0 });
       })
-      .finally(() => { if (alive) setLoading(false); });
+      .finally(() => { if (alive && identity === studioIdentityKey()) setLoading(false); });
     return () => { alive = false; };
-  }, [instanceId, tick]);
+  }, [instanceId, tick, identity]);
 
   useEffect(() => {
     let alive = true;
     apiFetch('/api/v1/auth/me')
       .then((response) => response.ok ? response.json() : null)
       .then((body) => {
-        if (alive) setCurrentUser(String(body?.data?.user_id || '').trim());
+        if (alive && identity === studioIdentityKey()) setCurrentUser(String(body?.data?.user_id || '').trim());
       })
       .catch(() => { /* 표시 선행 가드다 — 서버의 자기승인 차단은 항상 최종 판정이다 */ });
     return () => { alive = false; };
-  }, []);
-
-  useEffect(() => {
-    if (mode !== 'operate' || !rows) return;
-    const visible = rows.filter((row) => (
-      matchesStatusFilter(row, statusFilter) && matchesAppKind(row, appKind)
-    ));
-    setSelectedAppId((current) => (
-      visible.some((row) => row.app_id === current) ? current : (visible[0]?.app_id || '')
-    ));
-  }, [mode, rows, statusFilter, appKind]);
+  }, [identity]);
 
   if (loading) return <div style={{ padding: 16 }}>앱 목록을 확인하는 중…</div>;
 
@@ -624,7 +685,7 @@ export function KitAppPanel({
         </div>
         <div style={{ marginTop: 10 }}>
           <button type="button" className="secondary-button"
-                  onClick={() => setTick((value) => value + 1)}>다시 확인</button>
+                  onClick={reload}>다시 확인</button>
         </div>
       </div>
     );
@@ -637,6 +698,7 @@ export function KitAppPanel({
   const shownRows = rows.filter((row) => (
     matchesStatusFilter(row, statusFilter) && matchesAppKind(row, appKind)
   ));
+  // 선택이 필터 밖이면 현재 목록의 첫 행을 표시한다. 파생 선택을 effect에서 다시 쓰지 않는다.
   const selectedRow = shownRows.find((row) => row.app_id === selectedAppId) || shownRows[0];
 
   const renderAppRow = (row: KitAppRow) => (
@@ -645,10 +707,12 @@ export function KitAppPanel({
             currentUser={currentUser}
             notice={notices[row.app_id] ?? null}
             onOpenSimulation={onOpenSimulation}
+            reviewApiFactory={reviewApiFactory}
+            onVisibilityLost={hideUnavailable}
             setNotice={(notice) => setNotices((current) => ({
               ...current, [row.app_id]: notice,
             }))}
-            onChanged={() => setTick((current) => current + 1)} />
+            onChanged={reload} />
   );
 
   return (

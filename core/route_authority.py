@@ -50,12 +50,31 @@ from api.deps import current_principal as _current_principal
 from core.admin_capability import (ADMIN_DATA_ACCESS, ADMIN_ORGANIZATION, ADMIN_SECURITY,
                                    AGENT_EXECUTE, PROJECT_CREATE, PROJECT_EDIT,
                                    PROJECT_RELEASE, PROJECT_RUN)
+from core.admin_capability import PROCESS_CONFIG_PROPOSE, PROCESS_CONFIG_PUBLISH, PROCESS_CONFIG_EDIT
 
 F = "/api/v1/factory"
 
 #: **라우트 → 요구 권한.** 키는 `"<METHOD> <path>"` 이며 path 는 FastAPI 가 등록한 그대로다
 #: (경로 파라미터 포함). ⚠️ 손으로 문자열을 짓지 말 것 — 테스트가 라우터와 대조한다.
 ROUTE_CAPS: Dict[str, Tuple[str, ...]] = {
+    "POST /api/v1/data-preparation/instances/{instance_id}/apps/{app_id}/contract/v2": (PROJECT_RUN,),
+    "POST /api/v1/data-preparation/instances/{instance_id}/apps/{app_id}/contract/v2/approve": (ADMIN_DATA_ACCESS,),
+    "POST /api/v1/data-preparation/instances/{instance_id}/apps/{app_id}/contract/reject": (ADMIN_DATA_ACCESS,),
+    "POST /api/v1/data-preparation/instances/{instance_id}/apps/{app_id}/build/v2": (PROJECT_RUN,),
+    "POST /api/v1/advisor/drafts/process-context": (PROCESS_CONFIG_PROPOSE,),
+    "POST /api/v1/advisor/drafts": (PROCESS_CONFIG_PROPOSE,),
+    "POST /api/v1/advisor/drafts/{draft_id}/decision": (PROCESS_CONFIG_PUBLISH, PROJECT_RELEASE),
+    "POST /api/v1/advisor/drafts/bootstrap-project": (PROJECT_CREATE,),
+    "POST /api/v1/enterprise-context/process-configurations/changes": (PROCESS_CONFIG_PROPOSE,),
+    "POST /api/v1/enterprise-context/process-configurations/{configuration_id}/changes": (PROCESS_CONFIG_PROPOSE,),
+    "POST /api/v1/enterprise-context/process-changes/{change_id}/validate": (PROCESS_CONFIG_PROPOSE,),
+    "POST /api/v1/enterprise-context/process-changes/{change_id}/approve": (PROCESS_CONFIG_PUBLISH,),
+    "POST /api/v1/enterprise-context/process-changes/{change_id}/reject": (PROCESS_CONFIG_PUBLISH,),
+    "POST /api/v1/enterprise-context/process-installations/plan": (PROCESS_CONFIG_PROPOSE,),
+    "POST /api/v1/enterprise-context/process-installations": (PROCESS_CONFIG_PROPOSE,),
+    "POST /api/v1/enterprise-context/process-installations/{operation_id}/resume": (PROCESS_CONFIG_EDIT,),
+    "POST /api/v1/enterprise-context/process-installations/{operation_id}/cancel": (PROCESS_CONFIG_PROPOSE,),
+    "POST /api/v1/enterprise-context/process-packs/register": (PROCESS_CONFIG_EDIT,),
 
     # ── 프로젝트 만들기 ─────────────────────────────────────────────────────
     f"POST {F}/projects": (PROJECT_CREATE,),
@@ -70,6 +89,8 @@ ROUTE_CAPS: Dict[str, Tuple[str, ...]] = {
     f"POST {F}/{{project_id}}/sprint/stop": (PROJECT_RUN,),
     f"POST {F}/{{project_id}}/sprint/resume-quota": (PROJECT_RUN,),
     f"POST {F}/{{project_id}}/sprint/revision": (PROJECT_RUN,),
+    f"POST {F}/{{project_id}}/sprint/revision-requests": (PROJECT_RUN,),
+    f"POST {F}/{{project_id}}/execution-commands": (PROJECT_RUN,),
     f"POST {F}/{{project_id}}/heal": (PROJECT_RUN,),
     f"POST {F}/{{project_id}}/wbs/replan": (PROJECT_RUN,),
     f"POST {F}/{{project_id}}/resimulate": (PROJECT_RUN,),
@@ -85,6 +106,7 @@ ROUTE_CAPS: Dict[str, Tuple[str, ...]] = {
     #     `require_caps(PROJECT_RUN)` 로 직접 요구한다 — 승인할 수 없는 사람에게
     #     「승인할 것이 있다」를 알릴 이유가 없다.
     f"POST {F}/{{project_id}}/contract-review/decision": (PROJECT_RUN,),
+    f"POST {F}/{{project_id}}/contract-review/reconcile": (PROJECT_RUN,),
 
     # ── [2026-08-26] 계약을 **만들기 전에** 사람이 정하는 것들 ─────────────
     #   ★★★ 승인과 같은 권한을 요구한다(`PROJECT_RUN`). 이 결정은 **앱이 갖는 권한**을
@@ -140,6 +162,7 @@ ROUTE_CAPS: Dict[str, Tuple[str, ...]] = {
         (ADMIN_DATA_ACCESS,),
 
     "POST /api/v1/data-preparation/ownership/approve": (ADMIN_DATA_ACCESS,),
+    "POST /api/v1/data-preparation/certification-policies": (ADMIN_DATA_ACCESS,),
     "POST /api/v1/data-preparation/ownership/{binding_id}/revoke": (ADMIN_DATA_ACCESS,),
 
     # ── [DAO-8] 외부 데이터 수집 오케스트레이터 ─────────────────────────
@@ -275,6 +298,10 @@ ROUTE_CAPS: Dict[str, Tuple[str, ...]] = {
 #: ⚠️ 「나중에 넣자」로 여기 올리지 않는다 — 면제 목록은 조용히 자란다. 각 항목은 «다른 곳에
 #:   이미 판정이 있다» 여야 하고, 그 위치를 적는다.
 EXEMPT: Dict[str, str] = {
+    "POST /api/v1/data-preparation/snapshots/{snapshot_id}/certifications":
+        "certification_subject.sign — 현재 owner/PDP/회사 종류별 can_sign. 일반 PROJECT_RUN으로 서명권을 대체하지 않는다",
+    "POST /api/v1/data-preparation/snapshots/{snapshot_id}/certification-subject-revisions":
+        "certification_subject.restart — 현재 owner/PDP/회사 DATA_OWNER can_sign 및 subject CAS",
     f"DELETE {F}/projects/{{project_id}}":
         "core/project_deletion.classify() — 등록자/공유여부/실제삭제를 함께 본다",
     f"POST {F}/projects/{{project_id}}/restore":

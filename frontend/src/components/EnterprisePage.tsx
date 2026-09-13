@@ -22,7 +22,8 @@
 //
 // 큐·KPI 는 전사 브리핑이, Trust 4카드는 각 도메인 API 가 실제로 주는 것을 쓴다. 서버가 주지
 // 않는 값(담당 역할·기한·공정 프로필)은 **«미지정» 으로 적고 빈칸을 만들지 않는다.**
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { CompanySetupPanel } from './CompanySetupPanel';
 
 import { failed, loading, ok, type Loaded } from '../design/DataState';
 import { CanvasJarvisRail } from './CanvasJarvisRail';
@@ -154,6 +155,13 @@ export function EnterprisePage({ onOpenBuild, onOpenMenu, onOpenDataReadiness }:
   onOpenDataReadiness: () => void;
 }) {
   const [data, setData] = useState<Loaded<Briefing>>(loading<Briefing>());
+  const [showProcessConfiguration, setShowProcessConfiguration] = useState(false);
+  const processButton = useRef<HTMLButtonElement>(null);
+  const processWasOpen = useRef(false);
+  useEffect(() => {
+    if (!showProcessConfiguration && processWasOpen.current) processButton.current?.focus();
+    processWasOpen.current = showProcessConfiguration;
+  }, [showProcessConfiguration]);
   const [selected, setSelected] = useState<QueueRow | null>(null);
   const [layers, setLayers] = useState<Layer[]>(['DATA', 'SW', 'TWIN']);
   const [nodes, setNodes] = useState<Dept[]>([]);
@@ -252,6 +260,7 @@ export function EnterprisePage({ onOpenBuild, onOpenMenu, onOpenDataReadiness }:
     let alive = true;
     (async () => {
       let only = '';
+      setCalcWhy(null);
       try {
         const r = await listInstances();
         const rows = r?.instances || [];
@@ -263,7 +272,7 @@ export function EnterprisePage({ onOpenBuild, onOpenMenu, onOpenDataReadiness }:
       } catch { /* ⚠️ 실패를 «막힘 없음» 으로 그리지 않는다 — null 로 둔다 */ }
     })();
     return () => { alive = false; };
-  }, []);
+  }, [threadRevision]);
 
   /** §4.3 EnterpriseThreadCanvas — 업무 노드.
    *
@@ -375,6 +384,7 @@ export function EnterprisePage({ onOpenBuild, onOpenMenu, onOpenDataReadiness }:
   //: ⚠️ 실패해도 홈 화면을 죽이지 않는다 — 다만 «못 읽었다» 를 `null` 로 남긴다.
   useEffect(() => {
     let alive = true;
+    setReadiness(null);
     listInstances()
       .then(async (d) => {
         const out: any[] = [];
@@ -405,7 +415,7 @@ export function EnterprisePage({ onOpenBuild, onOpenMenu, onOpenDataReadiness }:
       })
       .catch(() => { if (alive) setReadiness(null); });
     return () => { alive = false; };
-  }, []);
+  }, [threadRevision]);
 
   /**
    * §5.1 상단 KPI **최대 4개** — 설계서 기본은
@@ -462,12 +472,14 @@ export function EnterprisePage({ onOpenBuild, onOpenMenu, onOpenDataReadiness }:
   const [pickedStep, setPickedStep] = useState<{ key: string; label: string } | null>(null);
   useEffect(() => {
     let alive = true;
+    setCanvas(null);
+    setCanvasErr('');
     fetchCanvas()
       .then((c) => { if (alive) { setCanvas(c); setCanvasErr(''); } })
       //: ⚠️ 실패를 빈 화면으로 접지 않는다 — 「없다」와 「못 읽었다」는 다르다.
       .catch((e) => { if (alive) setCanvasErr(e?.message || '불러오지 못했습니다.'); });
     return () => { alive = false; };
-  }, []);
+  }, [threadRevision]);
 
   const [scopeNodes, setScopeNodes] = useState<ScopeNode[]>([]);
   useEffect(() => {
@@ -512,6 +524,13 @@ export function EnterprisePage({ onOpenBuild, onOpenMenu, onOpenDataReadiness }:
     return DEFAULT_THREAD_OVERLAY_BY_NODE[key] || null;
   });
 
+  if (showProcessConfiguration) return <CompanySetupPanel initialTab="thread"
+    onClose={() => {
+      setThread(null);
+      setThreadState('loading');
+      setThreadRevision((value) => value + 1);
+      setShowProcessConfiguration(false);
+    }} />;
   return (
     /* ★★★ 승인 시안(`uiux-prototypes/master-concept/index.html`, 2026-07-30 채택)의
        구조를 그대로 쓴다. 클래스 이름·배치·치수는 시안 CSS(`design/enterprise-canvas.css`)
@@ -627,6 +646,8 @@ export function EnterprisePage({ onOpenBuild, onOpenMenu, onOpenDataReadiness }:
                 onClick={() => onOpenMenu('company')}>
                 회사 등록 · 연결구성
               </button>
+              <button ref={processButton} type="button" className="thread-config"
+                onClick={() => setShowProcessConfiguration(true)}>업무 구성 · L1/L2 수정</button>
             </div>
 
             {/* 단계와 보조카드를 같은 스크롤면에 둬 좁은 화면에서도 열 정렬을 지킨다. */}

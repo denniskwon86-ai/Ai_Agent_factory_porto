@@ -415,6 +415,11 @@ def publish_release(*, release_id: str, app_id: str, name: str, instance_id: str
         "not_for_management_decision": bool(
             str(entity_mode or "").upper() != "REAL"),
     }
+    if contract.get("schema_version") == "2.0":
+        release["runtime_document_version"] = "2.0"
+        release["not_for_management_decision"] = release["not_for_management_decision"] or any(
+            ref["certification_state"] == "DEMO_CERTIFIED" or ref.get("certified_use_kind") == "OPERATIONAL"
+            for ref in contract["process_context"]["verified_binding_refs"])
     rel_dir = library_paths.release_dir(release_id)
     os.makedirs(rel_dir, exist_ok=True)
     with open(os.path.join(rel_dir, "release.json"), "w", encoding="utf-8") as fh:
@@ -469,7 +474,8 @@ def build(*, blueprint: Mapping[str, Any], instance_id: str, outputs: Sequence[M
           actor_id: str, store: Any, app_data: Any,
           tenant_id: str, scope_node_id: str, entity_mode: str,
           approved_contract: Optional[Mapping[str, Any]] = None,
-          revision: int = 1) -> Dict[str, Any]:
+          revision: int = 1, context: Optional[Mapping[str, Any]] = None,
+          repo: Any = None) -> Dict[str, Any]:
     """청사진 하나를 실제 앱으로 만든다.
 
     ★★★ **준비도가 «만들 수 있다» 고 한 것만 만든다.** 판정은 여기서 다시 하지 않고
@@ -482,6 +488,11 @@ def build(*, blueprint: Mapping[str, Any], instance_id: str, outputs: Sequence[M
 
     ⚠️ 부분 물질화도 없다. 실체화기가 `plan()` 으로 전부 해석한 뒤에야 쓴다 —
       중간에 실패하면 아무것도 만들어지지 않는다."""
+    if isinstance(approved_contract, Mapping) and approved_contract.get("schema_version") == "2.0":
+        return build_v2(store=store, app_data=app_data, instance_id=instance_id,
+                        app_id=str(blueprint.get("app_id") or ""), actor_id=actor_id,
+                        context=context, revision=approved_contract.get("revision"),
+                        expected_fingerprint=approved_contract.get("semantic_fingerprint"), repo=repo)
     app_id = str(blueprint.get("app_id") or "").strip()
     name = str(blueprint.get("name") or app_id)
     if not str(instance_id or "").strip():
@@ -523,6 +534,7 @@ def build(*, blueprint: Mapping[str, Any], instance_id: str, outputs: Sequence[M
             f"{app_id}: 앱 계약이 아직 승인되지 않았습니다"
             f"(현재 {arc.STATUS_LABEL.get(status, status or '없음')}) — "
             f"승인 뒤에 만들 수 있습니다.")
+    reject_process_legacy(store, instance_id)
     release_id = release_id_for(instance_id, app_id)
     #: ★★★ **릴리스를 먼저 게시한다.** 없으면 만들어져도 열리지 않는다(위 주석 참조).
     published = publish_release(
@@ -549,3 +561,200 @@ def build(*, blueprint: Mapping[str, Any], instance_id: str, outputs: Sequence[M
         "owner_dept_id": str(published.get("owner_dept_id") or ""),
         "warning": str(row.get("user_message") or "") if state == readiness.AVAILABLE_WITH_WARNING else "",
     }
+
+
+def reject_process_legacy(store, instance_id):
+    """B2 적용본은 서버 소유 sidecar로 판단한다. 요청한 schema가 cohort가 아니다."""
+    from core.data_preparation.process_kit_instances import binding_for_instance
+    from core.enterprise_context.process_schema import ProcessError
+    # DB 없는 순수 1.0 빌더 대역은 기존 물질화 계층이 맡는다. 실제 저장소에는 항상
+    # get_instance가 있으며 그 경우 sidecar 조회 실패를 legacy로 폴백하지 않는다.
+    if not callable(getattr(store, "get_instance", None)):
+        return
+    instance = store.get_instance(instance_id)
+    if instance and binding_for_instance(store, instance):
+        raise ProcessError("PROCESS_CONTEXT_REQUIRED", "새 업무 팩 적용본에는 2.0 고정 업무 문맥이 필요합니다.", 409)
+
+
+def pinned_blueprint(bundle, app_id):
+    from core.enterprise_context.process_schema import ProcessError
+    rows = [b for b in bundle["blueprints"]["blueprints"] if b["app_id"] == app_id]
+    if len(rows) != 1:
+        raise ProcessError("PROCESS_BLUEPRINT_NOT_FOUND", "고정 팩의 앱 후보를 찾을 수 없습니다.", 404)
+    return dict(rows[0])
+
+
+def _fixed_schema(conn, ref):
+    """이미 검증한 정확 snapshot의 열만 변환한다. 최신 인증판/빈 schema 폴백 없음."""
+    import json
+    from core.app_data import RESERVED_FIELD_NAMES
+    from core.enterprise_context.process_context import snapshot_fingerprint
+    from core.enterprise_context.process_schema import ProcessError
+    raw = conn.execute("SELECT * FROM dataset_snapshots WHERE snapshot_id=?", (ref["snapshot_id"],)).fetchone()
+    if raw is None or snapshot_fingerprint(dict(raw)) != ref["snapshot_fingerprint"]:
+        raise ProcessError("PROCESS_BINDING_CONFLICT", "고정 인증판이 변경되었습니다.", 409)
+    try:
+        schema = json.loads(raw["schema_json"])
+        if isinstance(schema, dict):
+            schema = schema["fields"]
+        if not isinstance(schema, list) or not schema:
+            raise ValueError("schema required")
+        fields, seen = [], set()
+        for field in schema:
+            name, kind = field["name"], field["type"]
+            if name in seen or not isinstance(name, str):
+                raise ValueError("duplicate field")
+            seen.add(name)
+            if name in RESERVED_FIELD_NAMES:
+                continue
+            if kind not in FIELD_TYPE_MAP or not _NAME_RE.fullmatch(name):
+                raise ValueError("unsupported field")
+            fields.append({"name": name, "type": FIELD_TYPE_MAP[kind]})
+        if not fields:
+            raise ValueError("no usable fields")
+        return fields
+    except (KeyError, TypeError, ValueError) as exc:
+        raise ProcessError("PROCESS_SCHEMA_UNAVAILABLE", "고정 인증판의 데이터 열 형식을 확인하지 못했습니다.", 503) from exc
+
+
+def contract_from_process_context(store, *, instance_id, app_id, actor_id, context,
+                                  process_context, app_class, revision=1, repo=None):
+    """서버 pinned 후보 + 고정 인증 schema → 2.0 초안. 도메인 승인/자동 실행 아님."""
+    return _contract_from_process_context(store, instance_id=instance_id, app_id=app_id,
+        actor_id=actor_id, context=context, process_context=process_context, app_class=app_class,
+        revision=revision, repo=repo, for_action="GENERATE")
+
+
+def _contract_from_process_context(store, *, instance_id, app_id, actor_id, context,
+                                   process_context, app_class, revision, repo, for_action):
+    """생산자는 GENERATE, 고정 승인 원문 재검증은 실제 소비 action을 유지한다."""
+    import copy
+    from core import project_data_context as pdc
+    from core.enterprise_context.process_context import ProcessContextService
+    from core.enterprise_context.process_schema import ProcessError
+    if type(revision) is not int or revision < 1:
+        raise ProcessError("PROCESS_CONTRACT_INVALID", "양의 정수 개정이 필요합니다.", 422)
+    instance, bundle, verified = pdc.process_instance(store, instance_id, actor_id=actor_id,
+        context=context, process_context=process_context, repo=repo, for_action=for_action)
+    # 승인 검토는 RELEASE/GENERATE 권한을 발급받는 일이 아니다. 다만 READ로
+    # 현재 문맥을 검증했더라도 인증 데이터가 준비되지 않은 계약은 만들지 않는다.
+    from core.enterprise_context.process_context import DATA_ACTIONS
+    for blocker in verified["blockers"]:
+        if blocker["reason_code"] != "PROCESS_ACTION_FORBIDDEN" and set(blocker["blocking_actions"]) & set(DATA_ACTIONS):
+            raise ProcessError(blocker["reason_code"], "현재 인증 데이터 근거를 확인하십시오.", 409)
+    blueprint = pinned_blueprint(bundle, app_id)
+    from core.enterprise_context.process_schema import ProcessBoundary
+    resolved = ProcessContextService(repo=repo, store=store).configuration.resolved(
+        boundary=ProcessBoundary.model_validate(verified["context_key"]), actor=actor_id, context=context,
+        profile_id=verified["profile_id"])
+    suggestions = {b["app_id"] for b in resolved["payload"]["bindings"]
+                   if b["kind"] == "BLUEPRINT_SUGGESTION" and b["process_id"] in verified["process_ids"]
+                   and b["kit_id"] == bundle["kit_id"] and b["kit_version"] == bundle["version"]}
+    if app_id not in suggestions:
+        raise ProcessError("PROCESS_BLUEPRINT_PROCESS_MISMATCH", "선택 업무의 고정 앱 후보가 아닙니다.", 409)
+    refs = pdc.process_refs_for_instance(verified, instance_id)
+    keys = _keys(blueprint)
+    if not keys or len(set(keys)) != len(keys) or set(keys) - set(refs):
+        raise ProcessError("PROCESS_BLUEPRINT_REQUIREMENTS_UNRESOLVED", "앱 후보가 요구한 고정 데이터 참조를 모두 준비하십시오.", 409)
+    with ProcessContextService._errors():
+        with store.transaction() as conn:
+            if not conn.in_transaction:
+                conn.execute("BEGIN")
+            pdc.check_process_refs_conn(conn, store=store, instance=instance, bundle=bundle,
+                process_context=verified, actor_id=actor_id, context=context, repo=repo)
+            schemas = {key: _fixed_schema(conn, refs[key]) for key in keys}
+    labels = {d["dataset_contract_key"]: d.get("label", d["dataset_contract_key"]) for d in bundle["profile"]["datasets"]}
+    try:
+        contract = contract_from_blueprint(blueprint, project_id=instance_id, app_class=app_class,
+            revision=revision, labels=labels, schema_for=lambda key: schemas[key])
+    except KitAppError as exc:
+        raise ProcessError("PROCESS_CONTRACT_INVALID", "앱 후보 분류·필드 계약을 확인하십시오.", 422) from exc
+    contract["schema_version"] = "2.0"
+    contract["process_context"] = copy.deepcopy(verified)
+    # 1.0 함수/출력은 그대로 둔다. 2.0 목적에 표시 label을 삽입하면 이름만 바꿔도
+    # 의미 지문이 바뀌므로 안정 계약키와 앱 식별자만 사용한다.
+    for dataset in contract["datasets"]:
+        dataset["purpose"] = f"업무 데이터 «{dataset['enterprise_contract_key']}»를 «{app_id}»에서 읽는다."
+    contract["semantic_fingerprint"] = arc.semantic_fingerprint(contract)
+    errors = arc.validate(contract)
+    if errors:
+        raise ProcessError("PROCESS_CONTRACT_INVALID", "생성한 2.0 계약의 형식을 확인하십시오.", 422)
+    return contract
+
+
+def build_v2(*, store, app_data, instance_id, app_id, revision, expected_fingerprint,
+             actor_id, context, repo=None):
+    """실제 DB의 승인 계약만 게시/물질화한다. 호출자가 준 READY나 승인 본문은 안 쓴다."""
+    from core import kit_app_contract as kac, project_data_context as pdc
+    from core.enterprise_context.process_schema import ProcessError
+    row = kac.validated_v2(store, instance_id=instance_id, app_id=app_id, revision=revision,
+        expected_fingerprint=expected_fingerprint, actor_id=actor_id, context=context,
+        for_action="GENERATE", require_approved=True, repo=repo)
+    contract = row["contract"]
+    instance, bundle, _ = pdc.process_instance(store, instance_id, actor_id=actor_id, context=context,
+        process_context=contract["process_context"], for_action="GENERATE", repo=repo)
+    blueprint = pinned_blueprint(bundle, app_id)
+    try:
+        cm.plan(contract, store=store, tenant_id=instance["tenant_id"], scope_node_id=instance["scope_node_id"],
+                entity_mode=instance["entity_mode"])
+    except cm.MaterializeError as exc:
+        raise ProcessError("PROCESS_MATERIALIZATION_CONFLICT", "고정 계약 물질화 계획을 확인하십시오.", 409) from exc
+    # plan 뒤에도 현재 게이트를 통과해야 한다. FS·DP는 분산 원자적이라고 주장하지 않는다.
+    kac.validated_v2(store, instance_id=instance_id, app_id=app_id, revision=revision,
+        expected_fingerprint=expected_fingerprint, actor_id=actor_id, context=context,
+        for_action="GENERATE", require_approved=True, repo=repo)
+    release_id = release_id_for(instance_id, app_id)
+    from core.studio_release_cohort import pin_release_cohort
+    pin_release_cohort(store, release_id=release_id, instance_id=instance_id, app_id=app_id,
+                       context_key=contract["process_context"]["context_key"])
+    _verify_cohort_v2(store, contract, instance_id, release_id, app_id)
+    try:
+        published = publish_release(release_id=release_id, app_id=app_id, name=blueprint["name"],
+            instance_id=instance_id, contract=contract, tenant_id=instance["tenant_id"], scope_node_id=instance["scope_node_id"],
+            entity_mode=instance["entity_mode"], actor_id=actor_id, created_at=_now_iso())
+    except (KitAppError, OSError) as exc:
+        raise ProcessError("PROCESS_RELEASE_WRITE_UNAVAILABLE", "후보 릴리스 저장을 완료하지 못했습니다.", 503) from exc
+    _verify_published_v2(published, contract, instance, release_id, app_id)
+    _verify_cohort_v2(store, contract, instance_id, release_id, app_id)
+    try:
+        out = cm.materialize(contract, release_id=release_id, actor_id=actor_id, store=store, app_data=app_data,
+            tenant_id=instance["tenant_id"], scope_node_id=instance["scope_node_id"], entity_mode=instance["entity_mode"])
+    except cm.MaterializeError as exc:
+        raise ProcessError("PROCESS_MATERIALIZATION_CONFLICT", "고정 계약 물질화를 완료하지 못했습니다.", 409) from exc
+    expected_names = {dataset["name"] for dataset in contract["datasets"]}
+    if ({dataset.get("name") for dataset in out.datasets} != expected_names or len(out.datasets) != len(expected_names)
+            or any(dataset.get("release_id") != release_id for dataset in out.datasets)):
+        raise ProcessError("PROCESS_MATERIALIZATION_UNAVAILABLE", "물질화 결과의 데이터셋·릴리스 정체성이 다릅니다.", 503)
+    return dict(app_id=app_id, name=blueprint["name"], release_id=release_id, instance_id=instance_id,
+                state=readiness.AVAILABLE, datasets=[d["name"] for d in out.datasets], required_datasets=_keys(blueprint),
+                owner_dept_id=published.get("owner_dept_id", ""), warning="", runtime_document_version="2.0")
+
+
+def _verify_published_v2(published, contract, instance, release_id, app_id):
+    """publish 반환값뿐 아니라 저장된 후보 release/manifest/계약을 read-back한다."""
+    import json
+    from pathlib import Path
+    from core import library_paths
+    from core.enterprise_context.process_schema import ProcessError
+    expected = {"release_id": release_id, "project_id": release_id, "app_id": app_id,
+                "instance_id": instance["instance_id"], "tenant_id": instance["tenant_id"],
+                "entity_mode": instance["entity_mode"], "enterprise_scope_id": instance["scope_node_id"],
+                "runtime_document_version": "2.0",
+                "runtime_contract": contract, "manifest": app_manifest.snapshot(contract["manifest"])}
+    try:
+        with (Path(library_paths.release_dir(release_id)) / "release.json").open(encoding="utf-8") as stream:
+            stored = json.load(stream)
+        if any(stored.get(k) != v or published.get(k) != v for k, v in expected.items()):
+            raise ValueError("release readback mismatch")
+    except (OSError, ValueError, TypeError, AttributeError) as exc:
+        raise ProcessError("PROCESS_RELEASE_WRITE_UNAVAILABLE", "후보 릴리스·manifest·고정 계약 저장을 확인하지 못했습니다.", 503) from exc
+
+
+def _verify_cohort_v2(store, contract, instance_id, release_id, app_id):
+    from core.studio_release_cohort import get_release_cohort
+    from core.enterprise_context.process_schema import ProcessError
+    expected = dict(release_id=release_id, instance_id=instance_id, app_id=app_id,
+                    context_key=contract["process_context"]["context_key"], runtime_document_version="2.0")
+    cohort = get_release_cohort(store, release_id)
+    if not isinstance(cohort, Mapping) or any(cohort.get(k) != v for k, v in expected.items()):
+        raise ProcessError("PROCESS_RELEASE_COHORT_UNAVAILABLE", "서버 릴리스 cohort 저장을 확인하지 못했습니다.", 503)

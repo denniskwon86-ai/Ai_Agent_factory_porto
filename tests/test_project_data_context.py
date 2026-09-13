@@ -28,14 +28,14 @@ class FakeStore:
         payload = raw_path.read_bytes()
         self.snapshots = {
             "ds_prc": {
-                "snapshot_id": "ds_prc", "instance_id": "ki_hidden",
+                "snapshot_id": "ds_prc", "instance_id": "ki_hidden", "usage_holds": [],
                 "dataset_contract_key": "PRC-01", "state": "DEMO_CERTIFIED",
                 "tenant_id": "tenant-a", "scope_node_id": "plant-a",
                 "entity_mode": "REAL", "raw_path": str(raw_path),
                 "checksum": hashlib.sha256(payload).hexdigest(), "certified_at": "2026-09-01",
             },
             "ds_inv": {
-                "snapshot_id": "ds_inv", "instance_id": "ki_hidden",
+                "snapshot_id": "ds_inv", "instance_id": "ki_hidden", "usage_holds": [],
                 "dataset_contract_key": "INV-01", "state": "DEMO_CERTIFIED",
                 "tenant_id": "tenant-a", "scope_node_id": "plant-a",
                 "entity_mode": "REAL", "raw_path": str(raw_path),

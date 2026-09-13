@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 
 import { HubDialog } from '../design/HubDialog';
 import { HubShell, type RailItem } from '../design/HubShell';
@@ -15,6 +15,20 @@ import { actingScope, type ActingScope } from '../lib/actingScope';
 import { useOperatingContext } from '../lib/operatingContext';
 import { fetchCanvas } from '../lib/canvasApi';
 import { allocateSystemIds } from '../lib/systemIdApi';
+import { ProcessInstallationPanel } from './ProcessInstallationPanel';
+import { processContextIdentity } from '../lib/processInstallationApi';
+
+function subscribeProcessContext(listener: () => void) {
+  const names = ['factory:enterprise-context-changed', 'factory:session-changed'];
+  names.forEach((name) => window.addEventListener(name, listener));
+  return () => names.forEach((name) => window.removeEventListener(name, listener));
+}
+
+function setupError(error: unknown): { message?: string; status?: number } {
+  if (!error || typeof error !== 'object') return {};
+  return { message: 'message' in error && typeof error.message === 'string' ? error.message : undefined,
+    status: 'status' in error && typeof error.status === 'number' ? error.status : undefined };
+}
 
 // [ECM §4·§9] **회사 구성** — 회사 이름 · 법인/가상회사 · 조직 노드 · Digital Thread 연결구성.
 //
@@ -100,10 +114,14 @@ function findNodePath(rows: EcmNode[], nodeId: string, parents: EcmNode[] = []):
   return [];
 }
 
-export function CompanySetupPanel({ onClose, page = false }: { onClose: () => void; page?: boolean }) {
+export function CompanySetupPanel({ onClose, page = false, initialTab = 'company' }: {
+  onClose: () => void; page?: boolean; initialTab?: Tab;
+}) {
   const ctx = useOperatingContext();
+  const processIdentity = useSyncExternalStore(subscribeProcessContext, processContextIdentity, processContextIdentity);
+  const [showLegacy, setShowLegacy] = useState(false);
   const [actorScope, setActorScope] = useState<ActingScope | null>(actingScope.peek());
-  const [tab, setTab] = useState<Tab>('company');
+  const [tab, setTab] = useState<Tab>(initialTab);
   const [tenants, setTenants] = useState<Tenant[] | null>(null);
   const [entities, setEntities] = useState<Entity[] | null>(null);
   const [nodes, setNodes] = useState<EcmNode[] | null>(null);
@@ -127,7 +145,7 @@ export function CompanySetupPanel({ onClose, page = false }: { onClose: () => vo
       //: ⚠️ 셋을 따로 받는다 — 하나가 실패해도 나머지는 보여야 한다.
       //:   전부 묶어 실패시키면 「회사가 없다」로 읽힌다.
       try { const r = await listTenants(); if (alive) setTenants(r); }
-      catch (e: any) { if (alive) setErr(e?.message || '회사 목록을 읽지 못했습니다.'); }
+      catch (error) { if (alive) setErr(setupError(error).message || '회사 목록을 읽지 못했습니다.'); }
       try { const r = await listEntities(); if (alive) setEntities(r); } catch { /* null 유지 */ }
       try { const r = await getTree(); if (alive) setNodes(r); } catch { /* null 유지 */ }
     })();
@@ -143,7 +161,8 @@ export function CompanySetupPanel({ onClose, page = false }: { onClose: () => vo
       // 회사명·조직·Digital Thread 는 홈 화면이 즉시 다시 읽어야 한다. 저장됐는데 새로고침
       // 전까지 옛 이름/구성이 남으면 사용자는 저장 실패로 판단한다.
       window.dispatchEvent(new CustomEvent('factory:company-configuration-changed'));
-    } catch (e: any) {
+    } catch (error) {
+      const e = setupError(error);
       //: ⚠️ 사유를 삼키지 않는다. 403 이면 권한이고, 그때 할 일은 관리자에게 요청하는 것이다.
       setErr(e?.status === 403
         ? '조직·사용자 편집 권한이 필요합니다(관리자 전용).'
@@ -216,9 +235,16 @@ export function CompanySetupPanel({ onClose, page = false }: { onClose: () => vo
             currentMode={ctx.entityMode} canEdit={canEdit} />
         )}
         {tab === 'thread' && (
-          <ThreadTab nodes={nodes} entities={entities} busy={busy} run={run}
+          <>
+          <ProcessInstallationPanel companyName={ctx.companyName} scopeLabel={ctx.scopeLabel} />
+          <details style={{ marginTop: 24 }} onToggle={(event) => setShowLegacy(event.currentTarget.open)}>
+            <summary>기존 평면 연결구성 · 이전 방식 관리</summary>
+            <p>이미 L1/L2로 적용한 구성은 기존 편집기로 덮어쓸 수 없습니다.</p>
+          {showLegacy && <ThreadTab key={processIdentity} nodes={nodes} entities={entities} busy={busy} run={run}
             companyId={ctx.company} companyName={ctx.companyName}
-            entityMode={ctx.entityMode} scopeLabel={ctx.scopeLabel} canEdit={canEdit} />
+            entityMode={ctx.entityMode} scopeLabel={ctx.scopeLabel} canEdit={canEdit} />}
+          </details>
+          </>
         )}
       </div>
   );
@@ -663,7 +689,7 @@ function ContextSwitch({ flat, busy, run }: {
 
 // ── ③ 업무 연결구성 (Digital Thread) ─────────────────────────────────────
 
-function ThreadTab({ nodes, entities, busy, run, companyId, companyName, entityMode, scopeLabel, canEdit }: {
+function ThreadTab({ nodes, entities, busy, run, companyId, companyName, entityMode, scopeLabel, canEdit: canEditLegacy }: {
   nodes: EcmNode[] | null; entities: Entity[] | null; busy: string;
   companyId: string; companyName: string; entityMode: string; scopeLabel: string;
   canEdit: boolean;
@@ -676,6 +702,8 @@ function ThreadTab({ nodes, entities, busy, run, companyId, companyName, entityM
   const [draft, setDraft] = useState<Profile | null>(null);
   const [loading, setLoading] = useState(false);
   const [note, setNote] = useState('');
+  const requestGeneration = useRef(0);
+  const canEdit = canEditLegacy && !active?.read_only && !draft?.read_only;
 
   const editableNodes = (source: ThreadNode[]) => source.map((node) => (
     Object.prototype.hasOwnProperty.call(node, 'overlay')
@@ -684,12 +712,14 @@ function ThreadTab({ nodes, entities, busy, run, companyId, companyName, entityM
   ));
 
   const load = useCallback(async (target: string) => {
+    const generation = ++requestGeneration.current;
     setScope(target); setRows([]); setActive(null); setDraft(null); setNote('');
     if (!target) return;
     setLoading(true);
     try {
       const companyWide = target === COMPANY_SCOPE;
       const list = await listProfiles(companyWide ? '' : target, 'process_profile', companyWide);
+      if (generation !== requestGeneration.current) return;
       const current = list.find((x) => x.is_effective) || null;
       const editing = list.find((x) => x.status === 'DRAFT') || null;
       setActive(current); setDraft(editing);
@@ -701,18 +731,24 @@ function ThreadTab({ nodes, entities, busy, run, companyId, companyName, entityM
         setNote('현재 승인 구성을 복사해 편집합니다. 저장하면 새 판의 초안이 됩니다.');
       } else {
         const canvas = await fetchCanvas();
+        if (generation !== requestGeneration.current) return;
         setRows((canvas.domain_nodes || []).map((n) => ({
           key: n.id, label: n.label, note: n.reason || '',
           overlay: DEFAULT_THREAD_OVERLAY_BY_NODE[n.id],
         })));
         setNote('승인된 회사 구성이 없어 현재 홈의 기본 업무 흐름을 편집 초안으로 불러왔습니다.');
       }
-    } catch (e: any) {
-      setNote(e?.message || '연결구성을 읽지 못했습니다.');
-    } finally { setLoading(false); }
+    } catch (error) {
+      if (generation === requestGeneration.current) setNote(setupError(error).message || '연결구성을 읽지 못했습니다.');
+    } finally { if (generation === requestGeneration.current) setLoading(false); }
   }, []);
 
-  useEffect(() => { void load(COMPANY_SCOPE); }, [companyId, load]);
+  const cancelLoad = useCallback(() => { requestGeneration.current++; }, []);
+  useEffect(() => {
+    let alive = true;
+    queueMicrotask(() => { if (alive) void load(COMPANY_SCOPE); });
+    return () => { alive = false; cancelLoad(); };
+  }, [companyId, entityMode, load, cancelLoad]);
 
   const set = (i: number, patch: Partial<ThreadNode>) =>
     setRows((r) => r.map((x, j) => (j === i ? { ...x, ...patch } : x)));
@@ -731,8 +767,8 @@ function ThreadTab({ nodes, entities, busy, run, companyId, companyName, entityM
     try {
       const [key] = await allocateSystemIds('process_stage');
       setRows((old) => [...old, { key, label: '', note: '' }]);
-    } catch (e: any) {
-      setNote(e?.message || '새 업무 단계를 준비하지 못했습니다.');
+    } catch (error) {
+      setNote(setupError(error).message || '새 업무 단계를 준비하지 못했습니다.');
     }
   };
 

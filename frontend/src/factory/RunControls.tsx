@@ -1,280 +1,324 @@
-/**
- * [트랙 E · 7단계 전제] 실행 통제 — Sprint 시작 · 재개 · 복구 · WBS 재분할 · Release 저장.
- *
- * 근거: 구현 명세 §8 **기능 게이트** — 「Sprint 시작·일시정지·정지·재개·복구·재분할·Release·
- * Export 가 보존된다」. 2026-08-06 인수인계 §4 가 이 다섯 개를 «7단계 전제 미충족» 으로 남겼다.
- * 지금 기존 3패널을 지우면 사용자는 **실행을 시작할 수도, 멈춘 것을 재개할 수도 없다.**
- *
- * ## 이 화면이 지키는 것
- *
- * ★ **비활성 버튼에 반드시 이유를 붙인다.** 회색 버튼만 보이면 사용자는 화면 고장으로 읽고,
- *   진짜 이유(「기획 산출물이 아직 없습니다」)는 아무에게도 도달하지 않는다. 이 저장소가
- *   결정 차단·발간 게이트에서 이미 확인한 규칙이다.
- * ★ **되돌릴 수 없는 것은 화면 안에서 확인받는다.** `confirm()` 을 쓰지 않는다 — 키보드·
- *   스크린리더 대응이 안 되고, 무엇보다 «무엇이 사라지는지» 를 적을 자리가 없다.
- * ★ **명령은 전부 `sprintActions.ts` 를 지난다.** 여기서 `fetch` 를 직접 부르지 않는다 —
- *   부르는 순간 종전 통제실과 payload 가 갈라지고, 그때 「두 화면이 다른 프로젝트를 만든다」가
- *   된다(인수인계 §4.1 경고).
- */
-import { useState } from 'react';
-
+// B5: 현재 행동을 먼저 보여 주고 진단·재계획·내보내기는 접어 둔다.
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { useFactoryStore } from '../store/useFactoryStore';
-
 import type { FactoryStudioViewModel } from './factoryViewModel';
+import { studioNextAction } from './studioNextAction';
+import { studioIdentityKey, studioInputKey, studioInputMemory } from './studioInputMemory';
+import { RevisionRequestEditor } from './RevisionRequestEditor';
+import type { RevisionAttempt } from '../lib/studioRevisionFlow';
+import { getExecutionRecords, hasExecutionPending, subscribeExecutionRecords, type ExecutionAttempt } from '../lib/studioExecutionApi';
+import { StudioExecutionRequests } from './StudioExecutionRequests';
 import {
   REPLAN_CONFIRM, REVISION_NOTE, SELF_HEAL_NOTE, exportArchiveUrl, newPlanningTaskId,
-  publishRevisionBacklog, replanWbs, resumeAfterQuota, startPlanning,
+  replanWbs, resumeAfterQuota, resumeExistingTask, startPlanning, startExistingTask,
   type SprintResult,
 } from './sprintActions';
 
-type Pending = null | 'start' | 'replan' | 'revision';
-
+type Form = { idea: string; reference: string; uncertain: string; observedTask: string; requestId?: string };
+const EMPTY_FORM: Form = { idea: '', reference: '', uncertain: '', observedTask: '' };
+const EMPTY_EXECUTION_RECORDS: ExecutionAttempt[] = [];
+function pausedExecution(value: unknown, currentTaskId: unknown): { taskId: string; resumable: boolean; reason: string } | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const row = value as Record<string, unknown>;
+  const pause = row.pause && typeof row.pause === 'object' && !Array.isArray(row.pause)
+    ? row.pause as Record<string, unknown> : null;
+  if (typeof row.task_id !== 'string' || !row.task_id || row.task_id !== currentTaskId
+      || row.running !== false || pause?.status !== 'PAUSED') return null;
+  return { taskId: row.task_id, resumable: pause.resumable === true && typeof pause.reason_code === 'string',
+    reason: typeof pause.reason_code === 'string' && pause.reason_code ? pause.reason_code : 'RESUME_STATE_UNAVAILABLE' };
+}
+function subscribeExecutionUI(listener: () => void) {
+  const events = ['factory:session-changed', 'factory:acting-user-changed', 'factory:enterprise-context-changed'];
+  const unsubscribe = subscribeExecutionRecords(listener);
+  events.forEach(name => window.addEventListener(name, listener));
+  return () => { unsubscribe(); events.forEach(name => window.removeEventListener(name, listener)); };
+}
 export interface RunControlsProps {
   vm: FactoryStudioViewModel;
+  onReviewResult?: () => void;
+  onReviewDecision?: () => void;
+  onShowTasks?: () => void;
 }
 
-export function RunControls({ vm }: RunControlsProps) {
-  const setActiveSprintId = useFactoryStore((s) => s.setActiveSprintId);
-  const clearSuspendedQuota = useFactoryStore((s) => s.clearSuspendedQuota);
-  const clearSprintData = useFactoryStore((s) => s.clearSprintData);
-  const triggerSelfHealing = useFactoryStore((s) => s.triggerSelfHealing);
-  const saveRelease = useFactoryStore((s) => s.saveRelease);
+export function RunControls(props: RunControlsProps) {
+  const identity = useSyncExternalStore(subscribeExecutionUI, studioIdentityKey, studioIdentityKey);
+  return <ProjectRunControls key={JSON.stringify([identity, props.vm.project.id])} {...props} />;
+}
 
-  const [pending, setPending] = useState<Pending>(null);
-  const [busy, setBusy] = useState('');
-  const [note, setNote] = useState<{ tone: 'ok' | 'bad'; text: string } | null>(null);
-  const [idea, setIdea] = useState('');
-  /** [전환 게이트] Track 2 수정 요구 입력. */
-  const [revision, setRevision] = useState('');
-  const [masterData, setMasterData] = useState('');
-
+function ProjectRunControls({ vm, onReviewResult, onReviewDecision, onShowTasks }: RunControlsProps) {
   const pid = vm.project.id;
-  const { run, inspect } = vm;
-  const failure = inspect.failure;
+  const key = studioInputKey(pid, 'run-input', 'requirements');
+  const [form, setForm] = useState<Form>(() => studioInputMemory.get(key, EMPTY_FORM));
+  const update = (patch: Partial<Form>) => setForm(previous => {
+    const next = { ...previous, ...patch }; studioInputMemory.set(key, next); return next;
+  });
+  const [panel, setPanel] = useState<'planning' | 'resume-task' | 'task' | 'heal' | 'revision' | 'replan' | null>(null);
+  const [resumeTaskId, setResumeTaskId] = useState('');
+  const [revisionSelection, setRevisionSelection] = useState({ key: '', taskId: '' });
+  const [, renderRevisionState] = useState(0);
+  const revisionStateChanged = useCallback(() => renderRevisionState(value => value + 1), []);
+  const [busy, setBusy] = useState('');
+  const busyRef = useRef(false);
+  const alive = useRef(false);
+  useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
+  const [note, setNote] = useState<{ ok: boolean; text: string; requestId?: string } | null>(null);
+  const readExecutionPending = useCallback(() => hasExecutionPending(pid), [pid]);
+  const readExecutionRecords = useCallback(() => getExecutionRecords(pid), [pid]);
+  const executionPending = useSyncExternalStore(subscribeExecutionUI, readExecutionPending, () => false);
+  const executionRecords = useSyncExternalStore(subscribeExecutionUI, readExecutionRecords, () => EMPTY_EXECUTION_RECORDS);
+  const stateTaskId = useFactoryStore(store => store.state?.current_sprint_task_id);
+  const executionSnapshot = useFactoryStore(store => store.state?.studio_execution_state);
+  const stateProjectId = useFactoryStore(store => store.currentProjectId);
+  const paused = stateProjectId === pid ? pausedExecution(executionSnapshot, stateTaskId) : null;
+  const planningTaskId = typeof stateTaskId === 'string' && /^PLANNING_[A-Za-z0-9_-]+$/.test(stateTaskId) ? stateTaskId : '';
+  useEffect(() => {
+    let disposed = false;
+    const sync = () => {
+      if (disposed || key !== studioInputKey(pid, 'run-input', 'requirements')) return;
+      const previous = studioInputMemory.get<Form>(key, EMPTY_FORM);
+      if (!previous.uncertain || !previous.requestId) return;
+      const confirmed = getExecutionRecords(pid).find(record => record.request.client_request_id === previous.requestId
+        && (record.outcome === 'CONFIRMED' || record.outcome === 'REJECTED'));
+      if (!confirmed) return;
+      // 같은 태스크 ID나 active/pending 상태는 증거가 아니다. 공개 검증된 원요청 ID만 해제한다.
+      const next = { ...previous, uncertain: '', observedTask: '', requestId: '' };
+      studioInputMemory.set(key, next); setForm(next);
+    };
+    const unsubscribe = subscribeExecutionRecords(sync);
+    queueMicrotask(sync);
+    return () => { disposed = true; unsubscribe(); };
+  }, [pid, key]);
+  const action = studioNextAction(vm);
+  const resumePrimary = !!paused && !['refresh', 'decision', 'quota', 'running'].includes(action.kind);
+  const selected = vm.wbs.find(t => t.id === vm.selectedWbsId)
+    || vm.wbs.find(t => t.id === action.taskId)
+    || vm.wbs.find(t => t.id === vm.inspect.failure?.taskId);
+  const revisionRecords = studioInputMemory.projectValues<RevisionAttempt>(pid, 'revision-request');
+  const pendingRevision = revisionRecords.find(record => record.outcome === 'UNKNOWN' || record.outcome === 'RECORDED');
+  const hasRevisionPending = () => studioInputMemory.projectValues<RevisionAttempt>(pid, 'revision-request')
+    .some(record => record.outcome === 'UNKNOWN' || record.outcome === 'RECORDED');
+  const preferredRevisionTask = pendingRevision?.command.target.task_id || selected?.id
+    || useFactoryStore.getState().state?.current_sprint_task_id || revisionRecords[0]?.command.target.task_id || '';
+  const revisionTask = revisionSelection.key === key ? revisionSelection.taskId : preferredRevisionTask;
+  const openRevision = () => {
+    setRevisionSelection({ key, taskId: preferredRevisionTask }); setPanel('revision');
+  };
+  const feedbackKey = studioInputKey(pid, 'run-feedback', selected?.id || '');
+  const [feedbackEdits, setFeedbackEdits] = useState<Record<string, string>>({});
+  const feedback = feedbackEdits[feedbackKey] ?? studioInputMemory.get<string>(feedbackKey, '');
+  const updateFeedback = (value: string) => {
+    studioInputMemory.set(feedbackKey, value);
+    setFeedbackEdits(previous => ({ ...previous, [feedbackKey]: value }));
+  };
+  const readReason = !pid ? '프로젝트를 먼저 선택하세요.'
+    : ['forbidden', 'loading', 'error'].includes(vm.loadState) ? vm.loadReason || '상태 확인이 필요합니다.'
+    : vm.connection !== 'connected' ? '연결을 확인한 뒤 요청하세요.' : '';
+  const disabledReason = readReason || (form.uncertain ? '이전 요청 결과를 확인하기 전에는 새 요청을 보내지 않습니다.'
+    : executionPending ? '실행 명령의 접수 결과가 미확정입니다. 아래에서 원래 요청을 조회하세요.'
+    : pendingRevision ? '수정 접수 결과를 확인하기 전에는 다른 쓰기 명령을 보내지 않습니다.' : '');
+  const activeReason = disabledReason || (vm.run.active ? `현재 ${vm.run.label} 상태입니다.` : '');
+  const resumeReason = activeReason || (vm.inspect.suspendedTaskId ? '한도 회복 후 재개를 사용하세요.'
+    : !paused ? '현재 작업과 일치하는 일시정지 상태를 다시 조회하세요.'
+      : !paused.resumable ? `서버가 재개를 허용하지 않았습니다 (${paused.reason}).` : '');
+  const openResume = () => {
+    if (!paused || resumeReason) return;
+    setResumeTaskId(paused.taskId); setPanel('resume-task');
+  };
+  const hasResult = !!Object.keys(vm.docs).length || vm.generated.runnable || vm.run.wbsDone > 0;
 
-  /** 서버 문구를 그대로 보여 준다 — 화면이 지어내면 서버 규칙과 갈라진다. */
-  const show = (r: SprintResult, okText: string) =>
-    setNote(r.ok ? { tone: 'ok', text: r.message || okText } : { tone: 'bad', text: r.message });
-
-  const guard = async (label: string, fn: () => Promise<void>) => {
-    if (busy) return;
-    setBusy(label); setNote(null);
-    try { await fn(); } finally { setBusy(''); }
+  const command = async (label: string, work: () => Promise<SprintResult>, observedTask = '', receiptBacked = false) => {
+    if (busyRef.current || disabledReason || hasExecutionPending(pid) || hasRevisionPending() || studioInputKey(pid, 'run-input', 'requirements') !== key) return;
+    busyRef.current = true; setBusy(label); setNote(null);
+    const identity = studioIdentityKey();
+    // 새 bridge는 POST 전 원키를 예약한다. 별도의 원키 없는 UNKNOWN을 중복 생성하지 않는다.
+    // 영수증 없는 기존 명령은 이전 방식의 보수적인 잠금을 유지한다.
+    if (!receiptBacked) update({ uncertain: label, observedTask, requestId: '' });
+    try {
+      const result = await work();
+      if (identity !== studioIdentityKey()) return;
+      const settled = result.requestId && getExecutionRecords(pid).some(record => record.request.client_request_id === result.requestId
+        && (record.outcome === 'CONFIRMED' || record.outcome === 'REJECTED'));
+      const uncertain = result.outcome === 'UNKNOWN' && !settled;
+      const next = { ...studioInputMemory.get<Form>(key, EMPTY_FORM), uncertain: uncertain ? label : '',
+        observedTask: uncertain ? result.taskId || observedTask : '', requestId: uncertain ? result.requestId || '' : '' };
+      studioInputMemory.set(key, next);
+      if (!alive.current || useFactoryStore.getState().currentProjectId !== pid) return;
+      setForm(next);
+      setNote({ ok: result.ok, requestId: result.requestId,
+        text: result.message || (result.ok ? '명령 접수 결과를 확인했습니다. 실제 진행 상태는 별도로 확인하세요.' : '요청 결과를 확인해야 합니다.') });
+      if (result.ok) {
+        setPanel(null);
+        // 입력은 자동 삭제하지 않는다. 조회·접수와 서버 초안 저장은 다른 상태다.
+        // 접수는 실행 확인이 아니다. 최신 reader/SSE가 실제 active task를 갱신한다.
+        try {
+          await Promise.all([useFactoryStore.getState().fetchLatestState(), useFactoryStore.getState().fetchWBS(true), useFactoryStore.getState().checkHotl()]);
+        } catch {
+          if (alive.current && identity === studioIdentityKey() && useFactoryStore.getState().currentProjectId === pid)
+            setNote({ ok: false, requestId: result.requestId, text: '명령 접수 결과와 별도로 현재 상태 조회를 확인하지 못했습니다. 명령을 다시 보내지 말고 상태를 조회하세요.' });
+        }
+      }
+    } catch (error) {
+      if (!alive.current || identity !== studioIdentityKey() || useFactoryStore.getState().currentProjectId !== pid) return;
+      update({ uncertain: label, observedTask, requestId: '' });
+      setNote({ ok: false, text: `요청 결과를 확인하지 못했습니다. 자동 재전송하지 않습니다. ${error instanceof Error ? error.message : ''}` });
+    } finally { busyRef.current = false; if (alive.current) setBusy(''); }
   };
 
-  // ── Sprint 시작 ──────────────────────────────────────────────────────────
-  const doStart = () => guard('기획 가동 중', async () => {
-    const taskId = newPlanningTaskId();
-    const r = await startPlanning(pid, idea, masterData, taskId);
-    if (r.ok) {
-      // 낙관적으로 «가동 중» 을 표시하지 않는다 — 서버가 받았을 때만 표시를 옮긴다.
-      setActiveSprintId(taskId);
-      setIdea(''); setMasterData(''); setPending(null);
-    }
-    show(r, '기획을 가동했습니다.');
-  });
-
-  // ── 재개 ─────────────────────────────────────────────────────────────────
-  const doResume = () => guard('재개 중', async () => {
-    const r = await resumeAfterQuota(pid, inspect.suspendedTaskId);
-    if (r.ok) {
-      setActiveSprintId(inspect.suspendedTaskId);
-      clearSuspendedQuota();
-    }
-    show(r, '멈춘 지점부터 재개했습니다.');
-  });
-
-  // ── 복구 ─────────────────────────────────────────────────────────────────
-  const doHeal = () => guard('복구 요청 중', async () => {
-    // store 액션을 그대로 쓴다 — 두 경로를 만들면 또 갈라진다.
-    await triggerSelfHealing(failure?.error || '실행 실패');
-    setNote({ tone: 'ok', text: `복구를 요청했습니다. ${SELF_HEAL_NOTE}` });
-  });
-
-  // ── WBS 재분할 ───────────────────────────────────────────────────────────
-  const doReplan = () => guard('재분할 중', async () => {
-    const r = await replanWbs(pid);
-    if (r.ok) {
-      clearSprintData();
-      if (r.taskId) setActiveSprintId(r.taskId);
-      setPending(null);
-    }
-    show(r, 'WBS 분할을 다시 시작했습니다.');
-  });
-
-  // ── 피드백 백로그 발행 (Track 2) ─────────────────────────────────────────
-  const doRevision = () => guard('수정 요구 발행 중', async () => {
-    const r = await publishRevisionBacklog(pid, revision);
-    setNote(r.ok
-      ? { tone: 'ok', text: '수정 요구를 새 WBS 작업으로 추가했습니다.' }
-      : { tone: 'bad', text: r.message || '수정 요구를 추가하지 못했습니다.' });
-    if (r.ok) { setRevision(''); setPending(null); }
-  });
-
-  // ── Export (산출물 ZIP) ──────────────────────────────────────────────────
-  // ⚠️ `fetch` 하지 않는다 — 서버가 `Content-Disposition` 으로 파일명을 정하므로 링크로 연다.
-  const doExport = () => {
-    if (!pid) return;
-    const a = document.createElement('a');
-    a.href = exportArchiveUrl(pid);
-    a.download = `${pid}.zip`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    setNote({ tone: 'ok', text: '산출물 ZIP 내려받기를 시작했습니다.' });
+  const refresh = async () => {
+    if (busyRef.current) return;
+    busyRef.current = true; setBusy('상태 확인');
+    const identity = studioIdentityKey();
+    try {
+      const store = useFactoryStore.getState();
+      await Promise.all([store.fetchLatestState(), store.fetchWBS(true), store.checkHotl(), store.fetchReleases()]);
+      if (!alive.current || identity !== studioIdentityKey() || useFactoryStore.getState().currentProjectId !== pid) return;
+      // 기존 캐시의 같은 task ID는 이번 명령의 접수 증거가 아니다.
+      // 상태 조회는 명령별 영수증 조회를 대신하지 않는다. 원키가 없는 UNKNOWN도 풀지 않는다.
+      setNote({ ok: !form.uncertain, text: form.uncertain
+        ? '상태 조회를 요청했습니다. 이전 요청의 반영 여부는 아직 확인되지 않아 중복 요청을 막고 있습니다.'
+        : '현재 상태 조회를 요청했습니다. 아래 연결·오류 안내를 함께 확인하세요.' });
+    } finally { busyRef.current = false; if (alive.current) setBusy(''); }
   };
 
-  // ── Release 저장 ─────────────────────────────────────────────────────────
-  const doRelease = () => guard('Release 저장 중', async () => {
-    const r = await saveRelease(pid);
-    // ⚠️ `r.ok` 를 본다 — 객체는 항상 truthy 라 `if (r)` 로는 실패가 성공으로 읽힌다.
-    // ⚠️ 실패 이유를 **지어내지 않는다.** 종전에는 「산출물이 아직 준비되지 않았거나 권한이
-    //   없습니다」라고 썼는데, **백엔드를 내린 상태에서도 그 문구가 나왔다** — 사용자는 산출물과
-    //   권한을 확인하러 가고 거기엔 아무 문제가 없다(2026-08-07 오프라인 검증에서 잡혔다).
-    setNote(r.ok
-      ? { tone: 'ok', text: `Release 를 저장했습니다 — ${r.releaseId}` }
-      : { tone: 'bad', text: r.message || 'Release 를 저장하지 못했습니다.' });
-  });
+  const revisionSubmitted = useCallback(async () => {
+    if (!alive.current || studioInputKey(pid, 'run-input', 'requirements') !== key
+        || useFactoryStore.getState().currentProjectId !== pid) return;
+    // 수정 접수는 부모 command의 UNKNOWN·자동 닫기·실행 경로를 사용하지 않는다.
+    // 원래 작업 선택과 처리 카드를 유지하며 WBS 조회만 요청한다.
+    await useFactoryStore.getState().fetchWBS(true);
+  }, [pid, key]);
+  const executionConfirmed = useCallback(async () => {
+    if (!alive.current || studioInputKey(pid, 'run-input', 'requirements') !== key
+        || useFactoryStore.getState().currentProjectId !== pid) return;
+    const store = useFactoryStore.getState();
+    // 영수증은 명령 접수 결과다. 실제 가동·중지·완료는 상태 reader로 따로 확인한다.
+    await Promise.all([store.fetchLatestState(), store.fetchWBS(true), store.checkHotl()]);
+  }, [pid, key]);
 
-  // ── 왜 못 누르는가 ───────────────────────────────────────────────────────
-  // ★★ 비활성 이유가 **헤더의 낱말을 그대로 인용한다.** 여기서 「가동 중」이라고 새로 쓰면
-  //   헤더가 「사용자 결정 대기」일 때 두 문구가 모순된다 — 2026-08-06 실측에서 실제로 그랬다.
-  //   각각은 그럴듯하고 나란히 놓아야 보인다(인계서 §1 이 여덟 번 확인한 유형이다).
-  const startWhy = !pid ? '프로젝트를 먼저 선택하십시오.'
-    : run.active ? `지금은 «${run.label}» 상태입니다 — 먼저 일시정지하십시오.`
-      : run.wbsTotal > 0 ? '이 프로젝트는 이미 기획을 마쳤습니다. 다시 나누려면 «WBS 재분할» 을 쓰십시오.'
-        : '';
-  const resumeWhy = !inspect.suspendedTaskId
-    ? '쿼터로 동결된 작업이 없습니다 — 재개할 지점이 없습니다.' : '';
-  const healWhy = !failure ? '마지막 실행 실패 기록이 없습니다 — 복구할 대상이 없습니다.' : '';
-  // ⚠️ `docs` 는 배열이 아니라 **stage 키 맵**이다. 기획 산출물은 `PLANNING` 에 들어 있고,
-  //   `toDocs` 는 본문·판정이 둘 다 없으면 **키 자체를 만들지 않는다** — 즉 키의 유무가 곧
-  //   «있다/아직 없다» 다(빈 문자열을 «있음» 으로 세지 않기 위해 그렇게 만들어져 있다).
-  const replanWhy = !vm.docs.PLANNING
-    ? '기획 산출물(PRD)이 아직 없습니다 — 나눌 대상이 없습니다.'
-    : run.active ? `지금은 «${run.label}» 상태입니다 — 멈춘 뒤에 재분할할 수 있습니다.` : '';
-  const hasDocuments = Object.keys(vm.docs || {}).length > 0;
-  const releaseWhy = run.wbsTotal === 0 && !hasDocuments
-    ? '저장할 산출물이 아직 없습니다.' : '';
-  // ⚠️ 수정 요구는 **끝난 것이 있어야** 의미가 있다. 완료 0건이면 고칠 대상이 없다
-  //   (종전 통제실도 `doneTasks > 0` 일 때만 이 칸을 보여 준다 — 같은 조건을 쓴다).
-  const revisionWhy = !pid ? '프로젝트를 먼저 선택하십시오.'
-    : vm.wbs.filter((t) => t.kind === 'done').length === 0
-      ? '완료된 작업이 없습니다 — 고칠 대상이 아직 없습니다.'
-      : run.active ? `지금은 «${run.label}» 상태입니다 — 멈춘 뒤에 요구를 낼 수 있습니다.` : '';
-  const exportWhy = !pid ? '프로젝트를 먼저 선택하십시오.'
-    : Object.keys(vm.docs || {}).length === 0 && run.wbsTotal === 0
-      ? '아직 내려받을 산출물이 없습니다.' : '';
-
-  return (
-    <section className="run-controls" aria-label="실행 통제">
-      <header>
-        <b>실행 통제</b>
-        {/* 지금 무엇을 할 수 있는지 한 줄로 — 버튼 다섯 개를 훑기 전에 답을 준다. */}
-        <span>{run.label}</span>
-      </header>
-
-      {note && (
-        <p className={`run-note ${note.tone}`} role="status">{note.text}</p>
-      )}
-
+  const doPlanning = () => {
+    if (activeReason || planningTaskId || vm.wbs.length || !form.idea.trim()) return;
+    const task = newPlanningTaskId();
+    void command('요구사항 정리 요청', () => startPlanning(pid, form.idea, form.reference, task), task, true);
+  };
+  const doResumeTask = () => {
+    if (resumeReason || !paused || paused.taskId !== resumeTaskId) return;
+    const store = useFactoryStore.getState();
+    const latest = pausedExecution(store.state?.studio_execution_state, store.state?.current_sprint_task_id);
+    if (store.currentProjectId !== pid || !latest?.resumable || latest.taskId !== resumeTaskId) return;
+    void command('멈춘 작업 이어하기', () => resumeExistingTask(pid, resumeTaskId), resumeTaskId, true);
+  };
+  const doTask = () => {
+    if (activeReason || !selected || selected.kind === 'blocked' || selected.kind === 'done') return;
+    const raw = useFactoryStore.getState().wbsData?.tasks?.find((t: { task_id: string }) => t.task_id === selected.id);
+    if (!raw) { setNote({ ok: false, text: '현재 작업 목록에서 대상을 다시 확인하세요.' }); return; }
+    void command('선택 작업 시작 요청', () => startExistingTask(pid, selected.id, {}, feedback), selected.id, true);
+  };
+  const doHeal = () => {
+    if (activeReason || !vm.inspect.failure) return;
+    void command('오류 복구 요청', async () => {
+      const result = await useFactoryStore.getState().triggerSelfHealing(vm.inspect.failure!.error);
+      return { ...result, outcome: result.outcome === 'HEAL_STARTED' || result.outcome === 'HOTL_PENDING'
+        ? 'ACCEPTED' : result.outcome === 'LOCAL_BLOCKED' ? 'REJECTED' : result.outcome };
+    }, vm.inspect.failure.taskId || '', true);
+  };
+  const doRelease = () => {
+    if (activeReason || !hasResult) return;
+    void command('검토용 버전 저장', async () => {
+      const result = await useFactoryStore.getState().saveRelease(pid);
+      return { ...result, message: result.ok
+        ? `검토용 버전 ${result.releaseId}을 저장했습니다. 배포·운영 승인은 별도입니다.` : result.message };
+    });
+  };
+  const primary = () => {
+    if (resumePrimary) { openResume(); return; }
+    switch (action.kind) {
+      case 'refresh': void refresh(); break;
+      case 'decision': onReviewDecision?.(); break;
+      case 'quota': void command('한도 재개 요청', () => resumeAfterQuota(pid, vm.inspect.suspendedTaskId), vm.inspect.suspendedTaskId, true); break;
+      case 'planning': if (planningTaskId) void refresh(); else setPanel('planning'); break;
+      case 'task': setPanel('task'); break;
+      case 'heal': setPanel('heal'); break;
+      case 'result': case 'running': onReviewResult?.(); break;
+      default: onShowTasks?.();
+    }
+  };
+  return <section className="run-controls" aria-label="지금 할 일">
+    <div className="studio-next-action">
+      <div><strong>{resumePrimary ? '멈춘 작업을 이어갈 수 있는지 확인하세요' : action.title}</strong>
+        <p>{resumePrimary ? '현재 작업의 저장된 지점에서 재개합니다. 새 작업 시작과는 다릅니다.' : action.description}</p></div>
+      <button type="button" className="primary" disabled={!!busy || (action.kind === 'blocked' && !pid)
+        || (resumePrimary && !!resumeReason)
+        || ((executionPending || !!pendingRevision || !!form.uncertain) && ['planning', 'task', 'heal', 'quota'].includes(action.kind))} onClick={primary}>{resumePrimary ? '멈춘 작업 이어하기' : action.kind === 'planning' && planningTaskId ? '기존 기획 상태 확인' : action.label}</button>
+      <button type="button" disabled={!!busy} onClick={() => void refresh()}>상태 새로고침</button>
+    </div>
+    {paused && !paused.resumable && <p className="run-note bad" role="status">재개 불가 사유: {paused.reason}. 상태를 다시 조회하거나 필요한 조건을 먼저 확인하세요.</p>}
+    {note && (!note.requestId || executionRecords.some(record => record.request.client_request_id === note.requestId))
+      && <p className={`run-note ${note.ok ? 'ok' : 'bad'}`} role={note.ok ? 'status' : 'alert'}>{note.text}</p>}
+    {form.uncertain && <p className="run-note bad" role="alert">{form.uncertain}: 결과 확인 필요. 입력은 보존되어 있으며 요청을 자동 반복하지 않습니다.</p>}
+    {form.uncertain && !form.requestId && <p className="run-hint">이전 명령에는 복구할 원요청 ID가 없습니다. 현재 상태나 다른 요청의 성공만으로 잠금을 해제하지 않습니다.</p>}
+    <StudioExecutionRequests projectId={pid} onConfirmed={executionConfirmed} />
+    {pendingRevision && <div className="run-note bad" role="alert">
+      수정 요청의 접수 결과가 미확정입니다. 다른 쓰기는 잠그고 원래 요청의 GET 확인만 제공합니다.
+      <button type="button" disabled={!!readReason} onClick={openRevision}>수정 접수 확인 열기</button>
+    </div>}
+    <details className="studio-more-actions">
+      <summary>추가 작업 · 수정 요청, 버전 저장, 내려받기</summary>
       <div className="run-buttons">
-        <Btn label="기획 가동" why={startWhy} busy={busy === '기획 가동 중'}
-          onClick={() => setPending(pending === 'start' ? null : 'start')} primary />
-        <Btn label="재개" why={resumeWhy} busy={busy === '재개 중'} onClick={doResume}
-          hint="쿼터가 회복된 뒤 멈춘 지점부터 다시 시작합니다(처음부터가 아닙니다)." />
-        <Btn label="복구" why={healWhy} busy={busy === '복구 요청 중'} onClick={doHeal}
-          hint={SELF_HEAL_NOTE} />
-        <Btn label="WBS 재분할" why={replanWhy} busy={busy === '재분할 중'}
-          onClick={() => setPending(pending === 'replan' ? null : 'replan')} danger />
-        <Btn label="Release 저장" why={releaseWhy} busy={busy === 'Release 저장 중'}
-          onClick={doRelease} hint="현재 산출물을 하나의 릴리스로 묶어 보관합니다." />
-        {/* [전환 게이트] §8 「수정 요구가 보존된다」 — 종전 통제실의 «피드백 백로그 발행» */}
-        <Btn label="수정 요구" why={revisionWhy} busy={busy === '수정 요구 발행 중'}
-          onClick={() => setPending(pending === 'revision' ? null : 'revision')}
-          hint={REVISION_NOTE} />
-        {/* [전환 게이트] §8 「Export 가 보존된다」 — 종전 통제실의 «산출물 코드 ZIP 다운로드» */}
-        <Btn label="산출물 ZIP" why={exportWhy} busy={false} onClick={doExport}
-          hint="생성된 코드·문서를 zip 으로 내려받습니다(종전 통제실과 같은 파일)." />
+        <Action label="요구사항 정리" why={activeReason || (planningTaskId ? '현재 기획의 일시정지·재개 가능 상태를 먼저 조회하세요.' : vm.wbs.length ? '이미 작업 목록이 있습니다.' : '')} busy={busy} onClick={() => setPanel('planning')} />
+        {paused && <Action label="멈춘 작업 이어하기" why={resumeReason} busy={busy} onClick={openResume} />}
+        <Action label="선택 작업 시작·재가동" why={activeReason || (!selected ? '작업 목록에서 대상을 선택하세요.' : selected.kind === 'blocked' || selected.kind === 'done' ? '완료·선행 조건을 확인하세요.' : '')} busy={busy} onClick={() => setPanel('task')} />
+        <Action label="한도 회복 후 재개" why={disabledReason || (!vm.inspect.suspendedTaskId ? '사용 한도로 멈춘 작업이 없습니다.' : '')} busy={busy} onClick={() => void command('한도 재개 요청', () => resumeAfterQuota(pid, vm.inspect.suspendedTaskId), vm.inspect.suspendedTaskId, true)} />
+        <Action label="오류 복구" why={activeReason || (!vm.inspect.failure ? '복구할 오류 기록이 없습니다.' : '')} busy={busy} onClick={() => setPanel('heal')} />
+        <Action label="수정 요청" why={readReason || (!hasResult && !revisionRecords.length ? '먼저 결과를 확인하세요.' : '')}
+          busy="" onClick={openRevision} />
+        <Action label="검토용 버전 저장" why={activeReason || (!hasResult ? '저장할 결과가 없습니다.' : '')} busy={busy} onClick={doRelease} />
+        <Action label="작업 계획 다시 나누기" why={activeReason || (!vm.docs.PLANNING ? '기획 결과가 필요합니다.' : '')} busy={busy} onClick={() => setPanel('replan')} />
+        <Action label="코드·문서 내려받기" why={disabledReason || (!hasResult ? '내려받을 결과가 없습니다.' : '')} busy={busy} onClick={() => {
+          const a = document.createElement('a'); a.href = exportArchiveUrl(pid); a.download = `${pid}.zip`; a.click();
+        }} />
       </div>
-
-      {/* ── 기획 가동 폼 ─────────────────────────────────────────────────── */}
-      {pending === 'start' && !startWhy && (
-        <div className="run-form">
-          <label className="field-label" htmlFor="rc-idea">무엇을 만들지 한 문장으로 (필수)</label>
-          <textarea id="rc-idea" rows={2} value={idea}
-            placeholder="예: 사내 원료 재고를 조회하고 부족분을 알려 주는 화면"
-            onChange={(e) => setIdea(e.target.value)} />
-          <label className="field-label" htmlFor="rc-master">참고할 기준정보 (선택)</label>
-          <textarea id="rc-master" rows={2} value={masterData}
-            placeholder="에이전트가 확정 사실로 쓸 값이 있으면 적습니다"
-            onChange={(e) => setMasterData(e.target.value)} />
-          <p className="run-hint">
-            가동하면 요구 확인 → 기획 → 설계 → 구현 순서로 진행됩니다. 중간에 사용자 결정이
-            필요한 지점에서 멈추고 물어봅니다.
-          </p>
-          <div className="run-form-actions">
-            <button type="button" onClick={() => setPending(null)}>취소</button>
-            <button type="button" className="primary" disabled={!idea.trim() || !!busy}
-              onClick={doStart}>
-              {busy === '기획 가동 중' ? '가동 중…' : '기획 가동'}
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* ── 수정 요구 폼 ─────────────────────────────────────────────────── */}
-      {pending === 'revision' && !revisionWhy && (
-        <div className="run-form">
-          <label className="field-label" htmlFor="rc-revision">무엇을 고쳐야 합니까 (필수)</label>
-          <textarea id="rc-revision" rows={3} value={revision}
-            placeholder="예: 변환 이력이 5개만 남는데 20개까지 보이게 해 주십시오"
-            onChange={(e) => setRevision(e.target.value)} />
-          <p className="run-hint">{REVISION_NOTE}</p>
-          <div className="run-form-actions">
-            <button type="button" onClick={() => setPending(null)}>취소</button>
-            <button type="button" className="primary" disabled={!revision.trim() || !!busy}
-              onClick={doRevision}>
-              {busy === '수정 요구 발행 중' ? '발행 중…' : 'WBS 에 추가'}
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* ── 재분할 확인 ──────────────────────────────────────────────────── */}
-      {pending === 'replan' && !replanWhy && (
-        <div className="run-form">
-          <p className="run-hint">{REPLAN_CONFIRM}</p>
-          <div className="run-form-actions">
-            <button type="button" onClick={() => setPending(null)}>취소</button>
-            <button type="button" className="danger" disabled={!!busy} onClick={doReplan}>
-              {busy === '재분할 중' ? '재분할 중…' : '다시 나눕니다'}
-            </button>
-          </div>
-        </div>
-      )}
-    </section>
-  );
+    </details>
+    {panel && <div className="run-form">
+      {panel === 'planning' && <>
+        <label className="field-label" htmlFor="studio-idea">어떤 일을 쉽게 만들고 싶으세요?</label>
+        <textarea id="studio-idea" rows={3} value={form.idea} disabled={!!busy || !!form.uncertain} onChange={e => update({ idea: e.target.value })} placeholder="예: 원료별 구매계획과 입고 예정일을 한눈에 확인하고 싶어요." />
+        <details><summary>추가 설명</summary><label htmlFor="studio-reference">참고할 업무 설명 — 인증된 기준정보로 자동 등록되지 않습니다.</label>
+          <textarea id="studio-reference" rows={2} value={form.reference} disabled={!!busy || !!form.uncertain} onChange={e => update({ reference: e.target.value })} /></details>
+      </>}
+      {panel === 'task' && <p><b>{selected?.title || '작업을 선택하세요'}</b> — 기존 작업 ID와 서버의 실행 모드로 제작을 요청합니다. 한도 재개와는 다릅니다.</p>}
+      {panel === 'resume-task' && <>
+        <p><b>{resumeTaskId}</b> — 서버가 같은 작업의 재개 가능 상태를 확인합니다.
+          기존 산출물을 새 작업으로 대체하지 않으며, 현재 폼의 요구·참고 설명·피드백을 재전송하지 않습니다.</p>
+        {(resumeReason || paused?.taskId !== resumeTaskId) && <p role="alert">{resumeReason || '일시정지 대상이 바뀌었습니다. 현재 상태를 조회한 뒤 재개 화면을 다시 여세요.'}</p>}
+      </>}
+      {panel === 'task' && <>
+        <label htmlFor="studio-feedback">이번 작업에 전달할 추가 설명 (선택)</label>
+        <textarea id="studio-feedback" rows={3} value={feedback} disabled={!!busy || !!form.uncertain} onChange={e => updateFeedback(e.target.value)} />
+        <p className="run-hint">{REVISION_NOTE}</p>
+      </>}
+      {panel === 'revision' && (readReason ? <p role="alert">{readReason} · 현재 권한을 확인할 때까지 이전 수정 본문·기록을 숨깁니다.</p>
+        : revisionTask ? <RevisionRequestEditor projectId={pid} taskId={revisionTask}
+          disabled={!!busy || !!activeReason} onSubmitted={revisionSubmitted} onStateChange={revisionStateChanged} />
+          : <p role="alert">수정할 작업을 목록에서 선택하세요. 기준 없는 수정 요청은 보내지 않습니다.</p>)}
+      {panel === 'heal' && <><p role="alert">{vm.inspect.failure?.error}</p><p>{SELF_HEAL_NOTE}</p><p>새 복구 작업 또는 먼저 확인할 기존 검토 건을 서버 응답에 따라 안내합니다.</p></>}
+      {panel === 'replan' && <p role="alert">{REPLAN_CONFIRM}</p>}
+      <p className="run-hint">입력은 현재 로그인 세션에 보관됩니다. 서버 초안 저장과는 다르며 새로고침하면 잃을 수 있습니다.</p>
+      {disabledReason && <p role="alert">{disabledReason}</p>}
+      <div className="run-form-actions">
+        <button type="button" onClick={() => setPanel(null)}>입력 유지하고 접기</button>
+        {panel !== 'revision' && <button type="button" className="primary" disabled={!!busy || !!activeReason || (panel === 'planning' && (!form.idea.trim() || !!planningTaskId))
+          || (panel === 'resume-task' && (!!resumeReason || paused?.taskId !== resumeTaskId))} onClick={() => {
+          if (panel === 'planning') doPlanning();
+          if (panel === 'resume-task') doResumeTask();
+          if (panel === 'task') doTask();
+          if (panel === 'heal') doHeal();
+          if (panel === 'replan') void command('작업 계획 재분할 요청', () => replanWbs(pid));
+        }}>{busy || (panel === 'planning' ? '요구사항 정리 시작' : panel === 'resume-task' ? '같은 작업 재개 요청' : panel === 'replan' ? '영향을 확인하고 다시 나누기' : '확인하고 요청')}</button>}
+      </div>
+    </div>}
+  </section>;
 }
 
-/** 비활성 이유를 **항상** 들고 다니는 버튼. 이유 없이 회색이 되는 경로를 만들지 않는다. */
-function Btn({ label, why, busy, onClick, hint, primary, danger }: {
-  label: string; why: string; busy: boolean; onClick: () => void;
-  hint?: string; primary?: boolean; danger?: boolean;
-}) {
-  const disabled = !!why || busy;
-  return (
-    <button
-      type="button"
-      className={primary ? 'primary' : danger ? 'danger' : ''}
-      disabled={disabled}
-      onClick={onClick}
-      // ⚠️ 이유를 `title` 에만 두지 않는다 — 터치·키보드에서 보이지 않는다.
-      //   그래서 `aria-describedby` 대신 비활성 이유를 버튼 아래 줄로도 낸다.
-      title={why || hint || label}
-    >
-      <span>{busy ? '진행 중…' : label}</span>
-      {why && <em>{why}</em>}
-    </button>
-  );
+function Action({ label, why, busy, onClick }: { label: string; why: string; busy: string; onClick: () => void }) {
+  return <button type="button" disabled={!!why || !!busy} onClick={onClick}><span>{label}</span>{why && <em>{why}</em>}</button>;
 }

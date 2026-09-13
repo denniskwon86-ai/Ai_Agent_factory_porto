@@ -21,11 +21,14 @@ Tech_Lead
 """
 import json
 import os
+import copy
 from typing import Any, Dict, List
 
 from core import contract_review_gate as gate
+from core import app_runtime_contract as arc
 from core import project_contract_aggregator as aggregator
 from core import wbs_artifact_kind as artifact_kind
+from core import contract_decision as draft_decisions
 from state_models import ProjectState
 
 #: 계약 **설계 정본**의 자리(설계 §4). 상태에는 요약·상태·지문만 둔다.
@@ -51,12 +54,14 @@ def _read_json(path: str) -> Any:
         return None
 
 
-def load_drafts(workspace_root: str) -> Dict[str, Dict[str, Any]]:
+def load_drafts(workspace_root: str, *, require_metadata: bool = False) -> Dict[str, Dict[str, Any]]:
     """`<workspace>/contracts/drafts/<task_id>.json` 을 모은다.
 
     ⚠️ 읽지 못한 초안을 **건너뛰지 않는다.** 건너뛰면 「초안이 없다」와 「초안이
       깨졌다」가 같아지고, 합산기는 전자로 읽어 그 태스크를 빠뜨린 채 막는다 —
       사람은 초안을 안 썼다고 생각하고 다시 쓴다. 깨진 것은 깨진 채로 넘긴다."""
+    if require_metadata or draft_decisions.has_round_metadata(workspace_root):
+        return draft_decisions.load_drafts_for_workspace(workspace_root, require_metadata=require_metadata)
     out: Dict[str, Dict[str, Any]] = {}
     d = draft_dir(workspace_root)
     if not os.path.isdir(d):
@@ -95,6 +100,9 @@ def resolutions_path(workspace_root: str) -> str:
 def record_dataset_resolution(workspace_root: str, dataset_key: str,
                               winner_task_id: str) -> None:
     """데이터셋 충돌 결정을 남긴다 — 초안이 다시 써져도 살아남게."""
+    if draft_decisions.has_round_metadata(workspace_root):
+        raise draft_decisions.DecisionRoundError(
+            "DECISION_ROUND_REQUIRED", "서버 판 초안은 현재 결정 차수와 원장에 결속된 경로로 결정하십시오.", 409)
     path = resolutions_path(workspace_root)
     doc = _read_json(path)
     doc = doc if isinstance(doc, dict) else {}
@@ -131,7 +139,7 @@ def _with_resolutions(workspace_root: str,
     return drafts
 
 
-def save_draft(workspace_root: str, task_id: str, draft: Dict[str, Any]) -> str:
+def save_draft(workspace_root: str, task_id: str, draft: Dict[str, Any], *, require_metadata: bool = False) -> str:
     """태스크 하나의 **계약 초안**을 저장한다. 돌려주는 것은 저장 경로.
 
     ## ⚠️⚠️ [2026-08-25 실측] 이 함수가 **없었다**
@@ -158,12 +166,9 @@ def save_draft(workspace_root: str, task_id: str, draft: Dict[str, Any]) -> str:
     tid = str(task_id or "").strip()
     if not tid:
         raise ValueError("어느 태스크의 초안인지 없습니다.")
-    d = draft_dir(workspace_root)
-    os.makedirs(d, exist_ok=True)
-    path = os.path.join(d, f"{tid}.json")
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(draft, f, ensure_ascii=False, indent=2)
-    return path
+    # Producer's protected server state selects v2 explicitly, not an LLM field.
+    # Omitted flag preserves original unversioned 1.0 multi-draft behavior.
+    return draft_decisions.save_draft_source(workspace_root, tid, draft, require_metadata=require_metadata)
 
 
 def _wbs_tasks(workspace_root: str) -> List[Any]:
@@ -321,6 +326,26 @@ def _tasks_in_contract_scope(tasks: List[Dict[str, Any]], drafts: Dict[str, Any]
     return keep
 
 
+def _scoped_drafts_for_contract(workspace_root, tasks, current_task_id, *, require_metadata):
+    """Do not require not-yet-created metadata for a non-contract LIBRARY step.
+    Preserve the original scope rule: current task OR an existing draft. Any
+    managed marker still goes through strict integrity checks (including loss of
+    its companion), and current/present APP drafts never use this early exit.
+    """
+    if (not isinstance(tasks, list) or not tasks
+            or any(not isinstance(task, dict) or not isinstance(task.get("task_id"), str)
+                   or not task["task_id"].strip() for task in tasks)):
+        raise draft_decisions.DecisionRoundError("CONTRACT_SCOPE_UNREADABLE", "계약 대상 WBS를 확인할 수 없습니다.", 503)
+    if require_metadata and not draft_decisions.has_round_metadata(workspace_root):
+        present = draft_decisions.draft_task_ids_for_scope(workspace_root)
+        scoped = _tasks_in_contract_scope(tasks, {tid: True for tid in present}, current_task_id)
+        current_known = current_task_id in {task["task_id"] for task in tasks}
+        if current_known and not artifact_kind.contract_required_task_ids(scoped):
+            return scoped, {}
+    drafts = load_drafts(workspace_root, require_metadata=require_metadata)
+    return _tasks_in_contract_scope(tasks, drafts, current_task_id), drafts
+
+
 async def run_host_contract_compiler(state: Any) -> Dict[str, Any]:
     """WBS 의 계약 대상 태스크 초안을 **프로젝트 계약 하나**로 컴파일한다.
 
@@ -329,6 +354,14 @@ async def run_host_contract_compiler(state: Any) -> Dict[str, Any]:
       삭제되면 자연히 계약에서도 빠지고, 지문이 바뀌어 재승인을 지난다."""
     st = ProjectState.model_validate(state)
     ws = st.workspace_root or ""
+    document_version = getattr(st, "runtime_document_version", "1.0")
+    process_context = getattr(st, "process_context", None)
+    context_errors = arc.runtime_document_errors(document_version, process_context)
+    if context_errors:
+        reason = "업무 문맥 계약을 확인해야 합니다: " + " / ".join(context_errors[:4])
+        return {"app_runtime_contract_status": "DRAFT", "app_runtime_contract_fingerprint": "",
+                "app_runtime_contract_summary": reason, "terminal_status": "CONTRACT_BLOCKED",
+                "terminal_reason": reason, "supervisor_feedback": reason}
     tasks = _wbs_tasks(ws)
     previous = _read_json(contract_path(ws))
 
@@ -354,8 +387,14 @@ async def run_host_contract_compiler(state: Any) -> Dict[str, Any]:
             "supervisor_feedback": reason,
         }
 
-    drafts = load_drafts(ws)
-    tasks = _tasks_in_contract_scope(tasks, drafts, st.current_sprint_task_id or "")
+    try:
+        tasks, drafts = _scoped_drafts_for_contract(ws, tasks, st.current_sprint_task_id or "",
+            require_metadata=document_version == arc.PROCESS_DOCUMENT_VERSION)
+    except draft_decisions.DecisionRoundError as exc:
+        reason = str(exc)
+        return {"app_runtime_contract_status": "DRAFT", "app_runtime_contract_fingerprint": "",
+                "app_runtime_contract_summary": reason, "terminal_status": "CONTRACT_BLOCKED",
+                "terminal_reason": reason, "supervisor_feedback": reason}
 
     #: ★★★ 이번 범위에 **계약 대상이 하나도 없으면** 만들 계약이 없다.
     #:
@@ -375,7 +414,8 @@ async def run_host_contract_compiler(state: Any) -> Dict[str, Any]:
 
     result, agg = aggregator.compile_project_contract(
         tasks, drafts, project_id=os.path.basename(ws.rstrip("/\\")) or st.project_name,
-        previous=previous if isinstance(previous, dict) else None)
+        previous=previous if isinstance(previous, dict) else None,
+        document_version=document_version, process_context=process_context)
     contract = result.contract
     required = artifact_kind.contract_required_task_ids(tasks)
 
@@ -507,8 +547,30 @@ async def run_contract_review_gate(state: Any) -> Dict[str, Any]:
     #:   WBS 전체로 판정했다. 그래서 컴파일러가 「이번엔 계약 대상이 없다」고 통과시킨
     #:   태스크를 게이트가 「계약 대상인데 컴파일된 계약이 없다」로 막았다 —
     #:   **두 계층의 답이 갈리면 통제가 아니라 교착이 된다**([I-4 2.2a] 와 같은 종류).
-    tasks = _tasks_in_contract_scope(_wbs_tasks(ws), load_drafts(ws),
-                                     st.current_sprint_task_id or "")
+    document_version = getattr(st, "runtime_document_version", "1.0")
+    try:
+        tasks, drafts = _scoped_drafts_for_contract(ws, _wbs_tasks(ws), st.current_sprint_task_id or "",
+            require_metadata=document_version == arc.PROCESS_DOCUMENT_VERSION)
+    except draft_decisions.DecisionRoundError as exc:
+        return {"terminal_status": "CONTRACT_BLOCKED", "terminal_reason": str(exc),
+                "supervisor_feedback": str(exc), "contract_review_request_event_id": ""}
+    process_context = getattr(st, "process_context", None)
+    context_errors = arc.runtime_document_errors(document_version, process_context)
+    if document_version == arc.PROCESS_DOCUMENT_VERSION and not context_errors and artifact_kind.contract_required_task_ids(tasks):
+        contract = _read_json(contract_path(ws))
+        if not isinstance(contract, dict) or contract.get("schema_version") != arc.PROCESS_DOCUMENT_VERSION:
+            context_errors = ["2.0 대상의 고정 계약이 없거나 다른 판본입니다."]
+        else:
+            context_errors = arc.validate(contract)
+            if not context_errors:
+                current = copy.deepcopy(contract)
+                current["process_context"] = process_context
+                if arc.semantic_fingerprint(current) != contract["semantic_fingerprint"]:
+                    context_errors = ["현재 업무 의미·결속이 고정 계약과 다릅니다. 계약을 다시 검토하십시오."]
+    if context_errors:
+        reason = "업무 문맥 계약을 확인해야 합니다: " + " / ".join(context_errors[:4])
+        return {"terminal_status": "CONTRACT_BLOCKED", "terminal_reason": reason,
+                "supervisor_feedback": reason, "contract_review_request_event_id": ""}
     decision, required = gate.evaluate_project(tasks, _with_project_approval(st, ws))
 
     if decision.verdict == gate.AUTO_PASS:

@@ -60,12 +60,23 @@ from core.async_orchestrator import orchestrator
 from core import library_paths
 from core import project_visibility as _pv
 from core.paths import workspace_path
+from api.routes.studio_reconcile_control import contract_command as _contract_command
+from api.routes.studio_execution_control import (execution_route as _execution_route,
+    mark_effect_started as _execution_effect, dispatch_context as _execution_dispatch)
 
 # ★★ [2026-08-07] 권한 배정표를 **라우터에 붙인다.** 라우트마다 `require_caps` 를 적지
 #   않는 이유: 37개에 적으면 37번 빠뜨릴 기회가 생기고, 새 라우트가 생겨도 아무도
 #   알려 주지 않는다. 표는 `core/route_authority.ROUTE_CAPS` 하나뿐이며,
 #   `tests/test_route_authority_table.py` 가 표와 라우터를 **양방향으로** 대조한다.
 router = APIRouter(prefix="/api/v1/factory", dependencies=[Depends(_route_authority_guard)])
+from api.routes.studio_reconcile_control import router as _studio_reconcile_router
+router.include_router(_studio_reconcile_router)
+from api.routes.studio_input_draft_control import router as _studio_input_draft_router
+router.include_router(_studio_input_draft_router)
+from api.routes.studio_revision_control import router as _studio_revision_router
+router.include_router(_studio_revision_router)
+from api.routes.studio_execution_control import router as _studio_execution_router
+router.include_router(_studio_execution_router)
 
 #: 사용자에게 보일 자료 이름. 조사(을/를)는 `deps.eul` 이 맞춘다.
 WHAT = "공장 실행 기록"
@@ -76,8 +87,11 @@ class SprintStartRequest(BaseModel):
     project_state_payload: dict
 
 class HOTLResumeRequest(BaseModel):
+    model_config = {"extra": "forbid"}
     task_id: str
     feedback: Optional[str] = ""
+    expected_request_id: str = ""
+    expected_questions_digest: str = ""
 
 class RevisionRequest(BaseModel):
     feedback: str
@@ -253,6 +267,7 @@ async def _prepare_project_execution(workspace_root: str, state: dict) -> None:
 
 
 async def _prepare_project_execution_or_conflict(workspace_root: str, state: dict) -> None:
+    _execution_effect()
     try:
         await _prepare_project_execution(workspace_root, state)
     except TemplateBindingError as exc:
@@ -455,7 +470,8 @@ def _write_project_meta(workspace_root: str, template_id: str, output_format_id:
                         runtime_contract_profile: str = None,
                         template_fingerprint: str = None,
                         template_binding_version: str = None,
-                        project_name: str = None, data_binding: dict = None) -> None:
+                        project_name: str = None, data_binding: dict = None,
+                        studio_context: dict = None, strict_write: bool = False) -> None:
     """⚠️ 소유권 5필드도 **None 이면 보존**한다(Phase 3).
     이 함수는 템플릿만 바꾸려는 호출부가 많은데, 거기서 소유권이 초기화되면
     프로젝트가 조용히 무소속이 되어 권한 필터에서 사라진다."""
@@ -479,7 +495,8 @@ def _write_project_meta(workspace_root: str, template_id: str, output_format_id:
         if (master_domains is None or mcp_live_grounding is None
                 or knowledge_pack_ids is None or _own_missing
                 or template_fingerprint is None or template_binding_version is None
-                or project_name is None or data_binding is None):
+                or project_name is None or data_binding is None
+                or os.path.exists(_project_meta_path(workspace_root))):
             try:
                 with open(_project_meta_path(workspace_root), "r", encoding="utf-8") as f:
                     _prev = json.load(f) or {}
@@ -555,8 +572,14 @@ def _write_project_meta(workspace_root: str, template_id: str, output_format_id:
                     "enterprise_scope_id 중 최소 하나가 필요합니다 — 소유 없는 프로젝트는 "
                     "권한 필터에서 «미기록» 이 되어 통제 밖에 놓입니다.")
 
-        with open(_project_meta_path(workspace_root), "w", encoding="utf-8") as f:
-            json.dump({
+        from core.studio_project_files import STUDIO_FIELDS
+        _studio = {k: _prev[k] for k in STUDIO_FIELDS if k in _prev}
+        if studio_context is not None:
+            if not isinstance(studio_context, dict) or set(studio_context) != set(STUDIO_FIELDS):
+                raise ValueError("서버의 완전한 Studio 고정 참조가 필요합니다.")
+            _studio = dict(studio_context)
+        _metadata = {
+                **_studio,
                 "project_name": str(project_name or "").strip(),
                 "template_id": tid,
                 "template_fingerprint": template_fingerprint,
@@ -582,7 +605,13 @@ def _write_project_meta(workspace_root: str, template_id: str, output_format_id:
                 "runtime_contract_profile": runtime_contract_profile or "",
                 # 실행 때 최신판을 다시 고르지 않는다. 프로젝트 생성 당시 고른 인증판 봉인이다.
                 "business_data_binding": dict(data_binding or {}),
-            }, f, ensure_ascii=False, indent=2)
+            }
+        if strict_write or _studio:
+            from core.studio_project_files import write_json
+            write_json(_project_meta_path(workspace_root), _metadata)
+        else:
+            with open(_project_meta_path(workspace_root), "w", encoding="utf-8") as f:
+                json.dump(_metadata, f, ensure_ascii=False, indent=2)
         _sync_project_ownership(workspace_root, owner_dept_id, owner_user_id, visibility, nature)
     except (ProjectOwnershipRequired, TemplateBindingError):
         # ⚠️ **삼키지 않는다.** 아래 `except Exception` 이 이것까지 잡으면 메타가 안 써지고
@@ -590,6 +619,8 @@ def _write_project_meta(workspace_root: str, template_id: str, output_format_id:
         #   라우트가 이것을 4xx 로 바꿔 «무엇이 없어서 못 만들었는지» 를 말해야 한다.
         raise
     except Exception as e:
+        if strict_write or studio_context is not None or (_prev and _prev.get("runtime_document_version") == "2.0"):
+            raise
         print(f"⚠️ project_meta 저장 실패: {e}")
 
 
@@ -861,7 +892,8 @@ def provision_project(project_id: str, template_id: str = "default",
                       owner_dept_id: str = "", owner_user_id: str = "",
                       tenant_id: str = None, enterprise_scope_id: str = None,
                       entity_mode: str = None, blueprint_id: str = None,
-                      project_name: str = "", data_binding: dict = None) -> str:
+                      project_name: str = "", data_binding: dict = None,
+                      studio_context: dict = None) -> str:
     """프로젝트 디렉터리와 `project_meta.json` 을 만든다. **`POST /projects` 와 상담사
     `bootstrap-project` 가 공유하는 단일 경로**다.
 
@@ -880,9 +912,24 @@ def provision_project(project_id: str, template_id: str = "default",
     if tid not in {t["id"] for t in list_templates()}:
         raise KeyError(tid)                          # 미존재 → KeyError
     project_path = workspace_path(project_id)
-    if os.path.exists(project_path):
-        raise FileExistsError(project_id)
-    os.makedirs(project_path, exist_ok=True)
+    if studio_context is None:
+        if os.path.exists(project_path):
+            raise FileExistsError(project_id)
+        os.makedirs(project_path, exist_ok=True)
+    else:
+        # 내부 saga만 호출한다. 승인 operation과 같은 폴더만 복구하며 다른 자료는 덮지 않는다.
+        from core.studio_project_files import MARKER, read_json, write_json, recover_marker
+        marker = {"project_id": project_id, "operation_id": studio_context["bootstrap_operation_id"]}
+        marker_path = os.path.join(project_path, MARKER)
+        if os.path.exists(project_path):
+            if os.path.exists(marker_path):
+                if read_json(marker_path) != marker:
+                    raise FileExistsError(project_id)
+            else:
+                recover_marker(project_path, marker)
+        else:
+            os.makedirs(project_path, exist_ok=False)
+            write_json(marker_path, marker)
     _write_project_meta(project_path, tid, output_format_id, view_type, knowledge_pack_ids,
                         master_domains, mcp_live_grounding,
                         owner_dept_id=owner_dept_id, owner_user_id=owner_user_id,
@@ -893,7 +940,8 @@ def provision_project(project_id: str, template_id: str = "default",
                         # ★ [I-4 §3] **신규 프로젝트만** 계약 절차를 켠다. 생성 경로가
                         #   하나로 모여 있는 덕에 여기 한 줄이 경계 전부다 — 갱신 경로는
                         #   `None` 으로 두어 기존 값을 보존한다.
-                        runtime_contract_profile=_ak.PROFILE_V1)
+                        runtime_contract_profile=_ak.PROFILE_V1,
+                        studio_context=studio_context, strict_write=studio_context is not None)
     return tid
 
 
@@ -943,7 +991,9 @@ async def create_project(req: ProjectCreateRequest, p: Principal = Depends(curre
                 allowed_scope_nodes=getattr(p.scope, "readable_scope_nodes", ()) or (),
                 unrestricted=bool(getattr(p.scope, "unrestricted", False)))
         except ProjectDataBindingError as exc:
-            raise HTTPException(status_code=404, detail=str(exc)) from exc
+            # 비가시404와 보류409/판정불가503/입력422를 메시지 파싱 없이 구별한다.
+            raise HTTPException(status_code=exc.status_code, detail={
+                "reason_code": exc.reason_code, "message": str(exc)}) from exc
     try:
         tid = provision_project(
             project_id, req.template_id or "default", req.output_format_id, req.view_type,
@@ -1212,6 +1262,9 @@ async def start_all_mega_subprojects(project_id: str, p: Principal = Depends(cur
     results = []
     import time
     for domain, sub_id in sub_map.items():
+        _safe_id(sub_id, "project_id")
+        from core.studio_project_context import for_principal
+        _studio_sub = await asyncio.to_thread(for_principal, sub_id, p, "DRAFT")
         sub_ws = workspace_path(sub_id)
         sub_state_path = os.path.join(sub_ws, "latest_state.json")
         
@@ -1226,6 +1279,8 @@ async def start_all_mega_subprojects(project_id: str, p: Principal = Depends(cur
         # (문자열을 그대로 넣으면 첫 노드의 model_validate 에서 ValidationError 로 서브 전체가 즉사)
         _md_str = master_state.get("master_data", "") or ""
         sub_state["master_data"] = _md_str
+        if _studio_sub:
+            sub_state.update(_studio_sub)
         try:
             _md = json.loads(_md_str) if _md_str.strip() else {}
         except Exception:
@@ -1244,8 +1299,8 @@ async def start_all_mega_subprojects(project_id: str, p: Principal = Depends(cur
             json.dump(sub_state, f, ensure_ascii=False, indent=2)
 
         await _prepare_project_execution_or_conflict(sub_ws, sub_state)
-        await orchestrator.start_sprint(task_id, sub_state, sub_ws)
-        results.append(sub_id)
+        if await orchestrator.start_sprint(task_id, sub_state, sub_ws):
+            results.append(sub_id)
         
     return {"status": "success", "started_projects": results}
 
@@ -1375,6 +1430,9 @@ async def copy_project(project_id: str, req: ProjectCopyRequest,
                           p: Principal = Depends(current_principal)):
     _safe_id(project_id, "project_id")
     assert_project_writable(p, project_id)
+    from core.studio_project_context import for_principal
+    if await asyncio.to_thread(for_principal, project_id, p, "DRAFT"):
+        raise HTTPException(status_code=409, detail="승인판 기반 프로젝트는 폴더 복제로 만들 수 없습니다. 초안을 새 판본으로 저장·승인한 뒤 승격하십시오.")
     from core.system_ids import allocate
     new_project_id = (req.new_project_id or "").strip() or allocate("project")[0]
     new_project_name = (req.new_project_name or "").strip() or "복제 프로젝트"
@@ -1399,11 +1457,21 @@ async def copy_project(project_id: str, req: ProjectCopyRequest,
             "new_project_name": new_project_name}
 
 @router.post("/{project_id}/sprint/start")
+@_execution_route(quiescent=True)
 async def start_sprint(project_id: str, req: SprintStartRequest,
                           p: Principal = Depends(current_principal)):
     _safe_id(project_id, "project_id")
     assert_project_writable(p, project_id)
-    workspace_root = f"./projects/{project_id}"
+    from core.studio_project_context import for_principal
+    from core.studio_project_files import STUDIO_FIELDS
+    _studio = await asyncio.to_thread(for_principal, project_id, p,
+        "DRAFT" if req.task_id.startswith("PLANNING") else "GENERATE")
+    for _key in STUDIO_FIELDS:
+        req.project_state_payload[_key] = (_studio[_key] if _studio else
+            ("1.0" if _key == "runtime_document_version" else {} if _key == "process_context" else ""))
+    if _studio:
+        req.project_state_payload.update(_studio)
+    workspace_root = workspace_path(project_id)
     req.project_state_payload["workspace_root"] = workspace_root
     # T2-b: 프로젝트에 바인딩된 템플릿을 권위 있는 출처(project_meta.json)에서 주입 — 프론트 state 가
     #   stale 해도 모든 태스크가 같은 워크플로우로 실행되도록 보장(오케스트레이터가 이 값으로 그래프 선택).
@@ -1534,33 +1602,57 @@ async def start_sprint(project_id: str, req: SprintStartRequest,
             if "stage_scores" in req.project_state_payload and st in req.project_state_payload["stage_scores"]:
                 del req.project_state_payload["stage_scores"][st]
 
-    await orchestrator.start_sprint(req.task_id, req.project_state_payload, workspace_root)
+    accepted = await orchestrator.start_sprint(req.task_id, req.project_state_payload, workspace_root)
+    if not accepted:
+        raise HTTPException(status_code=409, detail="현재 작업 또는 계약 복구가 진행 중입니다. 상태를 확인한 뒤 다시 시도하십시오.")
     return {"status": "started", "task_id": req.task_id}
 
 @router.post("/{project_id}/sprint/pause")
+@_execution_route()
 async def pause_sprint(project_id: str, req: SprintPauseRequest,
                           p: Principal = Depends(current_principal)):
     _safe_id(project_id, "project_id")
     assert_project_writable(p, project_id)
-    await orchestrator.pause_sprint(req.task_id, project_id)
+    _safe_id(req.task_id, "task_id")
+    if not await orchestrator.pause_sprint(req.task_id, project_id):
+        raise HTTPException(409, "종료를 확인할 실행 중 작업이 없습니다.")
+    _execution_effect()
     return {"status": "paused", "task_id": req.task_id}
 
 @router.post("/{project_id}/sprint/stop")
+@_execution_route()
 async def stop_sprint(project_id: str, req: SprintPauseRequest,
                           p: Principal = Depends(current_principal)):
     _safe_id(project_id, "project_id")
     assert_project_writable(p, project_id)
     # 빈 reason을 전달하여 SUPERVISOR 피드백 큐 삽입 없이 태스크만 강제 종료(Kill)
-    await orchestrator.pause_sprint(req.task_id, project_id, reason="")
+    _safe_id(req.task_id, "task_id")
+    if not await orchestrator.pause_sprint(req.task_id, project_id, reason=""):
+        raise HTTPException(409, "종료를 확인할 실행 중 작업이 없습니다.")
+    _execution_effect()
     return {"status": "stopped", "task_id": req.task_id}
 
-async def _assert_resumable(project_id: str) -> None:
+async def _assert_resumable(project_id: str, p=None, task_id: str = ""):
     """[D-017 §9 P3-4] 멈춰 있는 동안 구성이 바뀌지 않았는가.
 
     ★★ **두 재개 경로가 같은 한 줄을 쓴다.** 한쪽만 걸면 그쪽만 통제되고, 사용자는 막힌 쪽을
       피해 열린 쪽으로 간다 — 이 저장소가 반복해서 확인한 형태다.
     ⚠️ 판정은 `core/resume_guard.check()` 한 곳에 있다. 여기서 조건을 다시 쓰지 않는다."""
     from core import resume_guard
+    from core.studio_project_context import for_principal
+    _studio = await asyncio.to_thread(for_principal, project_id, p,
+        "DRAFT" if task_id.startswith("PLANNING") else "GENERATE")
+    if _studio:
+        from core.enterprise_context.process_schema import ProcessError
+        from api.routes.process_configuration_control import error as _process_error
+        try:
+            checkpoint = await orchestrator.read_reconcile_state(task_id, project_id)
+        except ProcessError as exc:
+            _process_error(exc, getattr(p, "user_id", ""), project_id)
+        fixed_keys = ("runtime_document_version", "process_context", "approved_blueprint_revision_id",
+                      "approved_blueprint_digest", "bootstrap_operation_id")
+        if any(checkpoint.get(k) != _studio[k] for k in fixed_keys):
+            raise HTTPException(status_code=409, detail="체크포인트의 승인 업무 참조가 다릅니다. 초안을 보존하고 프로젝트 상태를 확인하십시오.")
     ws = workspace_path(project_id)
     # ★ [I-4 4c-0] 재개도 같은 문을 지난다. 시작만 막으면 **재개가 열린 쪽**이 되고,
     #   사용자는 막힌 쪽을 피해 그리로 간다 — 바로 위 독스트링이 말하는 형태 그대로다.
@@ -1574,6 +1666,7 @@ async def _assert_resumable(project_id: str) -> None:
         # 409 — 요청은 정당하지만 **지금 상태와 맞지 않는다.** 403(권한)도 400(잘못된 요청)도
         # 아니다. 사용자가 할 일은 「구성을 되돌리거나 새로 가동」이다.
         raise HTTPException(status_code=409, detail=v.reason)
+    return _studio
 
 
 # ══ [I-4 4c-3·4c-4] 계약 검토 전용 결정 경로 ═════════════════════════════
@@ -1604,6 +1697,9 @@ class ContractResolveRequest(BaseModel):
     dataset_key: str = ""
     winner_task_id: str = ""
     rationale: str = ""
+    decision_request_id: str = ""
+    expected_digest: str = ""
+    model_config = {"extra": "forbid"}
 
 
 @router.get("/{project_id}/contract-decisions/pending")
@@ -1619,14 +1715,19 @@ async def contract_decisions_pending(project_id: str,
     _safe_id(project_id, "project_id")
     assert_project_readable(p, project_id)
     from core import contract_decision as _cd
-    from nodes.contract import _wbs_tasks, load_drafts
-
-    ws = f"./projects/{project_id}"
-    items = await asyncio.to_thread(_cd.pending_items, _wbs_tasks(ws), load_drafts(ws))
+    from core.studio_project_context import for_principal
+    studio = await asyncio.to_thread(for_principal, project_id, p, "DRAFT")
+    try:
+        items = await asyncio.to_thread(_cd.pending_for_workspace, workspace_path(project_id),
+                                        require_metadata=bool(studio))
+    except _cd.DecisionRoundError as exc:
+        raise HTTPException(status_code=exc.status_code,
+            detail={"reason_code": exc.reason_code, "message": str(exc)}) from exc
     return {"status": "success", "data": items}
 
 
 @router.post("/{project_id}/contract-decisions/resolve")
+@_contract_command
 async def contract_decisions_resolve(project_id: str, req: ContractResolveRequest,
                                      p: Principal = Depends(current_principal)):
     """사람의 결정을 **초안에 남기고 원장에 기록한다.**
@@ -1642,7 +1743,48 @@ async def contract_decisions_resolve(project_id: str, req: ContractResolveReques
     from core.decision_ledger import decision_ledger
     from nodes.contract import load_drafts, save_draft
 
-    ws = f"./projects/{project_id}"
+    ws = workspace_path(project_id)
+    from core.studio_project_context import for_principal
+    studio = await asyncio.to_thread(for_principal, project_id, p, "DRAFT")
+    managed = await asyncio.to_thread(_cd.has_round_metadata, ws)
+    if studio or managed or req.decision_request_id or req.expected_digest:
+        from dataclasses import replace
+        from core.org_directory import org_directory
+        owner = await asyncio.to_thread(_pv.read_project_ownership, ws)
+        if owner.get("binding_state") == _pv.INVALID or not owner.get("enterprise_scope_id"):
+            raise HTTPException(status_code=409, detail="결정 대상 프로젝트의 소유 문맥을 확인하십시오.")
+        boundary = {key: owner[key] for key in ("tenant_id", "enterprise_scope_id", "entity_mode")}
+        def current_authority():
+            fresh = replace(p, scope=org_directory.resolve_scope(p.user_id, fresh=True))
+            assert_project_writable(fresh, project_id)
+            _require_caps(fresh, PROJECT_RUN, resource="project", action="contract_decisions:resolve")
+            current = for_principal(project_id, fresh, "DRAFT")
+            actual = _pv.read_project_ownership(ws)
+            if current != studio or any(actual.get(key) != value for key, value in boundary.items()):
+                raise HTTPException(status_code=409, detail="결정 검사 중 업무 문맥이 바뀌었습니다.")
+        def append_event(**payload):
+            current_authority()
+            row = decision_ledger.append(**payload, actor_type="user", actor_id=p.user_id, **boundary)
+            try:
+                confirmed = decision_ledger.get_event_strict(row["event_id"])
+                if not confirmed or any(confirmed.get(key) != value for key, value in boundary.items()):
+                    raise ValueError("결정 원장의 서버 문맥을 확인하지 못했습니다.")
+            except Exception as exc:
+                raise _cd.DecisionRoundError("DECISION_ROUND_LEDGER", "기록된 결정의 반영을 확인하지 못했습니다. 다시 결정하지 마십시오.",
+                    503, event_id=row["event_id"], decision_request_id=req.decision_request_id) from exc
+            return confirmed
+        await asyncio.to_thread(current_authority)
+        try:
+            result = await asyncio.to_thread(_cd.resolve_for_workspace, ws,
+                decision_request_id=req.decision_request_id, expected_digest=req.expected_digest,
+                task_id=req.task_id, capability=req.capability, decision=req.decision,
+                dataset_key=req.dataset_key, winner_task_id=req.winner_task_id, rationale=req.rationale,
+                require_metadata=bool(studio), append_event=append_event, before_write=current_authority)
+            return {"status": "success", "data": result}
+        except _cd.DecisionRoundError as exc:
+            raise HTTPException(status_code=exc.status_code, detail={"reason_code": exc.reason_code,
+                "message": str(exc), "event_id": exc.event_id,
+                "decision_request_id": exc.decision_request_id, "draft_applied": False}) from exc
     is_cap = bool((req.capability or "").strip())
     is_ds = bool((req.dataset_key or "").strip())
     if is_cap == is_ds:
@@ -1672,8 +1814,6 @@ async def contract_decisions_resolve(project_id: str, req: ContractResolveReques
             #: ⚠️ 초안에만 적으면 Tech Lead 가 다시 돌 때 통째로 덮이고, 같은 충돌이
             #:   45초마다 되살아난다(실측). `load_drafts` 가 이 기록을 다시 얹는다.
             from nodes.contract import record_dataset_resolution
-            await asyncio.to_thread(record_dataset_resolution, ws,
-                                    req.dataset_key, req.winner_task_id)
             changed, summary = _cd.apply_dataset_resolution(
                 drafts, dataset_key=req.dataset_key, winner_task_id=req.winner_task_id)
             subject_type = _cd.SUBJECT_DATASET
@@ -1684,6 +1824,9 @@ async def contract_decisions_resolve(project_id: str, req: ContractResolveReques
         #   하는지 모른 채 같은 값을 다시 보낸다.
         raise HTTPException(status_code=422, detail=str(e))
 
+    legacy_owner = await asyncio.to_thread(_pv.read_project_ownership, ws)
+    if legacy_owner.get("binding_state") == _pv.INVALID:
+        raise HTTPException(status_code=409, detail="결정 대상 프로젝트의 소유 문맥을 확인하십시오.")
     row = await asyncio.to_thread(
         decision_ledger.append,
         event_type="APP_CONTRACT_DECISION_RECORDED",
@@ -1692,10 +1835,14 @@ async def contract_decisions_resolve(project_id: str, req: ContractResolveReques
         decision=decision_value, rationale=(req.rationale or "").strip() or summary,
         evidence_refs=[f"project:{project_id}"] + [f"task:{t}" for t in sorted(changed)],
         project_id=project_id,
-        tenant_id=getattr(p, "tenant_id", "") or "tenant_default",
-        enterprise_scope_id=getattr(p, "enterprise_scope_id", "") or "")
+        **{key: legacy_owner[key] for key in ("tenant_id", "enterprise_scope_id", "entity_mode")})
 
     applied, failed = [], []
+    if is_ds:
+        try:
+            await asyncio.to_thread(record_dataset_resolution, ws, req.dataset_key, req.winner_task_id)
+        except Exception:
+            failed.append("데이터셋 결정의 지속 기록 반영 실패")
     for tid, draft in sorted(changed.items()):
         try:
             await asyncio.to_thread(save_draft, ws, tid, draft)
@@ -1715,11 +1862,19 @@ async def contract_decisions_resolve(project_id: str, req: ContractResolveReques
                               "다시 결정하지 마시고 재시도만 하십시오: " + " / ".join(failed))}}
 
 
-async def _contract_review_context(project_id: str, task_id: str):
+async def _contract_review_context(project_id: str, task_id: str, *, strict: bool = False):
     """`(게이트 판정, 체크포인트 계약 상태)`. **서버가 파생한다.**"""
     from core import contract_review_gate as _gate
 
-    state = await orchestrator.read_contract_state(task_id, project_id)
+    if strict:
+        from core.enterprise_context.process_schema import ProcessError
+        from api.routes.process_configuration_control import error as _process_error
+        try:
+            state = await orchestrator.read_reconcile_state(task_id, project_id)
+        except ProcessError as exc:
+            _process_error(exc, resource_id=project_id)
+    else:
+        state = await orchestrator.read_contract_state(task_id, project_id)
     # ★★★ [2026-08-26 실측] **그래프 노드와 같은 승인 기억을 본다.**
     #
     # ⚠️⚠️ 종전에는 여기가 **체크포인트만** 봤다. 체크포인트의 단위는 `project__task` 라
@@ -1730,7 +1885,7 @@ async def _contract_review_context(project_id: str, task_id: str):
     # ★ 판정 자체는 `contract_review_gate` 가 한다 — 여기서 다시 계산하지 않는다.
     from nodes.contract import _with_project_approval
 
-    ws = f"./projects/{project_id}"
+    ws = workspace_path(project_id)
     decision = _gate.evaluate_state(await asyncio.to_thread(_with_project_approval, state, ws),
                                     requires_contract=True)
     return decision, state
@@ -1801,6 +1956,7 @@ def _decision_note(state_applied: bool, stamp_note: str) -> str:
 
 
 @router.post("/{project_id}/contract-review/decision")
+@_contract_command
 async def contract_review_decision(project_id: str, req: ContractDecisionRequest,
                                    p: Principal = Depends(current_principal)):
     """계약 검토 승인·반려. **원장을 먼저 기록하고** 상태를 갱신한다."""
@@ -1824,13 +1980,28 @@ async def contract_review_decision(project_id: str, req: ContractDecisionRequest
                    f"{decision.reason}")
 
     approved = verdict == _DECISION_APPROVE
+    _studio_decision = None
+    from core.studio_project_context import for_principal
+    _studio_decision = await asyncio.to_thread(for_principal, project_id, p, "GENERATE" if approved else "DRAFT")
+    # Principal에는 자산의 tenant/scope/mode가 없다. 레거시도 서버 프로젝트에서 읽는다.
+    _decision_owner = _studio_decision or await asyncio.to_thread(_pv.read_project_ownership, workspace_path(project_id))
+    if (_decision_owner.get("binding_state") == _pv.INVALID
+            or not _decision_owner.get("enterprise_scope_id")):
+        raise HTTPException(status_code=409, detail="계약 검토를 기록할 프로젝트 소유 문맥을 확인하십시오.")
+    _decision_boundary = {k: _decision_owner[k] for k in ("tenant_id", "enterprise_scope_id", "entity_mode")}
+    from core.decision_ledger import DecisionLedgerError
+    try:
+        _parent = await asyncio.to_thread(decision_ledger.get_event_strict, req.request_event_id)
+    except DecisionLedgerError as exc:
+        raise HTTPException(status_code=503, detail="계약 검토 원장을 확인하지 못했습니다.") from exc
+    if not _parent or any(_parent.get(k) != v for k, v in _decision_boundary.items()):
+        raise HTTPException(status_code=409, detail="검토 요청의 문맥과 현재 프로젝트가 다릅니다. 기존 사건을 보정하지 않습니다.")
     try:
         row = _gate.record_decision(
             decision_ledger, decision, project_id=project_id,
             request_event_id=req.request_event_id, approved=approved,
             actor_id=p.user_id or "", rationale=req.rationale, task_id=req.task_id,
-            tenant_id=getattr(p, "tenant_id", "") or "tenant_default",
-            enterprise_scope_id=getattr(p, "enterprise_scope_id", "") or "")
+            **_decision_boundary)
     except _gate.ReviewRequestError as e:
         # 이미 결정됐거나 · 남의 요청이거나 · 요청 이후 계약이 바뀌었다 — 전부 409 다.
         raise HTTPException(status_code=409, detail=str(e))
@@ -1853,7 +2024,7 @@ async def contract_review_decision(project_id: str, req: ContractDecisionRequest
     if approved:
         from nodes.contract import stamp_approval as _stamp
         stamp_note = await asyncio.to_thread(
-            _stamp, f"./projects/{project_id}",
+            _stamp, workspace_path(project_id),
             fingerprint=decision.compiled_fingerprint,
             actor_id=p.user_id or "", ledger_event_id=str(row.get("event_id", "")))
         if stamp_note:
@@ -1878,7 +2049,7 @@ async def contract_review_decision(project_id: str, req: ContractDecisionRequest
 async def resume_from_hotl(project_id: str, req: HOTLResumeRequest, p: Principal = Depends(current_principal)):
     assert_project_writable(p, project_id)
     _safe_id(project_id, "project_id")
-    await _assert_resumable(project_id)
+    _studio = await _assert_resumable(project_id, p, req.task_id)
     # ★★★ [4c-4] 계약 검토 대기 중에는 **일반 재개를 막는다.**
     #
     # ⚠️ 이 경로는 빈 피드백을 사실상 승인으로 다룬다. 막지 않으면 계약 승인이
@@ -1887,7 +2058,8 @@ async def resume_from_hotl(project_id: str, req: HOTLResumeRequest, p: Principal
     # ★ 일반 산출물 HOTL 은 그대로 둔다. 계약 검토일 때만 닫는다.
     from core import contract_review_gate as _gate
 
-    _decision, _ = await _contract_review_context(project_id, req.task_id)
+    _decision, _ = (await _contract_review_context(project_id, req.task_id, strict=True) if _studio
+                    else await _contract_review_context(project_id, req.task_id))
     if _decision.verdict == _gate.REVIEW_REQUIRED:
         # ⚠️⚠️ [2026-08-26 사용자 실측] 종전 문구는 사용자에게 **API 경로**를 내밀었다
         #   (`POST /{project_id}/contract-review/decision`). 화면을 쓰는 사람은 그것으로
@@ -1900,22 +2072,31 @@ async def resume_from_hotl(project_id: str, req: HOTLResumeRequest, p: Principal
             detail=("계약 승인이 먼저 필요합니다 — 이 앱이 다룰 데이터와 권한을 사람이 "
                     "확인해야 합니다. 화면의 «계약 승인» 카드에서 승인하거나 반려해 "
                     "주십시오. 그냥 «계속»으로는 지나갈 수 없습니다."))
-    success = await orchestrator.resume_hotl(req.task_id, req.feedback, project_id)
+    from core.enterprise_context.process_schema import ProcessError
+    from api.routes.process_configuration_control import error as _process_error
+    try:
+        success = await orchestrator.resume_hotl(req.task_id, req.feedback, project_id,
+            expected_request_id=req.expected_request_id,
+            expected_questions_digest=req.expected_questions_digest, expected_studio_context=_studio)
+    except ProcessError as exc:
+        _process_error(exc, p.user_id, project_id)
     if not success:
-        raise HTTPException(status_code=500, detail="파이프라인 재가동에 실패했습니다.")
+        raise HTTPException(status_code=409, detail="재개할 수 없는 상태이거나 이미 처리 중입니다. 현재 요청을 확인하십시오.")
     return {"status": "resumed", "task_id": req.task_id}
 
 @router.post("/{project_id}/sprint/resume-quota")
+@_execution_route(quiescent=True)
 async def resume_from_quota(project_id: str, req: SprintPauseRequest, p: Principal = Depends(current_principal)):
     """[R2] 쿼터 회복 후 SUSPENDED_QUOTA 로 동결된 스프린트를 마지막 체크포인트에서 재개.
     '처음부터 재실행'이 아니라 중단 지점부터 이어서 실행한다. 쿼터가 아직도 없으면 재개 스트림이
     다시 쿼터 소진을 만나 자연히 재동결된다(400 반환 조건: 대상이 SUSPENDED_QUOTA 상태가 아님)."""
     assert_project_writable(p, project_id)
     _safe_id(project_id, "project_id")
-    await _assert_resumable(project_id)
+    await _assert_resumable(project_id, p, req.task_id)
     success = await orchestrator.resume_from_suspend(req.task_id, project_id)
     if not success:
         raise HTTPException(status_code=409, detail="쿼터 재개 대상이 아니거나(이미 실행 중/미동결) 재개에 실패했습니다.")
+    _execution_effect()
     return {"status": "resumed", "task_id": req.task_id}
 
 @router.post("/{project_id}/supervisor/chat")
@@ -1964,83 +2145,117 @@ async def supervisor_chat(project_id: str, req: SupervisorChatRequest,
 
 @router.get("/{project_id}/hotl/check")
 async def check_hotl(project_id: str, p: Principal = Depends(current_principal)):
-    """진행 중(IN_PROGRESS) 태스크가 HOTL 중단점에서 대기 중인지 조회 (SSE 이벤트 유실 복구용)."""
+    """대기 없음과 조회 실패를 구별한다. bool 사전조회로 UNKNOWN을 숨기지 않는다."""
     assert_project_readable(p, project_id)
     _safe_id(project_id, "project_id")
+    from core.studio_project_context import for_principal
+    await asyncio.to_thread(for_principal, project_id, p, "READ")
 
-    if await orchestrator.is_hotl_pending("sprint_init", project_id):
-        return {"status": "success", "hotl_task_id": "sprint_init"}
-
-    # 기획(PLANNING_*) 태스크는 WBS 목록에 없으므로 latest_state 의 현재 태스크 id 로도 확인
-    # - 미확인 시 기획 중 SSE 유실되면 UI/자동화가 인터뷰·RFP·WBS 게이트 대기를 영영 감지 못 한다
+    candidates, source_unknown = ["sprint_init"], False
+    def add_candidate(value):
+        if not value:
+            return
+        if not isinstance(value, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,160}", value):
+            raise ValueError("task identity")
+        if value not in candidates:
+            candidates.append(value)
     try:
         with open(workspace_path(project_id, "latest_state.json"), "r", encoding="utf-8") as f:
-            _cur_tid = (json.load(f) or {}).get("current_sprint_task_id") or ""
-        if _cur_tid and _cur_tid != "sprint_init" and await orchestrator.is_hotl_pending(_cur_tid, project_id):
-            return {"status": "success", "hotl_task_id": _cur_tid}
-    except Exception:
+            add_candidate((json.load(f) or {}).get("current_sprint_task_id"))
+    except FileNotFoundError:
         pass
-
-    from nodes.utils.wbs_manager import WBSManager
-    try:
-        wbs = WBSManager(workspace_root=f"./projects/{project_id}").get_wbs()
     except Exception:
-        wbs = {"tasks": []}
-    for t in wbs.get("tasks", []):
-        if t.get("status") == "IN_PROGRESS":
-            tid = t.get("task_id")
-            if await orchestrator.is_hotl_pending(tid, project_id):
-                return {"status": "success", "hotl_task_id": tid}
+        source_unknown = True
+    try:
+        with open(workspace_path(project_id, "00_wbs_master_plan.json"), "r", encoding="utf-8") as f:
+            tasks = (json.load(f) or {}).get("tasks", [])
+        if not isinstance(tasks, list):
+            raise ValueError("task list")
+        for task in tasks:
+            if task.get("status") == "IN_PROGRESS":
+                add_candidate(task.get("task_id"))
+    except FileNotFoundError:
+        pass
+    except Exception:
+        source_unknown = True
+    unknown = None
+    for task_id in candidates:
+        context = await orchestrator.read_hotl_context(task_id, project_id)
+        if context["available"]:
+            return {"status": "success", "hotl_task_id": task_id, "hotl_context": context}
+        if context["status"] == "UNKNOWN":
+            unknown = context
+    if unknown or source_unknown:
+        from core.studio_hotl_context import hotl_context
+        return {"status": "success", "hotl_task_id": None, "hotl_context": unknown or
+                hotl_context(None, project_id=project_id, task_id="sprint_init")}
     return {"status": "success", "hotl_task_id": None}
 
 @router.post("/{project_id}/sprint/revision")
 async def create_revision_task(project_id: str, req: RevisionRequest, p: Principal = Depends(current_principal)):
     assert_project_writable(p, project_id)
     _safe_id(project_id, "project_id")
-    
-    if await orchestrator.is_hotl_pending("sprint_init", project_id):
-        return {"status": "success", "hotl_task_id": "sprint_init"}
-        
-    from nodes.utils.wbs_manager import WBSManager
-    wbs_mgr = WBSManager(workspace_root=f"./projects/{project_id}")
-    task_id = wbs_mgr.add_revision_task(req.feedback)
-    if not task_id:
-        raise HTTPException(status_code=500, detail="WBS를 찾을 수 없습니다.")
-    return {"status": "success", "task_id": task_id}
+    # 기준 산출물·저장 초안·요청 ID 없이 새 WBS task를 만드는 구 접수는 사용하지 않는다.
+    raise HTTPException(409, detail={"reason_code": "REVISION_REQUEST_REQUIRED",
+        "message": "현재 산출물과 저장 초안을 확인하고 /sprint/revision-requests로 제출하십시오."})
 
 @router.post("/{project_id}/heal")
+@_execution_route(quiescent=True)
 async def trigger_self_healing(project_id: str, req: HealRequest, p: Principal = Depends(current_principal)):
     assert_project_writable(p, project_id)
     _safe_id(project_id, "project_id")
+    dispatch = _execution_dispatch()
+    if not dispatch or dispatch["command"]["operation"] != "HEAL":
+        raise HTTPException(409, detail={"reason_code": "EXECUTION_REQUEST_REQUIRED",
+            "message": "원래 요청을 추적할 수 있도록 execution-commands 경로로 복구를 요청하세요."})
+    from core.studio_project_context import for_principal
+    _studio = await asyncio.to_thread(for_principal, project_id, p, "GENERATE")
     
-    if await orchestrator.is_hotl_pending("sprint_init", project_id):
-        return {"status": "success", "hotl_task_id": "sprint_init"}
+    # 원래 실패 작업뿐 아니라 서버의 현재 작업/WBS 실행 중 작업도 확인한다.
+    server_hotl = await check_hotl(project_id, p)
+    if (server_hotl.get("hotl_context") or {}).get("status") == "UNKNOWN":
+        raise HTTPException(503, "현재 프로젝트의 사용자 결정 대기 상태를 확인하지 못해 복구를 보류합니다.")
+    if server_hotl.get("hotl_task_id"):
+        return {"status": "success", "hotl_task_id": server_hotl["hotl_task_id"]}
+    for source_task in [dispatch["command"]["task_id"]]:
+        context = await orchestrator.read_hotl_context(source_task, project_id)
+        if context["status"] == "UNKNOWN":
+            raise HTTPException(503, "사용자 결정 대기 상태를 확인하지 못해 복구를 보류합니다.")
+        if context["available"]:
+            return {"status": "success", "hotl_task_id": source_task}
         
-    from nodes.utils.wbs_manager import WBSManager
-
-    workspace_root = f"./projects/{project_id}"
-    wbs_mgr = WBSManager(workspace_root=workspace_root)
-
-    feedback = f"🚨 [자동 캡처 에러 리포트] UI 렌더링 중 에러 발생:\n{req.error_log}\n해당 에러를 분석하여 코드를 즉시 복원하십시오."
-    task_id = wbs_mgr.add_revision_task(feedback)
+    workspace_root = workspace_path(project_id)
 
     state_path = os.path.join(workspace_root, "latest_state.json")
     project_state_payload = {}
     if os.path.exists(state_path):
         try:
+            from pathlib import Path
+            if Path(state_path).is_symlink() or getattr(Path(state_path), "is_junction", lambda: False)():
+                raise ValueError("연결된 상태 원문")
             with open(state_path, "r", encoding="utf-8") as f:
                 project_state_payload = json.load(f)
-        except:
-            pass
+        except (OSError, ValueError) as exc:
+            raise HTTPException(503, "현재 상태 원문을 확인하지 못해 복구를 보류합니다.") from exc
+    if not isinstance(project_state_payload, dict):
+        raise HTTPException(503, "현재 상태 형식이 손상돼 복구를 보류합니다.")
+    from core.studio_healing_task import append_healing_task
+    _execution_effect()
+    task_id = await asyncio.to_thread(append_healing_task, workspace_root,
+        request_id=dispatch["command"]["client_request_id"],
+        source_task_id=dispatch["command"]["task_id"], error_log=req.error_log)
 
     project_state_payload["build_error_log"] = req.error_log
+    if _studio:
+        project_state_payload.update(_studio)
     project_state_payload["factory_mode"] = "REVISION"
     project_state_payload["current_sprint_task_id"] = task_id
     project_state_payload["workspace_root"] = workspace_root
     project_state_payload["template_id"] = _read_project_template(workspace_root)  # T2-b: 바인딩 템플릿 유지
 
     await _prepare_project_execution_or_conflict(workspace_root, project_state_payload)
-    await orchestrator.start_sprint(task_id, project_state_payload, workspace_root)
+    if not await orchestrator.start_sprint(task_id, project_state_payload, workspace_root):
+        raise HTTPException(status_code=409, detail="진행 중인 작업 또는 계약 복구가 있어 새 복구 실행을 시작하지 않았습니다.")
     return {"status": "healing_started", "task_id": task_id}
 
 @router.post("/{project_id}/wbs/replan")
@@ -2049,7 +2264,9 @@ async def replan_wbs(project_id: str, p: Principal = Depends(current_principal))
     WBS 분할이 실패(빈 태스크)했거나 부실할 때 기획 전체 재가동 없이 복구하는 경로."""
     assert_project_writable(p, project_id)
     _safe_id(project_id, "project_id")
-    workspace_root = f"./projects/{project_id}"
+    from core.studio_project_context import for_principal
+    _studio = await asyncio.to_thread(for_principal, project_id, p, "DRAFT")
+    workspace_root = workspace_path(project_id)
     state_path = os.path.join(workspace_root, "latest_state.json")
     if not os.path.exists(state_path):
         raise HTTPException(status_code=404, detail="프로젝트 상태가 없습니다. 기획부터 가동하세요.")
@@ -2064,6 +2281,8 @@ async def replan_wbs(project_id: str, p: Principal = Depends(current_principal))
     import time as _time
     task_id = f"REPLAN_{int(_time.time() * 1000)}"
     st["current_sprint_task_id"] = task_id
+    if _studio:
+        st.update(_studio)
     st["factory_mode"] = "EXECUTION"  # REPLAN_* 접두사가 라우팅을 결정(기획 산출물 재사용)
     st["needs_revision"] = False
     st["workspace_root"] = workspace_root
@@ -2162,6 +2381,15 @@ async def get_latest_state(project_id: str,
             _, fid, vtype = _read_project_meta(workspace_path(project_id))
             state_data["output_format_id"] = fid
             state_data["view_type"] = vtype
+        # 파일에 캐시한 실행/정지 표시가 아니라 현재 등록부와 고정 체크포인트를 조회한다.
+        task_id = state_data.get("current_sprint_task_id", "")
+        if task_id:
+            _safe_id(task_id, "task_id")
+        task = orchestrator.active_tasks.get(f"{project_id}__{task_id}")
+        state_data["studio_execution_state"] = {
+            "task_id": task_id, "running": bool(task and not task.done()),
+            "pause": await orchestrator.read_pause_state(task_id, project_id) if task_id else
+                {"status": "NOT_PAUSED", "resumable": False, "reason_code": "STUDIO_PAUSE_EVIDENCE_REQUIRED"}}
         return {"status": "success", "data": state_data}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"상태 파일 읽기 오류: {str(e)}")
@@ -2234,13 +2462,15 @@ def _promotion_materializer(release: Dict[str, Any], release_id: str, actor: str
         return None                       # 계약 없는 판은 물질화할 것이 없다
 
     def _run():
+        from core.studio_release_context import materialization_context
+        target = materialization_context(contract, ctx)
         cm.materialize(contract, release_id=release_id, actor_id=actor,
                        store=data_preparation_store,
                        app_data=app_preview.app_data_for(
                            app_preview.AUDIENCE_OPERATIONAL),
-                       tenant_id=str(ctx.get("tenant_id", "") or ""),
-                       scope_node_id=str(ctx.get("scope_node_id", "") or ""),
-                       entity_mode=str(ctx.get("entity_mode", "") or ""))
+                       tenant_id=str(target.get("tenant_id", "") or ""),
+                       scope_node_id=str(target.get("scope_node_id", "") or ""),
+                       entity_mode=str(target.get("entity_mode", "") or ""))
 
     return _run
 
@@ -2276,11 +2506,20 @@ def _release_code_paths(release_id: str, project_id: str = "") -> List[str]:
     return out
 
 
-def _release_readiness_state(release: Dict[str, Any]) -> Any:
+def _release_readiness_state(release: Dict[str, Any], *, actor="", context=None) -> Any:
     """이 릴리스가 읽는 업무 데이터의 준비도. **판정하지 않고 조회만 한다.**
 
     ⚠️ 물질화가 남긴 Kit Instance 를 통해 묻는다. 물질화 기록이 없으면 `None` —
       그리고 `None` 은 「확인하지 못했다」이지 「해당 없음」이 아니다."""
+    if (release.get("runtime_contract") or {}).get("schema_version") == "2.0":
+        from core.studio_release_readiness import release_readiness
+        from core.enterprise_context.process_schema import ProcessError
+        from core.advisor_revision_store import RevisionStoreError
+        from api.routes.process_configuration_control import error as process_error
+        try:
+            return release_readiness(release, actor=actor, context=context)
+        except (ProcessError, RevisionStoreError) as exc:
+            raise process_error(exc) from exc
     mat = release.get("contract_materialization") or {}
     if not isinstance(mat, dict) or mat.get("state") != "MATERIALIZED":
         return None
@@ -2349,7 +2588,7 @@ def _now_iso_utc() -> str:
 
 def _materialize_contract_for_release(project_id: str, release_id: str, *,
                                       actor_id: str, profile: str,
-                                      ctx: Dict[str, Any], plane: Any) -> Dict[str, Any]:
+                                      ctx: Dict[str, Any], plane: Any, sealed_contract: Any = None) -> Dict[str, Any]:
     """[Wave F-0] 승인된 프로젝트 계약을 **이 릴리스의 데이터셋으로 만든다.**
 
     ★★★ [2026-08-27 실측] **어느 평면에 만드는지는 부르는 쪽이 정한다.** 종전에는
@@ -2385,13 +2624,17 @@ def _materialize_contract_for_release(project_id: str, release_id: str, *,
     from nodes.contract import contract_path
 
     canon = contract_path(workspace_path(project_id))
-    if not os.path.exists(canon):
+    if sealed_contract is None and not os.path.exists(canon):
         #: ⚠️ 「계약 프로필이 켜졌는데 계약 파일이 없다」는 정상이 아니다. 조용히
         #:   건너뛰면 그 앱은 데이터 없이 게시되고, 화면은 빈 표를 정상으로 그린다.
         return {"state": "FAILED", "detail": "계약 원문을 찾을 수 없습니다.", "datasets": []}
     try:
-        with open(canon, "r", encoding="utf-8") as f:
-            contract = json.load(f)
+        if sealed_contract is not None:
+            import copy
+            contract = copy.deepcopy(sealed_contract)
+        else:
+            with open(canon, "r", encoding="utf-8") as f:
+                contract = json.load(f)
     except Exception as e:
         return {"state": "FAILED", "detail": f"계약 원문을 읽을 수 없습니다: {e}",
                 "datasets": []}
@@ -2408,12 +2651,14 @@ def _materialize_contract_for_release(project_id: str, release_id: str, *,
                           "물질화하지 않았습니다(생애주기 상태 미기록)."}
 
     try:
+        from core.studio_release_context import materialization_context
+        target = materialization_context(contract, ctx)
         out = cm.materialize(
             contract, release_id=release_id, actor_id=actor_id,
             store=data_preparation_store, app_data=plane,
-            tenant_id=str(ctx.get("tenant_id", "") or ""),
-            scope_node_id=str(ctx.get("scope_node_id", "") or ""),
-            entity_mode=str(ctx.get("entity_mode", "") or ""))
+            tenant_id=str(target.get("tenant_id", "") or ""),
+            scope_node_id=str(target.get("scope_node_id", "") or ""),
+            entity_mode=str(target.get("entity_mode", "") or ""))
     except (cm.MaterializeError, AppDataError) as e:
         return {"state": "FAILED", "detail": str(e)[:400], "datasets": []}
 
@@ -2433,6 +2678,8 @@ async def create_release(project_id: str,
     """완료된 프로젝트의 최종 결과물을 라이브러리에 스냅샷 저장(배포)."""
     _safe_id(project_id, "project_id")  # 경로 이탈 방지 + release_id가 라이브러리 라우트와 왕복 가능하도록 보장
     assert_project_writable(p, project_id)
+    from core.studio_project_context import for_principal
+    _studio_release = await asyncio.to_thread(for_principal, project_id, p, "RELEASE")
     state_path = workspace_path(project_id, "latest_state.json")
     if not os.path.exists(state_path):
         raise HTTPException(status_code=404, detail="저장할 결과물 상태가 없습니다.")
@@ -2474,6 +2721,7 @@ async def create_release(project_id: str,
     created_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     release_id = f"{project_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
     release = {
+        **(_studio_release or {}),
         "release_id": release_id,
         "project_id": project_id,
         "project_name": s.get("project_name", project_id),
@@ -2612,6 +2860,17 @@ async def create_release(project_id: str,
     release["runtime_contract_profile"] = _read_project_runtime_contract_profile(
         workspace_path(project_id))
 
+    if _studio_release:
+        from core.studio_release_context import assert_project_release
+        from core.enterprise_context.process_schema import ProcessError
+        from api.routes.process_configuration_control import error as process_error
+        try:
+            assert_project_release(release, _studio_release)
+        except ProcessError as exc:
+            raise process_error(exc) from exc
+    elif (release.get("runtime_contract") or {}).get("schema_version") == "2.0":
+        raise HTTPException(status_code=409, detail="2.0 계약 게시에는 서버가 승인한 프로젝트 승격 기록이 필요합니다.")
+
     rel_dir = library_paths.release_dir(release_id)
     os.makedirs(rel_dir, exist_ok=True)
     with open(os.path.join(rel_dir, "release.json"), "w", encoding="utf-8") as f:
@@ -2649,7 +2908,8 @@ async def create_release(project_id: str,
     release["contract_materialization"] = _materialize_contract_for_release(
         project_id, release_id, actor_id=(p.user_id or ""),
         profile=str(release.get("runtime_contract_profile", "") or ""),
-        ctx=viewing_context(p), plane=_candidate_plane(release_id))
+        ctx=viewing_context(p), plane=_candidate_plane(release_id),
+        sealed_contract=release.get("runtime_contract") if _studio_release else None)
     #: ⚠️ 결과를 릴리스 파일에 **다시 쓴다** — 「무엇이 만들어졌는가」를 나중에 물을
     #:   수 있어야 한다. 실패했다면 그 사실도 그대로 남는다.
     with open(os.path.join(rel_dir, "release.json"), "w", encoding="utf-8") as f:
@@ -2671,7 +2931,6 @@ async def create_release(project_id: str,
     # 지식 베이스(RAG) 인덱싱 (백그라운드에서 실행되도록 asyncio_task 등록 등 가능하지만 여기서는 간단히 직접 호출)
     try:
         from core.knowledge_base import knowledge_base
-        import asyncio
         
         # 파일 내용을 구성
         files_content = {
@@ -2810,6 +3069,8 @@ async def resimulate(project_id: str, req: ResimulateRequest,
     """시뮬레이션 인자를 변경하여 재실행. 기존 변수 정의를 유지한 채 Validator → 실행 파이프라인만 재가동."""
     _safe_id(project_id, "project_id")
     assert_project_writable(p, project_id)
+    from core.studio_project_context import for_principal
+    _studio = await asyncio.to_thread(for_principal, project_id, p, "GENERATE")
     
     state_path = workspace_path(project_id, "latest_state.json")
     if not os.path.exists(state_path):
@@ -2847,6 +3108,7 @@ async def resimulate(project_id: str, req: ResimulateRequest,
     # 상태 업데이트
     updated_state = {
         **current_state,
+        **(_studio or {}),
         "current_sprint_task_id": resim_task_id,
         "factory_mode": "EXECUTION",  # 설계 단계 건너뛰고 실행
         "sim_cycle_count": cycle_count,
@@ -3616,14 +3878,16 @@ async def promote_release(project_id: str, release_id: str, req: PromoteRequest,
     if str(release.get("project_id", "")) != project_id:
         raise HTTPException(status_code=404, detail="릴리스를 찾을 수 없습니다.")
 
-    readiness_state = (release_promotion.NOT_APPLICABLE if req.no_business_data
-                       else _release_readiness_state(release))
+    _v2 = (release.get("runtime_contract") or {}).get("schema_version") == "2.0"
+    readiness_state = (release_promotion.NOT_APPLICABLE if req.no_business_data and not _v2
+                       else _release_readiness_state(release, actor=p.user_id or "", context=viewing_context(p)))
 
     try:
         out = release_promotion.promote(
             release=release, release_id=release_id, lifecycle=program_lifecycle,
             actor=(p.user_id or ""), code_paths=_release_code_paths(release_id, project_id),
             readiness_state=readiness_state, reason=req.reason,
+            context=viewing_context(p),
             #: ★★★ [F-3] 검사는 **후보가 사는 평면**으로, 물질화는 **운영 평면**에.
             plane=_candidate_plane(release_id),
             on_promote=_promotion_materializer(release, release_id,
@@ -3670,10 +3934,11 @@ async def promotion_check(project_id: str, release_id: str, no_business_data: bo
 
     verdict = release_promotion.run_checks(
         release=release, release_id=release_id, lifecycle=program_lifecycle,
+        actor=p.user_id or "", context=viewing_context(p),
         code_paths=_release_code_paths(release_id, project_id),
         plane=_candidate_plane(release_id),
-        readiness_state=(release_promotion.NOT_APPLICABLE if no_business_data
-                         else _release_readiness_state(release)))
+        readiness_state=(release_promotion.NOT_APPLICABLE if no_business_data and (release.get("runtime_contract") or {}).get("schema_version") != "2.0"
+                         else _release_readiness_state(release, actor=p.user_id or "", context=viewing_context(p))))
     return {"status": "success",
             "data": {"ok": verdict.ok,
                      "checks": [c._asdict() for c in verdict.checks]}}

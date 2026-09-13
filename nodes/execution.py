@@ -490,7 +490,11 @@ def _save_contract_draft(state_obj: Any, output_str: str) -> None:
         print("⚠️ [Tech Lead] 계약 초안이 객체가 아닙니다 — 저장하지 않습니다.")
         return
     try:
-        path = save_draft(ws, tid, draft)
+        # 새 문서의 차수 저장은 서버 state가 선택한다. LLM 초안 내용으로 선택하지 않는다.
+        if getattr(state_obj, "runtime_document_version", "1.0") == "2.0":
+            path = save_draft(ws, tid, draft, require_metadata=True)
+        else:
+            path = save_draft(ws, tid, draft)
         print(f"[OK] [Tech Lead] 계약 초안 저장 — {os.path.relpath(path, ws)} "
               f"(데이터셋 {len(draft.get('datasets') or [])}개)")
     except Exception as e:

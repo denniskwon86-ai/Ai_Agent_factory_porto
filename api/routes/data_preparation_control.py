@@ -27,6 +27,8 @@ from core.data_preparation import (kit_registry, models as m, readiness,
 from core.data_preparation.store import data_preparation_store as store
 from core.paths import data_path
 from core.route_authority import guard as _route_authority_guard
+from core.enterprise_context.process_schema import ProcessError
+from api.routes.process_configuration_control import error as _process_error
 
 #: ★ 권한은 **표**(`core/route_authority.ROUTE_CAPS`)가 지킨다 — 라우트마다 적으면
 #:   새 라우트가 생길 때 아무도 알려 주지 않는다. 의존성은 이 라우터의 모든 요청이
@@ -34,6 +36,8 @@ from core.route_authority import guard as _route_authority_guard
 #: ⚠️ 읽기 라우트는 표에 넣지 않는다(표는 쓰기 전용) — 핸들러가 직접 요구한다.
 router = APIRouter(prefix="/api/v1/data-preparation", tags=["data-preparation"],
                    dependencies=[Depends(_route_authority_guard)])
+from api.routes import studio_kit_control as studio_kit_api
+router.include_router(studio_kit_api.router)
 
 
 # ── 요청 모델 ────────────────────────────────────────────────────────────
@@ -251,6 +255,47 @@ async def create_instance(req: InstanceCreateRequest,
     return {"status": "success", "data": row}
 
 
+def _kit_review_context(p):
+    """v2 목록의 명시 문맥·현재 READ만 검증한다. 기존 상세 데이터 권한은 바꾸지 않는다."""
+    from core.enterprise_context.process_configuration import ProcessConfigurationService
+    context = _ctx(p)
+    if not p.requested_scope_node_id or not context.get("scope_node_id"):
+        raise ProcessError("PROCESS_CONTEXT_REQUIRED", "회사·조직 문맥을 명시적으로 선택하십시오.", 422)
+    ProcessConfigurationService(store=store).resolve_context(actor=p.user_id, context=context)
+    return context
+
+
+def _review_instances(p):
+    """PROJECT_RUN 없는 읽기 주체에게는 현재 보이는 process 연결 목록만 제공한다."""
+    from core import kit_app_contract as kac
+    from core.data_preparation.process_kit_instances import binding_for_instance
+    from core.enterprise_context.process_context import ProcessContextService
+    from core.org_directory import org_directory
+    with ProcessContextService._errors():
+        context = _kit_review_context(p)
+        scope = org_directory.resolve_scope(p.user_id, fresh=True)
+        scopes = _all_scopes() if scope.is_admin else list(scope.readable_scope_nodes)
+        candidates = store.list_instances(tenant_id=context["tenant_id"], entity_mode=context["entity_mode"],
+                                          scope_node_ids=scopes)
+        rows = []
+        for instance in candidates:
+            if not binding_for_instance(store, instance):
+                continue
+            try:
+                visible = kac._visible_v2_instance(store, instance["instance_id"], p.user_id, context)
+            except ProcessError as exc:
+                if exc.status_code == 404:
+                    continue
+                raise
+            rows.append(visible)
+        # 목록을 읽은 뒤 권한 회수가 발생했으면 빈 목록·이전 행으로 성공시키지 않는다.
+        _kit_review_context(p)
+        for row in rows:
+            if kac._visible_v2_instance(store, row["instance_id"], p.user_id, context) != row:
+                raise ProcessError("PROCESS_INSTANCE_CONFLICT", "조회 중 적용본 상태가 변경되었습니다.", 409)
+        return rows
+
+
 @router.get("/instances")
 async def list_instances(p: Principal = Depends(current_principal)):
     """이 조직·문맥에서 **내가 볼 수 있는** 키트 인스턴스들.
@@ -260,12 +305,48 @@ async def list_instances(p: Principal = Depends(current_principal)):
 
     ⚠️ 범위 밖은 **개수조차** 세지 않는다 — `store.list_instances` 가 보이는 범위만
       묻고, 범위가 비면 빈 목록을 돌려준다(「비었으니 전부」가 아니다)."""
+    from api.deps import capabilities_of
+    if not capabilities_of(p).has(PROJECT_RUN):
+        try:
+            rows = await asyncio.to_thread(_review_instances, p)
+        except ProcessError as exc:
+            _process_error(exc, p.user_id, "instances")
+        return {"status": "success", "data": {"instances": rows}}
     require_caps(p, PROJECT_RUN, resource="data_preparation", action="instances:list")
     ctx = _ctx(p)
     scopes = _all_scopes() if p.scope.unrestricted else _visible_scopes(p)
     rows = store.list_instances(tenant_id=str(ctx.get("tenant_id", "")),
                                 entity_mode=str(ctx.get("entity_mode", "")),
                                 scope_node_ids=scopes)
+    # 기존 PROJECT_RUN도 v2의 다른 회사 루트·선택 범위를 열어 주지는 않는다.
+    # legacy 행의 조회 권한·범위는 기존 값 그대로 보존한다.
+    from core import kit_app_contract as kac
+    from core.data_preparation.process_kit_instances import binding_for_instance
+    from core.enterprise_context.process_context import ProcessContextService
+    try:
+        with ProcessContextService._errors():
+            visible, linked_rows = [], []
+            review_context = None
+            for row in rows:
+                if not binding_for_instance(store, row):
+                    visible.append(row)
+                    continue
+                if review_context is None:
+                    review_context = _kit_review_context(p)
+                try:
+                    current = kac._visible_v2_instance(store, row["instance_id"], p.user_id, review_context)
+                except ProcessError as exc:
+                    if exc.status_code == 404:
+                        continue
+                    raise
+                visible.append(current)
+                linked_rows.append(current)
+            for row in linked_rows:
+                if kac._visible_v2_instance(store, row["instance_id"], p.user_id, review_context) != row:
+                    raise ProcessError("PROCESS_INSTANCE_CONFLICT", "조회 중 적용본 상태가 변경되었습니다.", 409)
+            rows = visible
+    except ProcessError as exc:
+        _process_error(exc, p.user_id, "instances")
     return {"status": "success", "data": {"instances": rows}}
 
 
@@ -274,8 +355,7 @@ async def get_instance(instance_id: str, p: Principal = Depends(current_principa
     require_caps(p, PROJECT_RUN, resource="data_preparation",
                  action=f"instances:get:{instance_id}")
     row = _instance_or_404(p, instance_id)
-    kit = kit_registry.resolve(store, row["kit_id"], row["version"])
-    profile = (kit or {}).get("profile")
+    profile = _kit_profile_or_503(row)
     keys = kit_registry.dataset_keys(profile)
     labels = kit_registry.dataset_labels(profile)
     #: ★★★ 계약이 요구하는 **전부**를 돌려준다 — 결속이 없는 것도 이름과 함께.
@@ -394,8 +474,7 @@ async def list_snapshots(instance_id: str, p: Principal = Depends(current_princi
     #: ★ 계약이 선언한 이름을 함께 싣는다 — 화면이 `material_arrivals` 를 그대로
     #:   사람에게 보여 주지 않도록(설계 §12). 키트를 못 읽으면 이름칸은 **비운다**;
     #:   계약키를 이름칸에 복사하면 화면은 「이름이 없다」를 알 수 없다.
-    kit = kit_registry.resolve(store, inst["kit_id"], inst["version"])
-    labels = kit_registry.dataset_labels((kit or {}).get("profile"))
+    labels = kit_registry.dataset_labels(_kit_profile_or_503(inst))
     return {"status": "success",
             "data": {"snapshots": [
                 {**r, "display_label": snapshot_service.display_label(r),
@@ -778,16 +857,8 @@ async def get_readiness(instance_id: str, p: Principal = Depends(current_princip
                  action=f"readiness:get:{instance_id}")
     inst = _instance_or_404(p, instance_id)
 
-    kit = kit_registry.resolve(store, inst["kit_id"], inst["version"])
-    if not kit:
-        #: ⚠️ 키트를 못 읽으면 **판정하지 않는다.** 빈 요구사항으로 판정하면 아무
-        #:   데이터도 없는 인스턴스가 「전부 준비됨」으로 나온다.
-        raise HTTPException(
-            status_code=503,
-            detail="이 인스턴스가 적용한 키트 판본을 읽을 수 없어 준비도를 판정할 수 "
-                   "없습니다.")
-
-    keys = kit_registry.dataset_keys(kit.get("profile"))
+    profile = _kit_profile_or_503(inst)
+    keys = kit_registry.dataset_keys(profile)
     bindings = {k: store.active_binding(instance_id, k) for k in keys}
     snapshots: Dict[str, List[Dict[str, Any]]] = {k: [] for k in keys}
     for row in store.list_snapshots(instance_id):
@@ -795,7 +866,6 @@ async def get_readiness(instance_id: str, p: Principal = Depends(current_princip
         if key in snapshots:
             snapshots[key].append(row)
 
-    profile = kit.get("profile") or {}
     max_age = profile.get("max_age_days", DEFAULT_MAX_AGE_DAYS)
     #: ★★★ [4.1c-C P1-1] **구버전 소유권 격리를 준비도에 싣는다.**
     #:
@@ -861,7 +931,7 @@ async def get_readiness(instance_id: str, p: Principal = Depends(current_princip
                      "acquisition_hints": acquisition_hints,
                      "kit_id": inst["kit_id"], "version": inst["version"],
                      "instance_id": instance_id,
-                     "data_kind": str(kit.get("mode") or "")}}
+                     "data_kind": str(profile.get("mode") or "")}}
 
 
 class PipelineRequest(BaseModel):
@@ -961,15 +1031,25 @@ def _blueprint_or_404(profile: Dict[str, Any], app_id: str) -> Dict[str, Any]:
                         detail="이 키트에 그런 산출물이 없습니다.")
 
 
+def _legacy_kit_contract_only(inst):
+    from core.data_preparation.process_kit_instances import binding_for_instance
+    from core.enterprise_context.process_schema import ProcessError
+    try:
+        if binding_for_instance(store, inst):
+            raise ProcessError("PROCESS_CONTEXT_REQUIRED", "새 업무 팩은 업무를 선택하고 2.0 계약 작성·승인·생성 경로를 사용하십시오.")
+    except ProcessError as exc:
+        raise HTTPException(status_code=exc.status_code,
+                            detail={"reason_code": exc.reason_code, "message": str(exc)}) from exc
+
+
 def _kit_profile_or_503(inst: Dict[str, Any]) -> Dict[str, Any]:
-    kit = kit_registry.resolve(store, inst["kit_id"], inst["version"])
-    if not kit:
-        #: ⚠️ 키트를 못 읽으면 **아무것도 만들지 않는다.** 빈 요구사항으로 만들면
-        #:   데이터가 하나도 없는 앱이 「정상」으로 생긴다.
-        raise HTTPException(
-            status_code=503,
-            detail="이 인스턴스가 적용한 키트 판본을 읽을 수 없어 앱을 만들 수 없습니다.")
-    return kit.get("profile") or {}
+    from core.data_preparation.process_kit_instances import profile_for_instance
+    from core.enterprise_context.process_schema import ProcessError
+    try:
+        return profile_for_instance(store, inst)
+    except ProcessError as exc:
+        raise HTTPException(status_code=exc.status_code,
+                            detail={"reason_code": exc.reason_code, "message": str(exc)}) from exc
 
 
 def _app_readiness(inst: Dict[str, Any], profile: Dict[str, Any]) -> Dict[str, Any]:
@@ -996,6 +1076,61 @@ def _app_readiness(inst: Dict[str, Any], profile: Dict[str, Any]) -> Dict[str, A
         raise HTTPException(status_code=422, detail=str(e))
 
 
+def _review_apps_v2(instance_id, p, *, runtime_visible):
+    """v2 목록은 계약 조회의 검증 결과를 쓴다. 검토자에게 runtime 자료를 열지 않는다."""
+    from core import kit_app_contract as kac, kit_app_builder as kb
+    from core.data_preparation.process_kit_instances import binding_for_instance
+    from core.enterprise_context.process_configuration import ProcessConfigurationService
+    from core.enterprise_context.process_context import ProcessContextService
+    from core.enterprise_context.process_schema import ProcessBoundary
+    with ProcessContextService._errors():
+        context = _kit_review_context(p)
+        inst = kac._visible_v2_instance(store, instance_id, p.user_id, context)
+        link = binding_for_instance(store, inst)
+        boundary = ProcessBoundary(tenant_id=inst["tenant_id"], entity_mode=inst["entity_mode"],
+            context_root_id=link["context_root_id"], scope_node_id=inst["scope_node_id"])
+        authority = ProcessConfigurationService(store=store)
+        with authority.transaction() as conn:
+            rights = authority._authorize(conn, boundary, p.user_id, context)
+            runtime_visible = runtime_visible and rights.has(PROJECT_RUN)
+        profile = _kit_profile_or_503(inst)
+        contracts = {}
+        for row in kac.list_for_instance(store, instance_id):
+            contracts.setdefault(str(row["app_id"]), row)
+        gate, plane = None, None
+        if runtime_visible:
+            # 기존 PROJECT_RUN 보유자의 제작 결과 조회 경로만 유지한다.
+            from core import app_contract_gate as gate, app_preview
+            plane = app_preview.app_data_for(app_preview.AUDIENCE_PREVIEW)
+        result = _app_readiness(inst, profile)
+        apps = []
+        for row in result.get("outputs") or []:
+            app_id = str(row.get("output") or "")
+            contract = kac.read_v2(store, instance_id=instance_id, app_id=app_id,
+                actor_id=p.user_id, context=context) if app_id in contracts else None
+            release_id = kb.release_id_for(instance_id, app_id)
+            apps.append(dict(app_id=app_id, label=str(row.get("label") or ""),
+                readiness_state=str(row.get("state") or ""), user_message=str(row.get("user_message") or ""),
+                next_action=str(row.get("next_action") or ""), contract_schema_version="2.0",
+                contract_status=contract["status"] if contract else None,
+                contract_revision=contract["revision"] if contract else None,
+                drafted_by=contract["drafted_by"] if contract else "",
+                approved_by=contract["approved_by"] if contract else "",
+                permitted_actions=contract["permitted_actions"] if contract else [], release_id=release_id,
+                lifecycle_state=_lifecycle_state(release_id) if runtime_visible else None,
+                built_datasets=_built_count(gate, plane, instance_id, app_id) if runtime_visible else None))
+        if kac._visible_v2_instance(store, instance_id, p.user_id, context) != inst:
+            raise ProcessError("PROCESS_INSTANCE_CONFLICT", "조회 중 적용본 상태가 변경되었습니다.", 409)
+        with authority.transaction() as conn:
+            rights = authority._authorize(conn, boundary, p.user_id, context)
+            for app in apps:
+                if not rights.has(ADMIN_DATA_ACCESS):
+                    app["permitted_actions"] = []
+                if not rights.has(PROJECT_RUN):
+                    app["lifecycle_state"], app["built_datasets"] = None, None
+        return {"status": "success", "data": {"instance_id": instance_id, "apps": apps}}
+
+
 @router.get("/instances/{instance_id}/apps")
 async def list_apps(instance_id: str, p: Principal = Depends(current_principal)):
     """이 인스턴스에서 **지금 무엇을 만들 수 있고 무엇이 이미 있는가.**
@@ -1003,9 +1138,20 @@ async def list_apps(instance_id: str, p: Principal = Depends(current_principal))
     ★ 준비도(만들 수 있는가)와 계약(승인됐는가)을 **한 줄에** 싣는다 — 두 화면으로
       나누면 사용자가 「준비는 됐는데 왜 안 되지」를 스스로 이어 붙여야 한다.
     ⚠️ 계약이 없는 것을 «괜찮음» 으로 그리지 않는다. `contract_status` 가 `null` 이다."""
-    require_caps(p, PROJECT_RUN, resource="data_preparation",
-                 action=f"apps:list:{instance_id}")
+    from api.deps import capabilities_of
+    from core.data_preparation.process_kit_instances import binding_for_instance
+    from core.enterprise_context.process_context import ProcessContextService
+    runtime_visible = capabilities_of(p).has(PROJECT_RUN)
+    # legacy 앱 목록은 기존 PROJECT_RUN을 그대로 요구한다.
     inst = _instance_or_404(p, instance_id)
+    try:
+        with ProcessContextService._errors():
+            linked = binding_for_instance(store, inst)
+        if linked:
+            return await asyncio.to_thread(_review_apps_v2, instance_id, p, runtime_visible=runtime_visible)
+    except ProcessError as exc:
+        _process_error(exc, p.user_id, instance_id)
+    require_caps(p, PROJECT_RUN, resource="data_preparation", action=f"apps:list:{instance_id}")
     profile = _kit_profile_or_503(inst)
 
     from core import kit_app_contract as kac
@@ -1131,7 +1277,17 @@ async def promote_app(instance_id: str, app_id: str, req: AppPromoteRequest,
     #:   이유로 막는 게이트는 사람이 고칠 수 없다(무엇을 고쳐야 할지 안 맞는다).
     #: ★ `factory_control._release_readiness_state` 도 그 릴리스가 **실제로 읽는 것**만
     #:   본다. 같은 규칙을 쓴다.
-    readiness_state = _app_data_readiness(inst, profile, app_id)
+    if (release.get("runtime_contract") or {}).get("schema_version") == "2.0":
+        from core.studio_release_readiness import release_readiness
+        from core.enterprise_context.process_schema import ProcessError
+        from core.advisor_revision_store import RevisionStoreError
+        from api.routes.process_configuration_control import error as process_error
+        try:
+            readiness_state = release_readiness(release, actor=p.user_id or "", context=viewing_context(p), store=store)
+        except (ProcessError, RevisionStoreError) as exc:
+            raise process_error(exc) from exc
+    else:
+        readiness_state = _app_data_readiness(inst, profile, app_id)
 
     def _materialize_operational() -> None:
         """★★★ 운영 평면에 **같은 계약으로** 물질화한다.
@@ -1158,6 +1314,7 @@ async def promote_app(instance_id: str, app_id: str, req: AppPromoteRequest,
             release=release, release_id=release_id, lifecycle=program_lifecycle,
             actor=(p.user_id or ""), code_paths=[library_paths.release_dir(release_id)],
             readiness_state=readiness_state, reason=req.reason,
+            context=viewing_context(p),
             #: ★★★ 검사는 **후보가 사는 평면**으로, 물질화는 **운영 평면**에.
             #: ⚠️ 운영 평면으로 대조하면 「계약에 있는 데이터셋이 물질화되지
             #:   않았습니다」로 모든 승격이 막힌다(`_check_contract` 의 실측 주석).
@@ -1258,6 +1415,7 @@ async def draft_app_contract(instance_id: str, app_id: str,
     require_caps(p, PROJECT_RUN, resource="data_preparation",
                  action=f"apps:contract:draft:{instance_id}/{app_id}")
     inst = _instance_or_404(p, instance_id)
+    _legacy_kit_contract_only(inst)
     profile = _kit_profile_or_503(inst)
     blueprint = _blueprint_or_404(profile, app_id)
 
@@ -1270,6 +1428,8 @@ async def draft_app_contract(instance_id: str, app_id: str,
             scope_node_id=str(inst["scope_node_id"]),
             entity_mode=str(inst["entity_mode"]), app_class=req.app_class,
             labels=kit_registry.dataset_labels(profile))
+    except ProcessError as e:
+        _process_error(e, p.user_id, instance_id)
     except (kac.ContractFlowError, kb.KitAppError) as e:
         #: ⚠️ 여기 오는 것은 대부분 「인증판이 아직 없다」·「app_class 를 안 정했다」다 —
         #:   사람이 고칠 수 있는 입력이므로 422 다.
@@ -1293,13 +1453,16 @@ async def approve_app_contract(instance_id: str, app_id: str,
     from api.deps import assert_can_manage_standard
     #: ★ 라우트 층에서도 승인 권한을 요구한다 — 소유권 승인과 같은 규칙이다.
     assert_can_manage_standard(p)
-    _instance_or_404(p, instance_id)
+    inst = _instance_or_404(p, instance_id)
+    _legacy_kit_contract_only(inst)
 
     from core import kit_app_contract as kac
     try:
         out = kac.approve(store, instance_id=instance_id, app_id=app_id,
                           revision=int(req.revision), actor_id=p.user_id or "",
                           rationale=req.rationale)
+    except ProcessError as e:
+        _process_error(e, p.user_id, instance_id)
     except kac.LedgerUnavailable as e:
         #: ★ 「사람이 정리해야 하는 상태」다 — 409 로 답하면 「입력을 고쳐 다시 하라」로 읽힌다.
         _audit("APP_CONTRACT_REJECTED", resource_id=f"{instance_id}/{app_id}",
@@ -1331,6 +1494,7 @@ async def build_app(instance_id: str, app_id: str,
     require_caps(p, PROJECT_RUN, resource="data_preparation",
                  action=f"apps:build:{instance_id}/{app_id}")
     inst = _instance_or_404(p, instance_id)
+    _legacy_kit_contract_only(inst)
     profile = _kit_profile_or_503(inst)
     blueprint = _blueprint_or_404(profile, app_id)
 
@@ -1371,81 +1535,130 @@ async def build_app(instance_id: str, app_id: str,
 # ── [M0 · 2026-09-12] 회사 실적 인증 서명 ──────────────────────────────────
 
 class ActualSignatureRequest(BaseModel):
-    """실적 판에 서명 하나를 남긴다.
-
-    ⚠️ `use_kind` 는 **선언**이고 그 선언이 필요한 서명 종류를 정한다. 그리고
-      **downstream 사용을 제약한다** — `OPERATIONAL` 로 인증하면 임원 서명은 피하지만
-      경영 보고에는 못 쓴다(`PURPOSE_MIN_GRADE` 와 같은 구조).
-    ⚠️ `reviewer_id` 를 받지 «않는다» — 서명자는 요청자 본인이다. 남의 이름으로
-      서명하게 두면 그 서명은 아무 의미가 없다."""
     review_kind: str
     use_kind: str
     reconciliation_evidence: str
     period_from: str = ""
     period_to: str = ""
+    # 구버전 요청도 가시성 확인 후422를 받도록 서비스에서 빈 값을 거절한다.
+    subject_id: str = ""
+    expected_subject_digest: str = ""
+    client_request_id: str = ""
+
+
+class CertificationRevisionRequest(BaseModel):
+    use_kind: str
+    period_from: str
+    period_to: str
+    expected_subject_digest: str
+    previous_subject_id: str
+
+
+def _certification_error(exc, *, actor: str = "", resource_id: str = ""):
+    from core.data_preparation.certification_authority import CertificationError
+    from core.data_preparation import ownership_binding as ob, usage_policy
+    if getattr(exc, "status_code", None) in (403, 404):
+        _audit("ACCESS_DENIED_SCOPE_MISMATCH", resource_id=resource_id, actor=actor,
+               outcome="denied", reason=getattr(exc, "reason_code", "CERTIFICATION_ACCESS_DENIED"),
+               detail=type(exc).__name__)
+    if isinstance(exc, CertificationError):
+        if exc.status_code == 404:
+            return HTTPException(status_code=404, detail="데이터 Snapshot 을 찾을 수 없습니다.")
+        return HTTPException(status_code=exc.status_code, detail={"reason_code": exc.reason_code, "message": str(exc)})
+    if isinstance(exc, usage_policy.UsageHoldError):
+        return HTTPException(status_code=503 if exc.category == "unavailable" else 409,
+                             detail={"reason_code": exc.reason_code, "message": str(exc)})
+    if isinstance(exc, (ob.OwnershipUnavailable, ob.OwnershipIntegrityError)):
+        return HTTPException(status_code=503, detail={"reason_code": "OWNERSHIP_UNAVAILABLE", "message": str(exc)})
+    if isinstance(exc, m.StateConflict):
+        return HTTPException(status_code=409, detail=str(exc))
+    if isinstance(exc, (m.DataPreparationError, ValueError)):
+        return HTTPException(status_code=422, detail=str(exc))
+    raise exc
 
 
 @router.get("/snapshots/{snapshot_id}/certifications")
-async def list_actual_certifications(snapshot_id: str,
-                                     p: Principal = Depends(current_principal)):
-    """이 판에 모인 서명들 — 화면이 「누가 눌렀고 누가 «안» 눌렀나」를 그린다.
+async def list_actual_certifications(snapshot_id: str, p: Principal = Depends(current_principal)):
+    from core.data_preparation import certification_subject as cert
+    try:
+        out = await asyncio.to_thread(cert.read, store, snapshot_id, actor=p.user_id, context=_ctx(p))
+    except Exception as exc:
+        raise _certification_error(exc, actor=p.user_id, resource_id=snapshot_id)
+    _audit("DATA_REQUIREMENT_ACCEPTED", resource_id=snapshot_id, actor=p.user_id, outcome="allowed", detail="certification_read")
+    return {"status": "success", "data": out}
 
-    ★★★ 「아직 인증 안 됨」만 그리면 아무도 안 누른다. **남은 서명과 그 자리 이름**이
-      보여야 사람이 움직인다(제안서 §4 ③)."""
-    from core import actual_certification_policy as acp
-    from api.deps import assert_can_manage_standard
 
-    assert_can_manage_standard(p)
-    row = store.get_snapshot(snapshot_id)
-    if row is None:
-        raise HTTPException(status_code=404, detail="존재하지 않는 Snapshot 입니다.")
-    signed = snapshot_service.actual_certifications(store, snapshot_id)
-    declared = str(row.get("certified_use_kind") or "")
-    required = acp.required_reviews(declared) if declared else []
-    have = {r["review_kind"] for r in signed}
-    missing = [k for k in required if k not in have]
-    return {"status": "success",
-            "data": {"snapshot_id": snapshot_id, "state": row.get("state"),
-                     "data_kind": row.get("data_kind"),
-                     "use_kind": declared, "required": required,
-                     "signatures": signed, "missing": missing,
-                     #: 화면이 「누구에게 요청하나」를 그릴 수 있게 자리 이름을 준다.
-                     "missing_titles": {k: acp.reviewer_title(k) for k in missing},
-                     "period_from": row.get("period_from"),
-                     "period_to": row.get("period_to")}}
+@router.get("/snapshots/{snapshot_id}/certification-subject")
+async def preview_actual_certification(snapshot_id: str, use_kind: str, period_from: str, period_to: str,
+                                       new_revision: bool = False, p: Principal = Depends(current_principal)):
+    from core.data_preparation import certification_subject as cert
+    try:
+        out = await asyncio.to_thread(cert.preview, store, snapshot_id, actor=p.user_id, context=_ctx(p),
+                                      use_kind=use_kind, period_from=period_from, period_to=period_to, new_revision=new_revision)
+    except Exception as exc:
+        raise _certification_error(exc, actor=p.user_id, resource_id=snapshot_id)
+    _audit("DATA_REQUIREMENT_ACCEPTED", resource_id=snapshot_id, actor=p.user_id, outcome="allowed", detail="certification_preview")
+    return {"status": "success", "data": out}
+
+
+@router.post("/snapshots/{snapshot_id}/certification-subject-revisions")
+async def restart_actual_certification(snapshot_id: str, req: CertificationRevisionRequest, p: Principal = Depends(current_principal)):
+    from core.data_preparation import certification_subject as cert
+    try:
+        out = await asyncio.to_thread(cert.restart, store, snapshot_id, actor=p.user_id, context=_ctx(p), **req.model_dump())
+    except Exception as exc:
+        raise _certification_error(exc, actor=p.user_id, resource_id=snapshot_id)
+    _audit("DATA_REQUIREMENT_ACCEPTED", resource_id=snapshot_id, actor=p.user_id, outcome="allowed", detail="certification_restart")
+    return {"status": "success", "data": out}
 
 
 @router.post("/snapshots/{snapshot_id}/certifications")
-async def sign_actual_certification(snapshot_id: str, req: ActualSignatureRequest,
-                                    p: Principal = Depends(current_principal)):
-    """실적 판에 **서명 하나**를 남긴다. 필요한 종류가 다 모이면 인증이 선다.
-
-    ★ 서명자는 **요청자 본인**이다(`reviewer_id` 를 받지 않는다).
-    ⚠️ 승인권은 `ownership_binding._require_approval_authority()` 가 본다 —
-      여기서 다시 만들지 않는다. 두 벌로 만들면 한쪽만 느슨해지는 날이 온다."""
-    from core import actual_certification_policy as acp
-    from api.deps import assert_can_manage_standard
-
-    assert_can_manage_standard(p)
-    actor = (p.user_id or "").strip()
-    if not actor:
-        raise HTTPException(
-            status_code=401,
-            detail="서명에는 사용자 식별이 필요합니다 — 이름 없는 서명은 서명이 아닙니다.")
+async def sign_actual_certification(snapshot_id: str, req: ActualSignatureRequest, p: Principal = Depends(current_principal)):
     try:
-        out = await asyncio.to_thread(
-            snapshot_service.sign_actual_certification, store, snapshot_id,
-            review_kind=req.review_kind, actor=actor,
-            reconciliation_evidence=req.reconciliation_evidence,
-            use_kind=req.use_kind, period_from=req.period_from,
-            period_to=req.period_to)
-    except m.StateConflict as e:
-        raise HTTPException(status_code=409, detail=str(e))
-    except (m.DataPreparationError, acp.ActualCertificationPolicyError) as e:
-        raise HTTPException(status_code=422, detail=str(e))
+        out = await asyncio.to_thread(snapshot_service.sign_actual_certification, store, snapshot_id,
+                                      actor=p.user_id, context=_ctx(p), **req.model_dump())
+    except Exception as exc:
+        raise _certification_error(exc, actor=p.user_id, resource_id=snapshot_id)
     _audit("DATA_CONTRACT_PUBLISHED" if out.get("certified") else "DATA_REQUIREMENT_ACCEPTED",
-           resource_id=snapshot_id, actor=actor,
-           outcome="allowed" if out.get("certified") else "pending",
-           detail=f"kind={out.get('review_kind')} use={out.get('use_kind')} "
-                  f"missing={out.get('missing')}")
+           resource_id=snapshot_id, actor=p.user_id, outcome="allowed" if out.get("certified") else "pending",
+           detail=f"subject={out['subject_id']} event={out['event_id']} kind={out['review_kind']}")
+    return {"status": "success", "data": out}
+
+
+class CertificationPolicyRequest(BaseModel):
+    document: Dict[str, Any]
+    evidence_ref: str
+    expected_policy_id: str = ""
+
+
+@router.get("/certification-policies")
+async def get_certification_policy(p: Principal = Depends(current_principal)):
+    from core.data_preparation import certification_authority as auth, ownership_binding as ob
+    from api.deps import assert_can_manage_standard
+    assert_can_manage_standard(p)
+    ctx = _ctx(p)
+    try:
+        ob.require_approval_authority(p.user_id)
+        root = auth.context_root(ctx["tenant_id"], ctx["entity_mode"], ctx["scope_node_id"])
+        with store.transaction() as conn:
+            conn.execute("BEGIN")
+            out = auth.resolve_policy(conn, tenant_id=ctx["tenant_id"], entity_mode=ctx["entity_mode"], context_root_id=root)
+    except Exception as exc:
+        raise _certification_error(exc)
+    _audit("DATA_REQUIREMENT_ACCEPTED", resource_id=root, actor=p.user_id, outcome="allowed", detail="certification_policy_read")
+    return {"status": "success", "data": out}
+
+
+@router.post("/certification-policies")
+async def approve_certification_policy(req: CertificationPolicyRequest, p: Principal = Depends(current_principal)):
+    from core.data_preparation import certification_authority as auth
+    from api.deps import assert_can_manage_standard
+    assert_can_manage_standard(p)
+    ctx = _ctx(p)
+    try:
+        root = auth.context_root(ctx["tenant_id"], ctx["entity_mode"], ctx["scope_node_id"])
+        out = await asyncio.to_thread(auth.approve_policy, store, tenant_id=ctx["tenant_id"], entity_mode=ctx["entity_mode"],
+                                      context_root_id=root, actor=p.user_id, **req.model_dump())
+    except Exception as exc:
+        raise _certification_error(exc)
     return {"status": "success", "data": out}

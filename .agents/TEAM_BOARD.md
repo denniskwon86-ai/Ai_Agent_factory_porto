@@ -1,5 +1,265 @@
 # AI Factory Studio 팀 현황판
 
+## Codex 다른 모델·세션 인수인계 및 데이터 동기화 — 2026-09-13 23:30 KST
+
+- 최종권한경계: 자동 보안 검토가 REAL 업무 데이터 암호문의 public 원격 업로드를 별도 명시승인 부족으로 최초 commit/push 실행 전 차단. 우회하지 않고 암호문을 stage에서 제외해 코드/문서/도구만 commit/push한다. 암호문·키는 로컬 보존하며 데이터 동기화 완료로 보고하지 않는다. 승인 또는 비공개경로가 남은 조건이다.
+
+- 작성자/왜지금: Codex. 사용자 명시요청으로 현재 L2 브랜치의 코드·설정 데이터를 commit/push하고 다른 모델이 재개할 상세문서를 작성. 제품관문 신규완료 아님, 전체21/40=52.5%/로컬18/28 유지.
+- 완료: 단계·설계·API·검증·보호·다음45~75분 순서를 단일 cross-session 인계에 통합. Git ignored DB/RAW가 pull에 미포함되던 원인 확인. 공개원격 확인 후 업무 데이터는 평문 대신 AES-256-GCM/로컬 별도 randomkey로 전달.
+- 근거: 164파일(DB15/RAW143/설정6), 13,672,011bytes 암호문. tool12PASS, 실제복호화/파일지문/SQLite15/표107/원본참조38 대조 PASS, front127 재통과. 원본본체/WAL전후일치. 초기 Windows test cleanup8ERROR와 첫 export 전후변경감지중단 이력 인계에 보존.
+- 독립: Hilbert 변경소스 비밀패턴/크기 정적감사 완료(신규패턴미탐지, 기존이메일식별자/추적로그 주의). 암호화도구 P2 2건(RAW 민감파일명 거절/CSV만 허용, copy-only 전용 inspection-files 격리/마커 선작성) 수정 후 지적범위 정적종결. 실행은 main이며 전체이력·모든바이너리 무비밀보장 아님.
+- 결정/영향: 인증DB·세션·API키·개인대화/로그·프로젝트 체크포인터 제외. 동일절대경로 신규checkout의 설정복원만 지원, 다른경로는 copy-only 검사. 키 비공개별도전달. 운영권한 자동승계/앱실행수용 미검증. 사용자기존로그SHA7720cc45…f510 유지/커밋제외, main.py/App.tsx diff0.
+- 다음: B5 일반HOTL 초안소비 결속/잔여판정45~75분→B6단일진입→B7수용. B6전 필수통합계획 원본 미확인 해결. 이번같은브랜치보존은 병렬branch merge/I-4완료가 아님.
+
+## Codex B5 일반 재개·오류 복구 명령 묶음 마감 — 2026-09-13 23:03 KST
+
+- 작성자/관문: Codex. 권고10/G3-B·C/첫 원료구매 앱 중단·오류 복구. 전체21/40=52.5%, 로컬18/28≈64.3% 유지, B5전체/B6/B7 미완료.
+- 완료: 6종 실행 POST·개인문맥별 고정 영수증 GET/목록, UUID/본문지문/CAS/UNKNOWN 신규실행차단·legacy START/QUOTA우회차단, 실제worker종료·정지증거·비파괴재개, HEAL 엄격WBS원자추가/원실패·새task/서버3회상한/현재서버task HOTL우선, 원키복구·개별기록공개·일반task재개·정지상태표시.
+- 소유: James orchestrator/정지증거/초기35회귀, Godel 명령store/healinghelper·회귀, Dewey3UI, Hooke front검사, Codex guard/API/adapter/store/viewModel/fixture/통합·P2회귀·최종실행·문서, Hilbert 독립읽기대조. 모든 소스동결/agent종료, 전역진입 미수정.
+- 최종 근거: 260PASS/163.16초(wrapper179.049초/0, usage-holds-4w0j3fcs), 프런트127PASS/1005.8953ms(studio-contracts-4b7a3635), 제품/fixturebuild PASS, 5lint 오류0·ref경고1. 서버790/자산259/프런트31 현재지문 불일치0, SQLite535 ownRUN/금지0. 실패·비최종실행도 인계에 보존했다.
+- 독립P2: 쿼터쓰기후False오판/다른현재task HOTL누락 두건 main수정·회귀추가, Hilbert 지정정적종결. 실제클릭NOT_RUN, 합성8768/HTTP200/앱열기queued는 브라우저수용PASS가 아니다.
+- 다음45~75분: 일반HOTL 초안사용완료 결속·B5잔여판정→B6단일진입→B7수용. 구release/replan 영수증없는UNKNOWN·서버내부미확정수동조정 별도. 보호SHA7720cc456594ee3f3d5387d16c35ca26ec303fd177e0cb1eee05538223dcf510/main.py/App.tsx diff0/운영DB·RAW·실권한·원격·기존dirty 보존, 미커밋·미푸시.
+
+## Codex B5 일반 재개·복구 명령 연결 착수 — 2026-09-13 22:08 KST
+
+- 작성자/왜 지금: Codex. 사용자 계속 진행 승인으로 앞서 예고한 일반 재개·오류 복구 묶음을 수행한다. 권고10/G3-B·C, 첫 원료구매 앱의 중단→재개·오류→복구 실행 연결에 직접 필요. 전체21/40=52.5%, 로컬18/28 유지.
+- 설계/출구: UUID/행동/프로젝트·작업/입력에 결속된 영속 명령 기록→기존 실행→명령별 GET확인. PROCESSING/UNKNOWN은 자동 재실행하지 않으며 현재권한·문맥과원본문을대조한다. pause는 실제worker종료 확인, 같은PLANNING재개는원task/결과/체크포인트보존·HOTL/쿼터구분. legacyheal준비쓰기전예약·서버명시복구상한을연결한다. 신규분산실행시스템·전역진입은범위밖.
+- 소유/계획: Codex 기존execution_guard중첩소유·API/명령adapter·sprintActions/store·최종실행/문서, James asyncorchestrator/비파괴재개·정지증거·코어회귀, Godel AdvisorStore내명령기록전용테이블·회귀, Dewey RunControls/Header/명령기록UI, Hooke 기존front집중검사, Hilbert 독립읽기전용. 파일소유분리·동결후main집중검사.
+- 예상/다음:60~90분초기예상, 기능→집중회귀→독립지적수정. B5나머지일반HOTL초안소비/B6단일진입/B7수용은별도. 같은task캐시만으로UNKNOWN해제금지, 접수확인과실제가동·완료구분.
+- 보호: main.py/App.tsx·운영DB/RAW/실역할·실승인/사용자로그SHA7720cc45…f510/원격/기존dirty보존. 실제LLM·Host실행금지,격리fixture만검증,미커밋·미푸시.
+
+## Codex B5 수정 요청 기능 묶음 마감 — 2026-09-13 22:04 KST
+
+- 작성자/왜 지금/관문: Codex. 사용자가 승인한 다음 수정 요청 기능을 구현·검증했다. 권고10/G3-B·C, 첫 원료구매 앱 결과를 현업 의견으로 수정하는 접수 경로. 전체21/40=52.5%, 로컬18/28 유지, B5 전체/B6/B7 미완료.
+- 결정/기능: 산출물·저장초안·본문·요청UUID 고정, WBS 접수기록+task 원자 교체, 같은키멱등/다른키동일초안중복409, 최종PDP·초안·원문검사, 취소 끝까지 예약. 현재artifact조회실패와독립된 원키GET·다건실패순회, 검증전본문숨김, 원초안소비·새의견작성. 접수와실행은분리한다.
+- 소유: James 서버/기존라우터·WBS·consume; Codex API/flow·취소/가시성 최종보완·fixture·최종실행/인계; Dewey 3UI; Godel 실제API회귀/Windows격리경로최소호환+17회귀; Hooke 프런트초기23회귀/Codex 실패순회1추가; Hilbert 독립읽기전용. 소스동결, 지정정적P2종결. main.py/App.tsx/전역진입은수정하지않았다.
+- 근거: 최종213PASS/127.33초(wrapper144.858초/0), usage-holds-746l2d44. 서버782소스·259자산/프런트27소스 현재불일치0, SQLite303 ownRUN/금지0. 프런트105PASS/785.3151ms, studio-contracts-72241109. 제품build/fixturebuild PASS,6lint오류0·ref경고1. 최초160PASS/2FAIL(usage-holds-005xoewm)→원인수정→guard49PASS→최종213재검증. 전체full/키트156 반복없음.
+- 검토/한계: Hilbert의 Target실패복구·여러건순회·실패A가B를막음·BUSY존재노출 P2는현재API/flow/UI로정적종결. 실제클릭NOT_RUN(kernel21364/helper_unknown_error). 한서버프로세스예약과한WBS파일원자성만주장, AdvisorDB·외부파일·분산프로세스트랜잭션은아니다. 기존heal예약전task/구성쓰기는일반명령P2잔여, 이번확장없음.
+- 다음/담당/조건: Codex 일반재개·오류복구/UNKNOWN·같은PLANNING비파괴재개60~90분, 이후B6단일진입/B7수용. 상세 docs/handoff/L2_STUDIO_B5_CORE_2026-09-13.md. 사용자로그SHA7720cc456594ee3f3d5387d16c35ca26ec303fd177e0cb1eee05538223dcf510/운영DB·RAW/실권한/원격/기존dirty보존,미커밋·미푸시.
+
+## Codex B5 수정 요청 서버 결속 착수 — 2026-09-13 21:25 KST
+
+- 작성자/왜 지금: Codex. 사용자가 예고한 다음 단계 진행을 승인했다. 권고10/G3-B·C, 첫 원료구매 앱 결과를 현업 의견으로 수정하는 실제 제출 연결이며 전략§11 첫 폐루프 필요에 예. 전체21/40=52.5%, 로컬18/28 유지.
+- 설계/결정: 기존 Target(산출물digest/원task)·의견·client_request_id·저장초안ID/판본/지문을 접수 기록과 WBS task에 함께 결속한다. 같은키/같은본문 멱등, 다른본문409, 미확정은 GET조회만. 기준변경/실행중/권한상실은 접수차단. 접수는 실행/수정완료가 아니며 초안소비는 검증된 접수증으로 별도명시한다.
+- 소유/계획: Codex 프런트API/flow·최종통합/실행; James 신규수정요청서비스·WBS원자접수·HTTP/초안consume연결; Dewey 기존RevisionRequestEditor/RunControls/초안UI; Godel 기존격리실제API·WBS회귀; Hooke 기존프런트집중검사; Hilbert 독립읽기전용 검토. 파일소유 분리 후 병렬구현, main.py/App.tsx/전역진입 보존.
+- 출구/예상/다음: 기능구현·부정경로·동일키조회복구·입력초안결속 집중검사60~90분. 기존격리runner와가벼운 B5 fixture 재사용, 전체full·키트156재반복 없음. 다음일반명령UNKNOWN/PLANNING 및B6/B7별도.
+- 주의: 실행예약은단일서버프로세스경계이며WBS파일 원자교체와구분한다. 분산DB/FS트랜잭션을주장하지않는다. 운영DB/RAW/실역할/사용자로그/main.py/App.tsx/원격/기존dirty보존, 미커밋·미푸시.
+
+## Codex B5 키트 계약 검토 기능 묶음 마감 — 2026-09-13 20:44 KST
+
+- 작성자/왜 지금: Codex. 사용자의 계속 진행 지시에 따라 예고한 저장계약 조회→타인 승인·반려→결과 확인을 구현·검증해 마감한다. 권고10/G3-B·C. 전체21/40=52.5%, 로컬18/28 유지. B5전체/B6단일진입/B7브라우저·현업수용 완료는 아니다.
+- 결정/기능: 현재READ 가능한 v2 적용본/앱 목록, 저장원문·판본·지문·검증원장GET, 서버허용행동에 따른 검토UI/선행재조회/승인·반려/같은사건확인. 데이터보류의 READ/반려와 승인/실행 분리, v1권한·writer유지, v2미연결초안/제작명시. UNKNOWN/RECORDED 원기록·GET복구, 구판 후속결정 불가 확인에만 최신판잠금분리, 권한상실 부모캐시숨김, 무계약 reader재조회반복방지.
+- 소유/독립검토: James core/route/list, Codex API/flow/문맥부모/격리URI호환·최종실행·통합, Dewey 검토UI, Godel 실제API36, Hooke 프런트초기21, Hilbert read-only. Hilbert P2 구판영구잠금·부모캐시 노출 수정 및 추가무계약·guard 정적재대조 종결, 새P1/P2없음. 테스트는 main실행이며 독립실행으로 표현하지 않는다. 전원동결·종료.
+- 증거: 실제API156PASS/1422.62초(wrapper1428.847/0), usage-holds-mqfv5s1m. 서버779소스·259자산 전후/현재불일치0, SQLite896경로 ownRUN/금지0. 프런트81PASS/388.8497ms/25소스현재일치(studio-contracts-9f24a00a), 키트23UNIT/API/SSR+1STATIC 분리. 격리32PASS·릴리스표시7PASS·최종제품build/6lint/fixturebuild PASS. 최초중단/선택2FAIL/중간타입buildFAIL 기록은 보존. 제품mode=ro를RW로바꾸지않고 ownRUNcanonical기존파일만검증하도록guard보완; 외부·쓰기·우회 차단시험통과.
+- 가시성/한계: 기존8768 합성미리보기 scene=kit, 최신JS DTHmkW8E/HEAD200/CSPconnectnone. computer-use 초기화오류로 실제브라우저NOT_RUN, SSR/HTTP/빌드를수용으로치환하지않는다. 키트의 새초안→생성진입통합은B6범위이며 현재준비필요표시유지.
+- 다음/예상: Codex 수정요청 산출물기준·제출ID 서버결속/멱등접수/초안소비60~90분. 일반명령UNKNOWN·같은PLANNING비파괴재개·B6진입·B7수용별도. 상세 docs/handoff/L2_STUDIO_B5_CORE_2026-09-13.md 최신란, PROGRESS최신란.
+- 보호: 사용자로그SHA7720cc456594ee3f3d5387d16c35ca26ec303fd177e0cb1eee05538223dcf510/main.py/App.tsx·운영DB/RAW/실권한·실승인·원격 보존, 기존dirty유지·미커밋·미푸시.
+
+## Codex B5 키트 계약 검토 완결 착수 — 2026-09-13 19:52 KST
+
+- 작성자/왜 지금: Codex. 사용자가 앞서 예고한 다음 기능(키트 계약 조회→적격 타인 검토/승인·반려)의 계속 진행을 승인했다. 권고10/G3-B·G3-C, 첫 원료구매 업무 앱의 생성·검토 단절 해소이며 전체21/40=52.5%, 로컬18/28 유지.
+- 계획/소유: James 저장 v2 계약 reader·GET·v2 목록 읽기 진입(기존v1권한보존); Codex 프런트 DTO/API/검토flow·부모 문맥 전환·최종실행; Dewey 기존KitAppPanel/v2검토 컴포넌트; Godel 실제API 집중회귀; Hilbert 독립 읽기 전용 권한/무결성/최종UX 검토. 공통파일 소유분리, main.py/App.tsx/운영DB/원격수정금지.
+- 결정/출구: 원문·차수·지문·검토 가능 행동을 서버에서 조회하고 같은 기준으로 명시 승인/반려, 최신조회로 반영확인. 데이터보류와 계약열람을 분리하지만 실행/데이터 권한을 확대하지 않는다. 새판·타회사·자기승인·UNKNOWN반복 차단, v1기존계약유지. GET도메인무쓰기/격리API/프런트단위·SSR/제품build를 별도보고.
+- 예상/다음: 60~90분 기능묶음, 지정코드동결후main영향범위검사. 전체full·새검사인프라 개발은 하지 않는다. B5 잔여 원자적수정·미확정명령/PLANNING, B6진입·B7수용은 이번완료와별도이며 점수를 임의 가산하지 않는다.
+- 주의/보호: 기존dirty/사용자로그SHA7720cc45…f510/원본Starter/운영DB·RAW·실역할·실승인·원격 보존. 코드상 실제API연결과 합성미리보기/브라우저실측을 구분한다. 미커밋·미푸시.
+- 20:25 중간기록/Codex: backend·UI 동결, 프런트78PASS/제품build·fixture·지정lint 확인. 최초 API 전체 실행은 초반 실패를 좁히기 위해 중단(완료증거 아님), 선택2FAIL `usage-holds-v3lr6dvp`는 격리 guard의 모든 file: URI 거부가 원인. 제품 mode=ro를 쓰기 연결로 바꾸지 않고, 현재RUN 기존파일의 정확 canonical URI+mode=ro만 guard에서 검증하도록 지원. 외부/형제RUN/누락/비정규/쓰기/추가옵션 차단과 실제readonly INSERT 실패 포함32PASS(`usage-holds-ljrr0aal`); guard 변경 범위 독립검토 요청. 실제API 4파일 재실행 중이며 현재완료·전체점수 가산 아님. computer-use 초기화실패(kernel25276/helper_unknown_error)로 실제브라우저NOT_RUN, UI체험은 운영fallback 없는 합성이다.
+
+## Codex B5 핵심 내용 구현·집중 검증 마감 — 2026-09-13 19:00 KST
+
+- 작성자/왜 지금: Codex. 사용자 지시인 기능 구현 우선·최고 속도·진척 상시 보고에 따라 B5 입력/실행/결정 축을 병렬 구현하고 지정 검증 결과를 확정한다. 권고10/G3-B·G3-C. 전체21/40=52.5%, 로컬18/28 유지이며 B5 전체나 B6/B7 수용 완료로 집계하지 않는다.
+- 결정/기능: 쉬운 요구 입력·실제 초안 저장, 대표 행동·공통 StudioContent, 실제 action/store 반환 구분과 pause/stop, 결정 차수별 일반HOTL/Host/지원 능력·데이터 검토, 동일 사건 복구, 입력별 서버 보관/복원/폐기/지원 결정 사용 완료, fulltarget별 수정 의견·제출 전 변경 차단, 닫기/새로고침·문맥 전환 보호를 연결했다.
+- 소유/분담: Codex 공통UI·RunControls·server draft UI/API·fixture·최종 실행/통합. James sprintActions/store, Dewey BuildStart/requirementDraft/RevisionEditor, Hooke decision 영역/기존 집중script57건, Godel input draft backend/API/실제API회귀. 앞선 착수란의 Hooke 검사 전담은 중간에 결정 구현으로 확장 후 검사로 복귀했음을 보완한다. 파일 소유를 분리했고 전원 소스 동결했다.
+- 독립검토: Codex 요청/Hilbert 읽기 전용. 캐시로UNKNOWN해제·후속4xx원키폐기·저장표시불일치·수정기준재결속·consume복구UI소실·공백불일치 지적을 수정했다. 마지막 RECORDED 카드 조건까지 소스 재대조하여 지정 정적 리뷰 종결. 실행은 main이며 독립 실행이나 B5 전체 수용으로 표현하지 않는다.
+- 실행근거: usage-holds-rc74v0pf 64PASS/30.46초/wrapper37.738초·0, 소스778/자산259불변·SQLite231 ownRUN·금지0. studio-contracts-794056d3 57PASS/237.8847ms·20소스 현재불일치0. 요구초안5건은단위이며해당실제API재실행아님. 최종제품build·지정13lint·fixturebuild PASS, 기존chunk/dynamic import경고와줄바꿈경고별도. 최초서버1FAIL/프런트1FAIL증거보존후수정재실행.
+- 가시성/한계: 8768/tests/studio-transition.fixture.html?version=b5-20260913-1857 실제컴포넌트+합성5상태, connect-src none/운영쓰기0, HTTP200/앱열기queued. computer-use초기화오류로 실제브라우저NOT_RUN, 서버/SSR증거로대체하지않는다. 일시승인경로usage오류후최신ordinaryUsageAllowed와동일경로읽기성공확인후재개,우회/reset없음.
+- 다음/담당/조건: Codex 다음은 Kit v2 저장계약 GET→적격타인검토/승인·반려 UI완결60~90분. 수정제출원자적artifact/요청ID결속·소비,일반명령UNKNOWN확인,같은PLANNING비파괴재개는미구현별도. B5잔여후 B6 App단일담당으로초안→프로젝트·유형별URL/복귀/SSE진입통합. supportsInitialIdea플래그만켜거나기존projectPOST로우회하지않는다. B7브라우저·현업수용은후속.
+- 영향/보호: 사용자로그SHA7720cc456594ee3f3d5387d16c35ca26ec303fd177e0cb1eee05538223dcf510/current확인18:59. main.py/App.tsx diff0,운영DB·RAW·실권한·실승인·원격변경없음. 기존dirty보존·미커밋·미푸시. 상세 docs/handoff/L2_STUDIO_B5_CORE_2026-09-13.md.
+
+## Codex B5 단일 제작 내용 착수 — 2026-09-13 17:28 KST
+
+- 작성자/왜 지금: Codex. 사용자가 진척을 높이며 계속 구현하도록 승인했다. 권고10/G3-B·G3-C, 첫 원료구매 앱의 요구→제작→검토/저장 사용자 경로를 연결한다. 전체21/40=52.5% 유지; UI 내부 기능 수를 전체 점수로 바꾸지 않는다.
+- 계획/소유: Codex 기존 AdaptiveProductionStudio 내용/컨테이너 분리, RunControls·ProjectHeader·결정/초안 연결. James useFactoryStore/sprintActions의 명령 결과·실패/응답 유실 보존과 개별 작업 실행. Dewey BuildStartDialog 쉬운 입력/추가 설정. Hooke 기존 패턴 기반 집중 단위·SSR 검사. Hilbert 읽기 전용 독립 계약/권한/최종UX 검토. 공통 파일 소유 분리.
+- 출구/예상: 입력·단일 대표 행동·일반/쿼터 재개·복구 관찰 대상·결정 종류별 분리·검토용 저장/실패 보존, 제품build/영향 범위 집중검사. 초기120~180분 병렬 예상이며 실제 브라우저/현업 수용은 별도. B5에서 전역 단일 진입이 완료됐다고 주장하지 않는다.
+- 결정/주의: 신규 세 번째 생성기/임의 프로젝트/데이터 승인/자동 쓰기 없음. B3 API/기존 콘텐츠 재사용, 모호한 명령 결과를 성공으로 바꾸지 않는다. 네 입력 종류 서버초안 계약 실존 여부를 먼저 대조하며 메모리 보존을 서버 저장으로 표현하지 않는다.
+- 다음/담당: Codex가 세 구현 축을 통합 후 독립 검토·집중 검증, 완료 동작과 전체 진척·다음 ETA 보고. main.py/App.tsx·전역라우터/SSE mount는 B6 전까지 보존. 기존 dirty tree/사용자로그/운영DB·RAW/실권한/원격 보존, 커밋·푸시 없음.
+
+## Codex B4 구조 편집 코드·집중 검증 마감 — 2026-09-13 17:14 KST
+
+- 작성자/왜 지금: Codex. 승인된 다음 기능 묶음(추가·사용상태·부모 이동·바로가기)을 기존 제안/타인 승인/GET 반영과 연결하고 마감한다. 권고4·7·10/G2→G3의 첫 원료구매 업무 골격 변경 기능이며 전체21/40=52.5%, 로컬18/28 유지.
+- 결정/결과: B4 지정 기본 편집 코드·집중 검증 출구 마감. 경영 홈/앱 운영의 같은 설정 화면 진입·복귀 재조회 연결까지 포함한다. 실제 브라우저/현업 수용은 OPEN, B5~B7 완료나 전체 점수 가산을 주장하지 않는다.
+- 분담/이중검토: Codex 모델/API/UI 연결·실행, Dewey 구조 입력 컴포넌트, Hooke 기존 합성검사80→105/fixture, James 구조 실제API27사례. Hilbert 독립 검토의 양식 유실/잘못된 표시 명령 고정/복귀 재조회 누락 P2 3건 수정·재대조 종결, 지정 범위 미해결 P1/P2 없음. 코드 동결, 보조 에이전트 모두 종료.
+- 실행근거: usage-holds-0sx0_95d 서버177PASS/77.84초/wrapper83.7469초·0, 소스775/자산259 전후·현재 불변, SQLite471 ownRUN/금지0. 최종4ffd0920 프런트105PASS/375.6702ms=UNIT/SSR104+STATIC1, 소스16 현재불일치0. 제품build·전용6lint·최종fixturebuild PASS. 실제 DOM/포커스/복귀 GET 실행은 STATIC과 별도다.
+- 제약/사용자 확인: computer-use 초기화 helper_unknown_error로 실제 브라우저 NOT_RUN. 기존localhost8768 메모리 합성 미리보기에서 편집 바로 체험→추가 설정 제공. 운영 API/DB/승인 호출 없음, 새 검증 인프라/전체full 반복 없음.
+- 다음/소유/조건: Codex B5 단일 제작 화면 내용 연결(업무·요청 입력/현재 행동/검토·재개·저장), 초기120~180분(집중 검증 포함). 기존 B3 계약 재사용, 전역 App.tsx mount/URL/SSE는 B6 단일 담당 단계. 실제 브라우저 수용은 도구 복구 후 별도 필수 확인.
+- 보호: 사용자로그 SHA7720cc456594ee3f3d5387d16c35ca26ec303fd177e0cb1eee05538223dcf510, main.py/App.tsx·운영DB/RAW/실권한·원격 보존. 기존 dirty tree 유지, 미커밋·미푸시. 상세/해시는 B4 인계문서 최신란.
+
+## Codex B4 구조 편집 묶음 착수 — 2026-09-13 16:47 KST
+
+- 작성자/왜 지금: Codex. 사용자가 앞서 제시한 추가·사용상태·부모 이동·바로가기 편집의 다음 진행을 승인했다. 권고4·7·10/G2-A/B/C→G3-B/C, 첫 원료구매 수직 업무 골격의 현업 변경 기능이며 새 ERP/실데이터 실행 범위가 아니다. 전체21/40=52.5% 유지.
+- 계획/소유: Codex API type·순서 보존 편집 모델·미리보기/기존 검토 연결. Dewey 새 구조 입력 컴포넌트. Hooke 기존 합성검사80 유지+구조회귀/fixture. James 기존 서버 명령의 실제API·원본/참조 집중시험. Hilbert 권한·기준판·명령순서·멱등키·최종UX 독립검토. 각 파일 소유 분리, 테스트는 동결 후 main 실행.
+- 결정: 원래 승인판과 로컬 workingBase를 분리하고 display diff→구조명령의 순서를 고정한다. 최종 제안은 명령만 보내며 임시 placement ID를 보내지 않는다. 새 배치가 있는 형제 목록의 순서는 승인 후 변경 가능하게 안내한다. 임시 바로가기 제거/rebase는 전체 replay 성공 후만 교체한다.
+- 복구: 해당 propose POST에서 확정422를 받은 경우만 명시 수정 재개. 선행GET/로컬오류나 미확정409/5xx는 원본문/요청키를 보존한다. 기존 입력·알 수 없는 응답을 버리는 동작은 금지한다.
+- 다음/출구/예상: 구조 네 기능+표시 편집 혼합→제안→타인 승인→GET 반영 확인, 영향 범위 격리 검사/정적이중검토. 초기60~90분(검증 포함). B4전체는 진입 연결/실브라우저 상태와 함께 별도 판정하며, B5~7 완료나 전체점수 가산으로 대신하지 않는다.
+- 보호: 기존dirty tree/사용자로그/운영DB·RAW·실권한/원격 보존, main.py/App.tsx 미변경. 새 검사 기반 도구/전체full 반복 없음.
+
+## Codex B4 표시 편집 기능 묶음 마감 — 2026-09-13 15:47 KST
+
+- 작성자/결정: Codex. 이름·설명·형제 순서의 사용자 편집→미리보기→고정 제안→기존 타인 승인/GET 반영 경로를 지정 검사까지 완료. B4 전체와 전체21/40=52.5%는 OPEN/유지. 사용자 요청대로 기능 구현 우선, 검사 인프라 확장·전체full 반복 없음.
+- 분담/이중검토: James 서버+40직접 사례, Codex 제품 API/편집 상태/UI/기존 승인 연결, Hooke 기존 합성 검사·fixture 확장. Hilbert 정적검토 P2 2건 발견→Codex 권한 상실 부모 읽기 결과 숨김/미수정 기준판 전환 보완→Hilbert 둘 다 종결/추가 확정P1/P2없음. 모든 작성자 동결·종료.
+- 실행근거: Codex run `usage-holds-cqim8wod`150PASS/80.19초/wrapper87.13초/소스774·자산259 불변 및 현재일치/SQLite390 ownRUN/금지0. 프런트e9445430…80PASS/281.91ms/12지문현재일치. 제품빌드·지정5lint·fixture빌드PASS. 상세지문은B4인계문서.
+- 사용자 확인: 기존localhost8768미리보기에 바로 체험 버튼 추가(합성 승인판, 빈 범위만), 현재HTML HTTP200. 열기queued. computer-use 초기화trustedNodeexit로 실제클릭/현업NOT_RUN이며 우회하지 않음.
+- 다음/소유/출구: Codex B4 추가·사용상태·부모 이동·바로가기 UI를 기존 명령에 연결하고 제안/승인/새로고침 확인. 예상60~90분(검증포함/브라우저복구대기별도). App.tsx는B6전까지변경없음. 운영·원격·사용자로그보존, 미커밋·미푸시.
+
+## Codex B4 기본 편집 사용자 기능 완결 — 2026-09-13 15:34 KST
+
+- 작성자/왜 지금: Codex. 사용자가 기능 완성과 체감 가능한 진척을 우선 요청. 권고4·7·10/G2→G3의 기존 B4 범위에서 이름·설명·순서 편집→고정 변경안 제안→타인 승인→GET 반영을 한 묶음으로 연결한다. 전체 분모40/현재21=52.5%를 내부 작업량으로 보정하지 않는다.
+- 계획/소유: James 서버 표시 명령·직접 시험(15:29동결), Codex 편집 상태·UI·기존 검토 연결, Hooke 기존 합성 검사·fixture 확장, Hilbert 완결 경로 독립 검토. 기반 검사 도구 추가·전체full 재실행 없이 영향 범위 집중 검증.
+- 완료 조건/다음: 실제 제품 컴포넌트에서 수정·미리보기·제안·타인 승인·GET 반영 연결 및 핵심 실패 보존. 브라우저 실검사는 별도 증거로 구분. 이후 B4 잔여(활성/부모/바로가기 등)와 B5~7 연결을 진행한다.
+- 진척 해석: Dewey의 한정 조회로 D03 잔여가 REAL 검사 경로/Owner 서명UI·정책UI·일반 사용자 연결임을 확인. B4 편집만으로 D02의 전제데이터/7앱 수용 조건을 완료했다고 주장하지 않는다. D03 구현을 이번 편집에 끼워 넣지 않는다.
+- 보호: 기존 dirty tree 보존. 운영DB/RAW/실권한/원격 및 main.py/App.tsx 변경 없음. 사용자 로그SHA7720cc45…f510 보존. 예상 화면 연결·집중 검사20~30분, 장애 시 근거와 수정예상 즉시 보고.
+
+마감 대조 — 2026-09-13 15:08 KST / Codex: 15:05 기록의 최종 증거를 Hilbert가 독립 대조했다. 요청Codex/검토Hilbert/판정 지정 코드·증거 범위 마감 가능. B4 107 정확1회·phase중복/실패/skip0·773source/259asset 현재 일치·SQLite306 ownRUN, exact5 초기실패집합 일치, frontend60고유PASS/10지문 일치. 전체52.5%·B4전체OPEN/브라우저NOT_RUN 유지. 다음은 기존 기록의 이름·설명·순서 제안 연결이며 운영/원격 변경 없음.
+
+## Codex B4 재개·검토 승인 연결 검증 — 2026-09-13 15:05 KST
+
+- 작성자/왜 지금: Codex. 요청에서 담당자 재개·타인 승인·반영 조회까지 사용자 흐름이 연결되어 집중 검사 결과와 잔여 범위를 인계한다. 권고4·7·10/G2→G3 업무 골격 입력이며 전체21/40=52.5% 유지.
+- 근거: 최종 usage-holds-r0qqlsi1 B4 107PASS/48.26초/wrapper0/773source·259asset 불변/현재source일치/SQLite306 ownRUN/금지0. 프런트426eb4ae…60PASS·10지문불변, 지정lint·제품build·fixturebuild PASS. 최초15xmnk1v 281=276PASS5FAIL 및 exact v53wpcs5 5PASS는 별도 이력 보존.
+- 결정/상태: 설치 재개·인수와 고정 변경안 검토·승인·GET 적용 확인의 지정 코드 흐름 마감. B4 기본 수정·B5~B7/실제브라우저/현업 수용 OPEN. 검증 도구 추가나 전체full 반복은 하지 않았으며 서로 다른 실행을 새 판281PASS로 합치지 않는다.
+- 교차검토: 요청Codex/검토Hilbert/core/API4+frontend3의 5경계 정적검토 새 P1/P2 없음. James는 실패5건의 작성자[]/관리자[adopt] 계약 차이를 독립 확인했고 main이 테스트1함수만 보강했다. 마지막 증거 대조 상태는 인계 문서에 남긴다.
+- 다음/담당/조건: Codex가 B4 이름·설명·순서 제안/승인 연결을 다음 구현으로 진행(60~90분+집중5~10분 초기추정). 검증 완료 소스는 동결, 추가 수정 시 해당 범위 재검증. 브라우저 도구 복구 후 실제 화면 검사 필요.
+- 영향/주의: 사용자로그SHA7720cc45…f510, main.py/App.tsx, 운영DB/RAW·실역할·원격 불변. 로컬 미커밋·미푸시. 합성 리허설만 localhost8768에 제공(session82416), 서버/DB 없는 메모리 API이며 실제인증·승인 PASS로 주장하지 않는다.
+
+## Codex B4 담당자 재개·타인 승인 연결 착수 — 2026-09-13 14:41 KST
+
+- 작성자/왜 지금: Codex. 사용자가 진척·가시성 진단 후 다음 구현을 승인했다. 권고4·7·10/G2→G3의 업무 골격 설치를 요청에서 담당자 재개·타인 승인·적용 조회까지 잇는다.
+- 근거: B4 인계의 다음 slice 1~4, 기존 resume/approve 쓰기 계약과 검증된 첫 설치 화면을 재사용한다. 전체21/40=52.5%, B4 OPEN이며 설명/순서 변경과 B5~B7는 이번 범위 밖이다.
+- 결정/소유: James core/API 4파일과 신규 B4 change/review 시험, Codex frontend API/Flow/Panel/CSS 및 실행·기록, Hooke 기존 프런트 검사/합성 fixture, Hilbert 독립 읽기 전용 검토. 신규 검증 인프라 개발·운영 자료 접근·원격 변경 없음.
+- 검토/검증: 상태 전이·권한 경계를 조기 검토하고 소스 동결 뒤 B1/B2/B4 관련 집중 회귀·프런트 검사/빌드로 확인한다. 과거 full PASS를 새 판 전체 PASS로 승계하지 않는다. 브라우저 도구는 별도 확인하며 실패 시 NOT_RUN을 표시한다.
+- 다음/담당/조건: 현재 principal/operation 행동·고정 변경안 DTO 확정→재개/명시인수 UI→별도 승인 목록/차이/이유→승인 후 GET 확인. 코드·집중검증75~120분 예상, 작업 중 짧은 상태와 중간 산출물을 보여준다.
+- 영향/주의: 기존 dirty와 사용자로그 보존, main.py/App.tsx·실역할·실승인·운영DB/RAW·배포·원격은 변경하지 않는다. 조회 실패를 승인 재전송으로 복구하지 않는다.
+
+## Codex B4 첫흐름 지정 코드 출구 마감 — 2026-09-13 13:02 KST
+
+- 작성자/왜지금: Codex. 최종회귀·보존·독립증거대조를마쳐설치·탐색첫흐름의코드출구를마감하고다음승인연결로인계한다.
+- 근거: verification-axojhsot2194정확1회/2187PASS7symlinkskip/186subtestsPASS/실패0/1645.47초/부모자식0/소스771자산259전후현재일치·추가삭제0/금지0/SQLite3051회ownRUN. 프런트ecc761e8…37PASS·10파일지문불변,lint/type/productbuild/fixturebuild main실행PASS.
+- 교차검토: 요청Codex/검토Hilbert/판정코드지적종결+FULL_REGISTERED증거PASS. old2110누락0/new84=B457+planner27/phase6582정상확인,`overall_product_pass=false`와browserNOT_RUN을유지한다. 정적·증거대조이며독립실행·현업승인이아니다.
+- 결정/상태: B4첫설치·탐색지정코드출구마감, B4전체/B5~B7/브라우저·현업수용OPEN. 전체21/40=52.5%·로컬18/28유지. 권고4·7·10/G2→G3의실제회사설정진입·업무골격입력을연결했지만데이터·권한·7앱수용완료로가산하지않는다.
+- 다음/담당/조건: Codex주관B4재개/명시인수·타인변경안목록/상세/승인70~110분+집중검증5~10분. James읽기전용5단계계약대조를B4인계에수록. 설명·정확형제배치순서변경은후속분리. 실제브라우저는도구환경복구후필수검증. main92140종료,source전원동결상태에서인계한다.
+- 영향/주의: 운영DB/RAW/실역할/실승인·배포/원격/main.py/App.tsx변경없음.사용자로그기존10줄SHA7720cc45…f510보존. 기존B0~B3와함께로컬미커밋·미푸시. 이전실패full을삭제하거나부분PASS와합치지않았다.
+
+## Codex B4 첫흐름 검증·동결 — 2026-09-13 12:38 KST
+
+- 작성자/왜 지금: Codex. 설치·탐색 연결의 집중 검사와 독립 수정 확인 후 동일판 전체회귀를 가동하여 다음 담당자에게 실제 검증 경계를 남긴다.
+- 근거: r13oyl3d203실행/202PASS1skip34.87초/wrapper0/소스자산불변/금지0. 최초2실패는fixture원본계보·boundmethod복원오염이며제품권한/404기대값불변. 프런트37PASS+10파일hash불변 증거 process-installation-check-9d6e085d-934f-4209-bf62-b4c820342a4f, lint/type/productbuild/fixturebuild PASS.
+- 교차검토: 요청Codex/검토Hilbert read-only. 서버경계/권한·무결성/late응답·구조화오류, 과거상세와현재제출분리, scope왕복, 외부boundary A→B→A원키복원 지적을보강했다. 마지막정적추가P1/P2없음; 실행증거대조중. 실제브라우저는Cua/sky초기화sandbox오류로NOT_RUN,검토로대체하지않는다.
+- 결정/상태: verification-axojhsot full/jobs1/main92140/12:27시작/2194수집(이전2110누락0/추가84/B457). Python전체writer동결,프런트도최종동결. 전체fullPASS는아직미확보. 전체21/40=52.5%·로컬18/28, B4첫코드흐름검증중/B4전체·B5~B7미완료.
+- 다음/담당/조건: main전체종료·정확집합/해시/금지접근·독립증거검토 후한정마감. 후속B4담당자재개·타인승인·설명/순서변경제안및브라우저복구, 약60~90분 첫후속slice 예상. 전체B4기존150~240분은이전범위예상으로유지한다.
+- 영향/주의: 권고4·7·10/G2→G3 업무골격 입력의제품연결을전진. 사용자로그SHA7720cc45…f510/main.py/App.tsx/기존dirty/운영DB·RAW·실역할/원본Starter/원격보존. 로컬미커밋·미푸시. 상세 B4 handoff 참조.
+
+## Codex B4 첫 설치·탐색 흐름 착수 — 2026-09-13 12:09 KST
+
+- 작성자/왜 지금: Codex. 사용자 계속 진행 승인에 따라 검증 효율화 다음 제품 작업을 실제 화면까지 연결한다. 권고4·7·10/G2-A/B/C→G3-B/C, 원료구매 첫 수직 폐루프의 업무 골격 입력에 직접 필요하다.
+- 근거: 상세설계 rev2.1 §11/B3 인계 보정/검증 효율화 작은 흐름 방식. 전체21/40=52.5%, 로컬18/28 유지. 이번 출구는 후보→명시 등록→계획→설치 요청→상태GET·L1/L2 탐색이며 B4 전체 완료는 아니다.
+- 소유/상태: James=core process_configuration/install·두API·test_b4_installation_queries; Codex=companyApi 분리 adapter/설치 controller·Panel/CompanySetupPanel 연결; Hooke=독립 프런트 계약 검사·명시 mock fixture; Dewey=planner B4 registry·자체시험; Hilbert=read-only 독립 권한·UX 검토. main.py/App.tsx 불변.
+- 검토: Codex 요청/Hilbert 초기 P2 기존 늦은 문맥 응답/구조화 오류 소실 확인. 신규 identity·세대 결속과 오류 adapter로 보강, 구현 후 재검토한다. 운영 권한·데이터 변경 및 자동 설치/승인 없음.
+- 다음/담당/조건: source 동결→정확 API·프런트 검사→브라우저 모의 범위/실제 API 증거 분리→안정 통합 full jobs1. 첫 흐름60~90분 예상 유지. 이전 fullFAIL을 부분PASS와 합산하지 않는다.
+- 영향/주의: 기존미커밋·사용자로그보존, 로컬미커밋·미푸시. 재개/타인승인/변경제안·note/order는 후속slice, B5/B6 두 Studio 통합·B7현업수용 별도.
+
+## Codex 검증 효율화 제한 범위 인계 — 2026-09-13 11:49 KST
+
+- 작성자/왜 지금: Codex. 승인된 검증 운영 개선의 구현·실측·실패원인 수정과 독립검토를 마쳐 제한 범위 결과를 인계한다. 전체PASS를 주장하지 않는다.
+- 근거: `docs/testing_efficiency_2026-09-13.md`. full `verification-5xyfosvs`2110실행/기존1929누락0/2092PASS11FAIL7skip/subtest186PASS/2272.45초/집계FAIL. 11건은2시험fixture 상대writeopen. 금지SQLite0,11상대쓰기실행전차단, 실제원본변경0. source770/asset259불변.
+- 수정·결정: 제품/runner/guard불변, `test_contract_decision_api.py` tmp절대경로와 `test_tech_lead_contract_draft.py`의 해당시험 data경로대역·실제번들readback만 수정. full이후hashdiff정확2개. `usage-holds-6q1sonnm` 해당파일51+self171=221PASS1skip+subtest186PASS/31.51초/wrapper0/금지0. 최신quick `verification-imhhufyo`215사례/35.54초/SELECTED PASS/금지0. 병렬full큰속도이득미확인으로기본jobs1유지.
+- 교차검토: 요청Codex/검토Hilbert. 기존P1 1/P2 3종결, 현재두fixture영향범위검증은마감가능/지금full반복필수아님. 최신quick215개1회실행/누락·중복·phase오류0/현재source770asset259일치·추가삭제0도독립확인. fullFAIL기록유지·동일판fullPASS미확보명시·다음B4안정통합full1job필수조건. main실행과독립read-only대조를구분한다. 취소probe `verification-hka1q8yz` CANCELLED/130/관리자식종료/PASS없음, CIM잔존0은main실측.
+- 다음/담당/착수조건: Codex B4 첫수직흐름60~90분(전체B4기존150~240분) 예상. 검증된boundary/permitted_actions·scope별operation목록→companyApi v2 adapter→설치상태GET/재접속→기존화면연결. 권한/API와최종UX독립검토, lint/build·실화면검사·등록시험/full1job을안정통합출구로한다. Hooke의읽기전용구체경로인계는운영문서참조.
+- 영향/주의: 권고4·7·10/G2→G3 후속개발의검증비용지원, 새제품관문완료아님. 전체21/40=52.5%/로컬18/28/B4~B7미완료유지. 사용자로그SHA7720cc45…f510/main.py/App.tsx/생산코드/실DB·RAW·역할/원본/원격보존. 로컬미커밋·미푸시. source작업전원동결, 실행세션32669·75128·64734·19180종료, 재대기/실패full성공재표시금지.
+
+## Codex 검증 효율화 적용 — 2026-09-13 10:40 KST
+
+- 작성자/왜 지금: Codex. 사용자가 검증 방법론 제안 전부를 승인하여 B4 착수 전 반복 준비·선택·피드백 비용을 낮춘다.
+- 근거: 기존 최종 B0~B3 `usage-holds-6m4qchly` 1923PASS/6skip/2183.28초. 상위5파일166케이스가 시간81.5%. 새 `docs/testing_efficiency_2026-09-13.md`에 실행계층·안전·B4 수직 흐름·측정 기준을 고정했다.
+- 결정/상태: quick/feature/full 선택, 실제 cold seed에서 시험별4DB backup, 최대2worker 독립 RUN/audit 및 정확한 nodeid/단계 증거 검증을 구현 중. 가드/선택기 자체시험 `usage-holds-m176y84s` 107PASS/1Windowslinkskip/6.59초/소스·자산불변/금지접근0. 실제 kit/seed 동등성은 session72657 진행 중, 성능·병렬 완료 미판정.
+- 담당/교차검토: Codex=기존 runner/new isolation guard·실제 시험·문서; James=verification_plan/자체시험 동결; Hooke=b3 seed/kit fixture/격리시험 동결; Dewey=run_verification/집계 자체시험; Hilbert=독립 read-only 보안검토. 계획검토5조건(다른 RUN쓰기 차단/선택 시 가드 유지/seed 독립/실행 중 cwd 불변/정확한 nodeid)을 반영, 최종 증거 검토 별도.
+- 다음/착수 조건: 메인이 pilot 결과 확인→dispatcher 자체시험→전원 소스 동결→빠른 순차/병렬 및 full 실측→동일범위·보존·독립검토. 최초45~60분 pilot 예상 유지, 전체 회귀 기존 약36분 기준이며 개선 실측 후 갱신.
+- 영향/주의: 권고4·7·10/G2→G3 후속 개발 지원으로 제품 완료 관문을 새로 넘지 않았다. 전체21/40=52.5%·로컬18/28, B0~B3 제품 코드 출구 완료/B4~B7 미완료 유지. 생산 코드·권한/보안 의미·main.py/App.tsx·사용자로그·운영 DB/RAW·원격 변경 없음, 로컬 미커밋·미푸시.
+
+## Codex B3 지정 출구 마감 / B4 인계 — 2026-09-13 09:42 KST
+
+- 작성자/왜 지금: Codex. 최종 통합 실행·skip/격리·소스 보존 검사 및 독립 증거 대조를 마쳐 B3 OPEN을 완료로 갱신한다. 하단 기록은 당시 실행 이력이다.
+- 근거: `output/usage-holds-6m4qchly`, 명령 `venv/Scripts/python.exe scripts/verify_data_usage_holds.py --b0 --b1 --b2 --b3`, selection없음/wrapper exit0. 1923PASS/6skip/실패·오류0/2warnings/2183.28초. SQLite2492 모두RUN내부, 금지DB·파일접근0, conftest없음, 소스369·보호자산259 해시불변/현재소스불일치0.
+- 교차검토: 요청Codex / 검토Hilbert / 판정B3 지정 코드·격리 회귀 출구PASS. 기존4P2 종결과 핵심회귀, B3 시험27파일 포함을 읽기 전용 대조. 실제 시험은 main 실행이며 독립 실행으로 가장하지 않는다. 6skip은 Windows 실제symlink생성권 부재, 별도환경 담당/착수조건은 해당 권한을 가진 격리 시험 환경 확보다.
+- 결정/상태: 사용자 지정 B2→B3 연속 단계 종료. B0~B3 코드 출구완료/B4~B7미완료, 전체21/40=52.5%·로컬18/28유지. 문맥·초안/승격·양쪽2.0/1.0보존·현재사용권·키트반려·Host승인복구·질문/결정차수 출구이며 전체T3/운영/브라우저/현업수용 아님.
+- 다음/담당/조건: 다음 Codex B4 주관. James 사전 대조·메인 재확인에 따라 대기목록/변경상세, 확정운영root·범위행동, 설명/순서 명령 보강 후 UI 연결. 예상150~240분(종전90~150분 대체). 실제 구현자는 착수 때 core/API·UI·독립시험의 겹치지 않는 파일 소유권을 확정하고 권한/최종UX 독립검토를 진행한다. B4 구현 미착수, B5/B6 단일Studio 및 B7 업데이트/수용 별도.
+- 영향/보존: 권고4·7·10/G2-A/B/C→G3-B/C 전진, 제품70% 미달을 테스트수로 숨기지 않는다. branch codex/l2-unified-studio-20260912/HEAD58e666833. 사용자로그 기존10줄 SHA7720cc45…f510/main.py/App.tsx/운영DB·RAW·실역할/원본Starter/원격보존. 로컬미커밋·미푸시, 자동재개·재승인·배포 없음.
+- 인계: `docs/handoff/L2_STUDIO_B3_CONTEXT_2026-09-13.md` 최종 증적과 B4 보정, 기존 상세설계 §11 B4 연결 보완 참조. 이전 실행 session2975는 정상 종료했으므로 재대기/동일 실행을 반복하지 않는다.
+
+## Codex B0~B3 최종 통합 실행 — 2026-09-13 09:02 KST
+
+- 작성자/왜 지금: Codex. 독립4P2 및 마지막fixture/선행조회 회귀를확인하여 최종지정통합을실행한다.
+- 근거/상태: zmv5h8sq 464PASS/2fixtureFAIL/3skip/307.34초/금지접근0;2.0실제생산자로fixture만수정. c5qffnjy 마지막6PASS/3.71초/SQLite17/소스자산불변/금지접근0. 현재 --b0 --b1 --b2 --b3 session2975,약25분예상. B3 OPEN/전체21/40=52.5%/로컬18/28.
+- 검토/결정: 요청Codex·검토Hilbert 신규4P2전부정적종결/추가확정P1·P2없음. 실제통합성공은아직아니다. source/test전원동결,문서만main갱신. 임시RUN만실행/원본쓰기guard유지.
+- 다음/인계: main2975종료확인→JUnit/isolation/sourcehash및보존검사→B3출구/문서정리. B4는사전읽기만,후속예상90~150분. 사용자로그SHA7720cc45…f510/운영·원격·main.py/App.tsx보존. 미커밋·미푸시. 실패때만해당소유자좁게동결해제.
+
+## Codex B3 최신 동결/재회귀 — 2026-09-13 08:53 KST
+
+- 작성자/왜 지금: Codex. 선택 회귀 종료와 독립 추가 지적4건 보완 후 소스 전원을 재동결하고 실제 재검증에 들어간다.
+- 근거/상태: usage-holds-py4q07im 299PASS/3skip/218초/SQLite338/소스자산불변. 기존 종결 단위시험 원본 failure bundle2쓰기·Git subprocess1시도는 가드 차단으로 wrapper exit1; 원본변경없음. 해당 시험만 tmp cwd+명시GitManager대역/실제임시번들 확인으로 수정, guard유지. 앞반려4실패는해소, B3전체최종판정은아직이다.
+- 교차검토: 요청Codex/검토Hilbert 신규P2 4건. Dewey legacy기본writer유지/명시managed 및 v2LIBRARY비계약판정; main 실제TechLead서버2.0opt-in·legacyA/B HTTP·HOTL UNKNOWN/503응답, Hooke 엄격HOTL조회/반영실패31케이스. 정적 재확인 요청 중이며 실행 전 Close하지 않는다.
+- 다음/소유: 현재선택session62293, runtime_contract_v2 포함. 전원 source/test freeze확인; 메인이실행/실패분류→필요수정→전원동결→B0~B3전체(약25분). 전체21/40=52.5%, 로컬18/28. B4사전읽기만/구현미착수,예상90~150분.
+- 영향/교대: main nodes.execution의계약초안어댑터만추가수정, main.py/App.tsx불변. 사용로그SHA7720cc45…f510/운영DB/원본Starter/실권한/배포/원격보존, 미커밋·미푸시. 첫재개=62293결과확인,전원동결중수정금지. 알려진부분실패는재승인자동전송금지/사건ID보존.
+
+## Codex B3 차수 계약 보완 — 2026-09-13 08:23 KST
+
+- 작성자/왜 지금: Codex. 최신 선택 회귀 종료와 독립 검토·설계 추가 누락이 확인되어 이전 실행 중 상태 및 소유권을 정정한다.
+- 근거/판정: usage-holds-dcavqtay 123PASS/4FAIL/1skip/198.25초/SQLite226/금지접근0/소스자산불변. B3 OPEN, 전체21/40=52.5%, 로컬18/28 유지. 실패4건 수정 및 새 회귀 전이다.
+- 교차검토: 요청Codex/검토Hilbert 5건(P1취소worker예약/P2가시성·legacy경계·오류분류·부분응답) 수정 후 재검토 요청. Dewey §7.3 감사로 질문/결정 차수 누락을 확인해 B3에 보완한다. 증적 없는 Close 없음.
+- 소유권/다음: James kit_app_contract/반려회수시험+새legacy오류시험; Dewey contract_decision/nodes.contract/decision_round시험; Hooke HOTL helper/질문·취소·재개시험; main Factory/Orchestrator/guard/API시험·통합 실행. 현재 소스 편집 허용, 다음 메인 선언 후 전원동결. B3 잔여60~100분(08:15 기준), 선택후전체통합약25분.
+- 영향/교대: 기존1.0/Host wire1/State5.3.0 보존, 차수CAS는 서버고정신규 또는 명시 토큰에 적용. 입력 draft UI=B5. 사용자로그/운영DB·원본Starter·실권한·main.py/App.tsx·원격 변경 금지. branch codex/l2-unified-studio-20260912/HEAD58e666833, 로컬 미커밋·미푸시. 첫 재개=각 helper 인터페이스 연결 및 신규회귀.
+
+## Codex B3 검증 재개 — 2026-09-13 08:04 KST
+
+- 작성자/왜 지금: Codex. 04:45경 승인보조 한도/환경 오류 이후 사용자가 계속 진행을 요청했고 08:00경 명령 실행이 복구되어 실제 검증을 재개한다.
+- 근거/상태: `usage-holds-_q7bmbx7` 선택176PASS/2symlink권한skip/411.23초/임시DB246·원본쓰기도금지DB접근도0·소스자산불변. 이후 §6.1 누락2개를 구현했으므로 B3 OPEN이며 새 소스 통과로 승계하지 않는다. 신규37파일 AST/diff 통과. `usage-holds-6wyns_sv` 테스트 사용자상수1수집오류는 수정, focused 재실행 중.
+- 변경/소유: James kit_app_contract 반려 및 test_b3_kit_rejection; Dewey studio_contract_reconcile 및 helper시험; Hooke promotion/execution_guard시험; Codex 실행 예약·bound state CAS/Factory·신규 반려/복구 API·공통권한표·실제 임시HTTP시험·runner. 모든 source 현재 freeze, docs만 갱신.
+- 교차검토: 요청Codex/검토Hilbert. 신규 API·원장/상태 복구·경합 최종 검토 재요청. Dewey에게 §7.3 질문/결정 차수 식별자 명시 제공 추가 누락 감사를 요청했다. 이전 한도 오류 이후 새 완료 판정 전이다.
+- 다음/담당/착수조건: main focused 결과 분류→중요 지적/명시 누락 보완→B0/B1/B2/B3 전체 지정 회귀 약25분→출구 증적 대조. 재개 기준 B3 잔여45~75분. 전체21/40=52.5%, 로컬18/28 유지. B4 UI 다음, 별도 수용 미완료.
+- 교대 체크포인트: branch codex/l2-unified-studio-20260912/HEAD58e666833, B0~B3 로컬 미커밋·미푸시. interaction_log SHA7720cc45…f510 재확인. 운영DB/RAW/실역할·실승인/Starter 원문/배포 및 main.py·App.tsx 보존. 첫 재개=현재 focused session4901 확인. 운영 권한 변경·무승인push·테스트 수 제품점수 가산 금지.
+
+## Codex B3 격리 검증 체크포인트 — 2026-09-13 03:57 KST
+
+- 작성자/왜 지금: Codex. B3 첫 실제 격리 회귀가 진행 중이므로 중간 결과를 완료로 오인하지 않도록 증거·잔여 보강을 기록한다.
+- 근거/상태: 첫 `usage-holds-zvb9nz0c`는 seed 이전 NODES 수집3오류(동일원인)·금지접근0·소스/자산불변. James가 수집 초기화2곳을 수정했고 현재 `usage-holds-8mhv496g` --b3 진행 중이다. 완료 판정 전, whole source freeze 유지. git diff --check 통과.
+- 교차검토: 요청Codex/검토Hilbert·Hooke·Dewey. 원장 오류 분류/exact context, 고정 승인revision/지문, 제공할 release의 proof 재대조, parsed RAW checksum 지적은 정적 재확인. 실제 통과와 구별한다. marker write 중 hard kill의 완성 임시파일 복구, 일반 게시 원문 고정 전달, 양쪽 readiness/승격 지문 최신판 제거는 후속 보강 필요.
+- 다음/담당/착수조건: 회귀 종료 후 Codex가 일반 게시·Host/준비도·marker 및 실제 게시 회귀를 보완하고 James가 담당 실패를 수정. 전원 재freeze→B0/B1/B2/B3 통합→독립 최종확인. 예상 잔여45~75분. 임시 DB/파일만 허용하며 운영·실사용 완료를 주장하지 않는다.
+- 진척/영향: 전체21/40=52.5%, 로컬18/28 유지. B4~B7 별도 미완료. 기존 사용자로그 SHA7720cc45…f510 재확인, 로컬 미커밋/미푸시. 이 문서는 상태 보고이며 추가 작업을 중단하는 신호가 아니다.
+
+## Codex B3 연결 구현 중간 점검 — 2026-09-13 03:05 KST
+
+- 작성자/왜 지금: Codex. 사용자 지정 B2→B3 연속 진행 중 생산자/API/소비자 연결이 추가되어 담당 범위와 아직 미검증인 사실을 기록한다.
+- 근거: 새 studio_drafts/project_files/bootstrap/project_context/release_context, advisor·kit child router, Factory 시작/재개/체크포인트/복구/릴리스, Host 발급·요청/승격. 21개 파일 AST 검사만 통과했으며 B3 pytest는 아직 실행하지 않았다.
+- 결정/영향: 고정 Blueprint 판본·ProcessContext·operation ID와 현재 권한을 분리한다. FS/Advisor/원장 분산 원자성은 주장하지 않으며 부분 프로젝트는 SETUP_INCOMPLETE. Host 승인 앱 사용(AGENT_EXECUTE)과 Factory 생성 가동(PROJECT_RUN)을 혼동하지 않는다. 1.0 문서 바이트·Host wire1·State5.3.0은 보존 대상이다.
+- 분담/검토: Codex=API·saga·Factory/Host·실행경계시험; James=ProcessContext·kit_app_builder/kit_app_contract/project_data_context·시험; Hooke=2.0 일반계약·materializer·고정판 실제 소비 경계 검토; Dewey=revision/ledger 및 초안·saga/API 시험; Hilbert=독립 read-only 보안검토. 공유 파일은 1명만 편집한다.
+- 다음/착수조건: 신규 계약 인터페이스와 고정 Snapshot 실제 소비 연결을 확정하고 전원 source freeze 후 --b3 격리 실행. runner는 DATA/PROJECTS/LIBRARY를 새 RUN으로 옮기고 기존 Starter/팩/data/projects/library/workspace 쓰기를 차단한다. 중요 지적 해소 및 통합 회귀 후에만 B3 완료 판정. 예상 잔여80~130분(리스크 발견 시 갱신).
+- 진척/주의: 전체21/40=52.5%, 로컬18/28 유지. 70% 목표를 시험·파일 수로 가산하지 않는다. B4~B7 UI/현업수용 미완료. 코드 로컬 미커밋·미푸시, 운영 DB/실역할/인증/앱·배포 및 사용자 interaction_log 변경 없음.
+
+## Codex B2 출구 / B3 실행 — 2026-09-13 02:27 KST
+
+- 작성자/왜 지금: Codex. 사용자 지정 두단계 연속진행 중 B2 검증·독립검토가 끝나 B3 소유권과 인계를 고정한다.
+- 근거/상태: `output/usage-holds-2kfaqye_` 662PASS/1symlink권한skip/148.00초/S807 임시DB·자산/소스불변/금지접근0. B2 코드출구완료, 운영·UI·현업수용아님. 전체21/40유지.
+- 검토: 요청Codex/검토Hilbert. 원4건+후속2건 지적을수정하고정적범위추가P1/P2없음확인. 후속실제회귀포함. 이전654PASS6FAIL/660PASS1skip은중간이력, 최종과합산금지.
+- 결정/영향: 불변후보8L1·29L2는 NO_DATA/REFERENCE_ONLY, 기존1.0.0 파일불변. 새전용DP표/좁은registryguard 방식. 일반storeALTER·영구트리거제안은미적용. 사용자로그SHA7720cc45…f510유지.
+- 다음/담당/착수조건: B3즉시시작120~180분예상. Codex=advisorAPI/bootstrap·Factory/kit/Host배선, James=serverProcessContext새모듈/시험, Hooke=runtime1.0보존+2.0/일반컴파일4파일·시험, Dewey=advisor revision·bootstrap원장멱등전용모듈/시험, Hilbert=독립보안검토. 공유파일1편집자, 생성코드테스트는새RUN쓰기보호아래메인이수행.
+- 관문/인계: 권고4·7·10/G2-A/B/C→G3-B/C. docs/handoff/L2_STUDIO_B2_SETUP_2026-09-13.md. B4~B7 UI·현업수용은미완료, B3도실측전완료표시금지. 로컬미커밋/미푸시.
+
+## Codex B2 자동 연속 진행 체크포인트 — 2026-09-13 02:13 KST
+
+- 작성자/왜 지금: Codex. 사용자가 현재 이후 두 단계와70% 목표를 명시해 B2/B3 범위·안전 조정·분담을 고정한다.
+- 근거: 승인 설계 execution §8/11/14, process_installation.py/process_kit_instances.py/process_pack_artifacts.py, PROGRESS02:13. 상위 권고4·7·10/G2-A/B/C→G3-B/C/원료구매 폐루프 직접 필요.
+- 결정/상태: B2 구현 검증 전, B3 저장 모듈만 병렬 준비. 전체21/40 유지. 자동검토에서 기존store ALTER/트리거 거절 → 미적용, 신규전용테이블 및 동일버전 충돌 가드로 영향 축소. 기존Starter1.0.0 원문·운영DB·사용자로그 불변.
+- 교차검토: 요청Codex/검토Hilbert. P1설치자회수후인수, P2시도CAS·기존instance미리보기·승인직전DP검증 수정, 재검토/실측 미완료. Hooke팩완료(실행0), James B2시험 작성, Dewey B3advisor저장전용파일 작성. 공유파일 한 편집자.
+- 다음/담당/착수조건: Codex가 원본 쓰기 차단+새SQLite audit runner로 B2 시험. 모든중요지적/회귀PASS후 B3 context/API/일반·키트2.0연결. 예상 B2잔여30~60분/B3초기120~180분. 시험중검사소스freeze.
+- 영향/인계: 신규candidate는 DOMAIN_REVIEW_REQUIRED/NO_DATA/REFERENCE_ONLY이며 앱 생성·실적 인증·역할 부여가 아니다. B4~B7/실사용/운영적용 별도미완료. 70%숫자를위해기준완화금지. 현재로컬미커밋/미푸시, data/interaction_log.jsonl 사용자변경10줄 보존(SHA7720cc45…f510).
+
 ## 팀 보드 기록 규약 — 작성 주체·판단 배경·인계 의무
 
 > 적용일: 2026-07-29 / 요청자: Supervisor / 목적: 팀 간 맥락 손실과 책임 공백 방지
@@ -45,6 +305,43 @@
 ---
 
 ## 🚀 활성 및 최근 주요 진행 항목
+
+### [L2-STUDIO-B1-CLOSED-20260913] ECM v2 저장·권한·CAS 지정 출구 완료 / 다음 B2
+
+- 작성자 / 기록 시각: Codex / 2026-09-13 01:43 KST
+- 왜 지금 기록하는가: Supervisor의 설계 순차 실행·단계별 전체 진척 보고 및 다음 작업 예상 시간 추가 요청에 따라 B1 구현/회귀/독립 검토 결과를 인계한다.
+- 상태: **B1 지정 안전 저장 출구 완료**, B0 완료 유지·B2~B7 미완료. 전체21/40=52.5%, 로컬18/28≈64%, D02=2/4 유지.
+- 결정 및 근거: `docs/handoff/L2_STUDIO_B1_STORAGE_2026-09-13.md`. ECM의 root/mode/configuration 필드·head/changes/outbox, strict L1/L2 문서, 명령형 초안·별도 승인/반려·CAS, 불변판·고정 지문·현재 권한·구 writer/reader/복제 보호 및 API 배선. 새 프로세스 DB나 운영 권한 배정은 만들지 않았다.
+- 검증: `output/usage-holds-95pftf6f/tests.xml`·`isolation.json`, **550 passed / 111.18초**, SQLite670경로 임시 루트만·검사 소스 불변·금지 접근0·전역 conftest 없음. 중간150통과/1실패→160→543→548은 별도 이력이다. 기존 B0 보류·실적 인증 회귀 포함, 전체T3/브라우저/실사용 검증은 아니다.
+- 교차검토: 요청 Codex / Hilbert(`01a09660-955f-7570-855e-d40b068e858e`) / v1 상위·industry 누락, tenant 삽입 경쟁, head 포인터/기준판 지문 손상 지적 수정 및 정적 한정 PASS. 마지막 입력422 변환도 PASS. 검토자는 DB/테스트/수정 없음. James(`01a09668-1a60-72a1-9bb1-79746e3d6888`)는 격리 부정 시험25케이스 작성만 수행했다. 모두 종료.
+- 영향·주의사항: 권고4·7·10/G2-A/B/C에서 G3로 전달할 저장 기반 전진. 기존 v1이 있으면 CONTEXT_REVIEW_REQUIRED이며 실제 이관 미구현. 팩·실제 바인딩·상위 판 고정 변형·분리통합·outbox 송신 worker·UI는 후속. audit_delivery=PENDING을 송신 완료로 바꾸지 않는다. Org/ECM 간 분산 직렬화 보장이 아니다.
+- 다음 행동 / 담당 / 착수 조건: Codex / **B2 팩·BK-01 설치/재개·명시 이관 / 예상90~150분** / B1 지정 출구 충족. core/data_preparation/kit_registry.py·docs/data-kits·starter_kits1.0.0 원본을 확인하고 새 불변 팩/설치 계약을 연결한다. Starter 원문 변이 위험을 격리한 뒤 패키지 시험 실행. B4/B5로 건너뛰지 않는다.
+- 교대 체크포인트: branch codex/l2-unified-studio-20260912, HEAD58e666833 · 기존B0+이번B1 코드/시험/문서 로컬 미커밋·미푸시 · 운영 DB/RAW/역할/승인/Starter1.0.0/앱/배포 변경 없음 · 사용자 실행로그SHA7720cc456594ee3f3d5387d16c35ca26ec303fd177e0cb1eee05538223dcf510 불변·제외 · 첫재개=B2 소스소유권·팩/이관검토 확인 · 금지=시험건수제품점수가산/임의운영이관·역할활성화/로그포함일괄커밋/무승인push.
+
+### [L2-STUDIO-B0B-CLOSED-20260913] 인증 안전성 지정 출구 완료 / 다음 B1
+
+- 작성자 / 기록 시각: Codex / 2026-09-13 01:01 KST
+- 왜 지금 기록하는가: Supervisor의 순차 실행·단계별 전체 진척 보고 지시에 따라 B0-B 구현·검증을 마감하고 B1 착수 조건 해소를 인계한다.
+- 상태: **B0-A/B 지정 출구 완료**, B1~B7 미착수. 전체21/40=52.5%, 로컬18/28≈64% 유지. 실제 회사 인증/배포/전체T3 완료가 아니다.
+- 결정 및 근거: `docs/handoff/L2_STUDIO_B0B_CERTIFICATION_2026-09-13.md`. 승인 정책 정본·실제 종류별 역할/위임/PDP, 불변subject/revision/digest, 기존 서명 재검사, 완료 후 멱등, 단일 DP 원자성, 실제 owner/저장root 조회 경계, stale/hold 표시를 구현했다. 일반 관리자/직함을 서명권으로 쓰지 않는다.
+- 검증: `output/usage-holds-3tnn8abh/tests.xml`·`isolation.json`, **382 passed / 135.97초**, SQLite473경로 임시루트, source불변·금지접근0·전역conftest 없음. 기존322+신규60. 직전158/1→365→378→380 결과와 수정은 인계 문서에 구분했다.
+- 교차검토: 요청 Codex / Lorentz(`01a09618-0d9a-7241-a502-da93aa59e50a`) / 최초5건·후속4건·최종보류조회1건 수정 및 정적 재확인. 마지막 권한표·거부감사 보완에서도 새 P1/P2 없음. 검토자는 테스트/DB/파일 수정 없이 정적 검토, 최종 시험은 메인 담당자가 실행했다.
+- 영향·주의사항: 권고5·6/G2-D 및 G4 입력신뢰성의 선행 안전성 관문 전진. DP 내부 원자성만 보장, Org/ECM/Ledger 분산 직렬화 아님. 실제 회사 역할 매핑 자동등록 없음. 기존 JSON은 안내/제안이며 실제 서명 정책은 승인된 회사 판본. 전체T3·starter자산 실행순서 문제는 별도 미종결로 유지한다.
+- 다음 행동 / 담당 / 착수 조건: Codex / B1 L2v2 저장·권한·CAS·old-writer guard / B0 지정 출구 충족으로 착수 가능. B4/B5 UI로 건너뛰지 않는다. 후속 패키지/전역 시험은 자산 쓰기 격리를 먼저 확인한다.
+- 교대 체크포인트: 브랜치 codex/l2-unified-studio-20260912, HEAD58e666833 · 코드/시험/문서 로컬 미커밋·미푸시 · 운영 DB/RAW/역할/승인/앱/배포 변경 없음 · 사용자 실행로그SHA7720cc456594ee3f3d5387d16c35ca26ec303fd177e0cb1eee05538223dcf510 불변·제외 · 재개=B1 · 금지=시험건수의제품점수가산/실제회사매핑임의활성화/기존로그포함일괄커밋/무승인push.
+
+### [L2-STUDIO-B0-20260913] 순차 구현 — B0-A 완료, 인증 원자성 보완 / B0-B 전체 미완
+
+- 작성자 / 기록 시각: Codex / 2026-09-13 00:12 KST
+- 왜 지금 기록하는가: Supervisor의 설계 순차 구현·단계별 전체 진척 보고 지시에 따라 실제 코드·시험·독립 검토 결과와 남은 출구를 인계한다.
+- 상태: **B0-A 완료 / B0-B 부분 / B1~B7 미착수**. 전체21/40=52.5%, 로컬18/28≈64% 유지.
+- 결정 및 근거: docs/handoff/L2_STUDIO_B0_IMPLEMENTATION_2026-09-13.md. R0는 기존574c26fd8·새58e666833 정상 push/원격 일치로 완료. 구현 시작 HEAD58e666833, 현재 공유 브랜치 codex/l2-unified-studio-20260912.
+- 실제 변경: store 읽기 snapshot/명시 conn, projection 소비 및 구조화 프로젝트 HTTP 오류, 기존7실패 복구. 서명은 fresh DP write transaction에서 상태/기간/용도와 함께 확정, 별도 인증 fallback 제거, 기간·서명 덮어쓰기 차단. generic 상태 전환 helper로 기존 보류·성격·인증자 관문 재사용.
+- 검증: 최종322 passed/71.57초, output/usage-holds-1avm64wq/tests.xml·isolation.json. 임시 SQLite237경로, 금지 접근0·소스 불변·전역 conftest 없음. 중간 fixture 오류27+2건은 각각 경로 오탐/키트 미등록을 수정한 기록이며 SKIP하지 않았다.
+- 교차검토: 요청 Codex / Boyle(B0-A) P2 1건→명시conn·rollback 시험 보완→한정 PASS. Lorentz(B0-B 최소 원자성) 새 결함 발견 없음, 전체 인증 조건 미충족은 별도. 실제 회사 승인·전체 보안 감사·독립 테스트 실행으로 기록하지 않는다.
+- 영향·주의사항: 인증 서비스 시험은 소유/권한 대역을 사용하는 기존 단위 fixture이며 종류별 실제 서명권을 증명하지 않는다. HTTP는 실제 임시 조직/ECM 판정+합성 개발 신원이다. 회사 역할 매핑·불변 subject·정책/소유권 판본·기존 서명 재평가·완료 후 요청 멱등·전체 문맥/GET 일관성이 남는다. 운영 인증·배포 가능으로 승인하지 않는다.
+- 다음 행동 / 담당 / 착수 조건: Codex가 B0-B 남은 can_sign/승인 매핑 정본·subject·멱등을 구현하고 U03/U20/U21 전체를 검증. 코드 구현을 위한 추가 사용자 선택은 없으며 실제 회사 역할표 등록/활성화만 별도 승인이다. B0 전부 닫기 전 B1/UI로 우회 금지.
+- 교대 체크포인트: 로컬 코드·회귀·문서 변경 보존, 이번 커밋/푸시 없음 · 사용자 실행로그SHA7720cc456594ee3f3d5387d16c35ca26ec303fd177e0cb1eee05538223dcf510 불변·제외 · 실제DB/RAW/역할/승인/앱/배포 변경 없음 · 재개=B0-B 종류별권한/subject부터 · 금지=322시험을제품322기능/전체B0완료로계산, 과거관리지표로진척재산정.
 
 ### [L2-STUDIO-REVIEW-CLOSED-20260912] 상세 설계·독립 이중검토 종결 / 푸시 승인 대기
 

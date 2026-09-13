@@ -1,6 +1,13 @@
 import { create } from 'zustand';
+import {
+  startExistingTask, pauseSprint as requestPauseSprint, stopSprint as requestStopSprint,
+  requestSelfHealing, saveProjectRelease, rejectedCommand, isProjectCommandPending,
+} from '../factory/sprintActions';
+import type { ExistingTaskInput, SprintResult, HealingResult, ReleaseResult } from '../factory/sprintActions';
 
 export interface ProjectState {
+  studio_execution_state?: { task_id: string; running: boolean;
+    pause: { status: string; resumable: boolean; reason_code: string } };
   project_name: string;
   template_id?: string;
   initial_idea?: string;
@@ -125,14 +132,14 @@ interface FactoryStore {
    *  공유된 프로젝트라서인지 서버 문제인지 구분할 수 없다 — 셋은 할 일이 다르다. */
   projectActionError: string;
   connectSSE: () => void | Promise<void>;
-  fetchWBS: () => Promise<void>;
+  fetchWBS: (force?: boolean) => Promise<void>;
   fetchLatestState: () => Promise<void>;
   checkHotl: () => Promise<void>;
   fetchFeed: () => Promise<void>;
   fetchReleases: () => Promise<void>;
   /** 성공/실패와 **이유**를 함께 돌려준다 — `null` 하나로 뭉개면 화면이 원인을 지어낸다. */
   saveRelease: (projectId: string) =>
-    Promise<{ ok: boolean; releaseId: string | null; message: string }>;
+    Promise<ReleaseResult>;
   viewRelease: (releaseId: string) => Promise<void>;
   closeRelease: () => void;
   deleteRelease: (releaseId: string) => Promise<void>;
@@ -158,8 +165,10 @@ interface FactoryStore {
   openFormatPanel: () => void;
   closeFormatPanel: () => void;
   clearSprintData: () => void;
-  triggerSelfHealing: (errorMsg: string) => Promise<void>;
-  stopSprint: (projectId: string, taskId: string) => Promise<void>;
+  triggerSelfHealing: (errorMsg: string) => Promise<HealingResult>;
+  startSprint: (projectId: string, taskId: string, input?: ExistingTaskInput, feedback?: string) => Promise<SprintResult>;
+  pauseSprint: (projectId: string, taskId: string) => Promise<SprintResult>;
+  stopSprint: (projectId: string, taskId: string) => Promise<SprintResult>;
 }
 
 //: ★★★ [WEB-1] **API 주소는 `lib/api.ts` 한 곳에서만 정한다.**
@@ -174,7 +183,7 @@ export { API_BASE_URL };
 // [CL-4] 사용자 식별을 쿼리로 싣는 공용 헬퍼. 여기서 다시 구현하지 않는다.
 //: [P0-1C] `apiUrl` 은 더 이상 쓰지 않는다 — 마지막 사용처였던 SSE 가 1회용 접속표로
 //  옮겨 갔다(P0-1B). 남겨 두면 «쿼리로 신원을 싣는 방법이 아직 있다» 로 읽힌다.
-import { getEnterpriseContext, getSessionToken } from '../lib/api';
+import { getActingUser, getEnterpriseContext, getSessionToken } from '../lib/api';
 
 // 단일 SSE 연결만 유지 — StrictMode 이중 마운트/자동 재연결 시 중복 연결로 이벤트가 2번 수신되는 것 방지
 let _sseConn: EventSource | null = null;
@@ -195,6 +204,62 @@ let _sseReconnectTimer: ReturnType<typeof setTimeout> | null = null;
  *  ⚠️ 프로젝트를 바꾸면 반드시 비운다. 안 비우면 새 프로젝트의 첫 판본이 «이미 가진 것» 으로
  *    읽혀 **첫 갱신을 통째로 건너뛴다.** */
 let _lastStateVersion = '';
+
+// 프로젝트 A→B→A와 같은 값으로 돌아온 경우도 이전 요청을 재사용하지 않는다.
+let _projectGeneration = 0;
+let _identityGeneration = 0;
+const _readGeneration = { wbs: 0, state: 0, hotl: 0, feed: 0, releases: 0 };
+let _healingInFlight: (() => boolean) | null = null;
+if (typeof window !== 'undefined') {
+  const invalidateIdentity = () => { _identityGeneration += 1; };
+  window.addEventListener('factory:session-changed', invalidateIdentity);
+  window.addEventListener('factory:enterprise-context-changed', invalidateIdentity);
+}
+
+/** 표시 수명 검사이지 권한 판정이 아니다. 서버 PDP는 모든 요청에서 그대로 수행된다. */
+function currentProjectRequest(
+  get: () => FactoryStore, projectId: string | null,
+  reader?: keyof typeof _readGeneration,
+): () => boolean {
+  const projectGeneration = _projectGeneration;
+  const identityGeneration = _identityGeneration;
+  const session = getSessionToken();
+  const actor = getActingUser();
+  const context = getEnterpriseContext();
+  const contextValues = [context.tenantId, context.scopeNodeId, context.entityMode];
+  const readGeneration = reader ? ++_readGeneration[reader] : 0;
+  return () => {
+    const currentContext = getEnterpriseContext();
+    return get().currentProjectId === projectId && _projectGeneration === projectGeneration
+      && _identityGeneration === identityGeneration && getSessionToken() === session
+      && getActingUser() === actor && currentContext === context
+      && currentContext.tenantId === contextValues[0] && currentContext.scopeNodeId === contextValues[1]
+      && currentContext.entityMode === contextValues[2]
+      && (!reader || _readGeneration[reader] === readGeneration);
+  };
+}
+
+function refreshExecution(get: () => FactoryStore) {
+  // 쓰기 재전송 없음. 조회 실패가 원래 명령의 접수/거절 결과를 덮지 않는다.
+  void Promise.allSettled([get().fetchLatestState(), get().fetchWBS(true), get().checkHotl()]);
+}
+
+async function currentSprintCommand(
+  get: () => FactoryStore, projectId: string, send: () => Promise<SprintResult>,
+): Promise<SprintResult> {
+  if (!projectId || get().currentProjectId !== projectId) {
+    return rejectedCommand('현재 선택한 프로젝트의 작업만 요청할 수 있습니다.', 'CURRENT_PROJECT_REQUIRED');
+  }
+  const isCurrent = currentProjectRequest(get, projectId);
+  const result = await send();
+  if (!isCurrent()) return { ok: false, outcome: 'UNKNOWN', status: result.status,
+    requestId: result.requestId,
+    reasonCode: 'CONTEXT_CHANGED',
+    message: '요청 중 프로젝트 또는 사용자 문맥이 변경되었습니다. 원래 프로젝트에서 결과를 확인하십시오.' };
+  if (result.outcome === 'ACCEPTED' || result.outcome === 'CONFIRMED' || result.outcome === 'UNKNOWN') refreshExecution(get);
+  // 접수 응답으로 active/HOTL/실패 근거를 초기화하지 않는다. 실제 이벤트/조회가 담당한다.
+  return result;
+}
 
 export const useFactoryStore = create<FactoryStore>()((set, get) => ({
   state: null,
@@ -239,11 +304,13 @@ export const useFactoryStore = create<FactoryStore>()((set, get) => ({
   setActiveSprintId: (id) => set({ activeSprintId: id }),
 
   setCurrentProject: (id) => {
+    _projectGeneration += 1;
     //: ⚠️ [G1-C1.1] 상태 판본을 **반드시 비운다.** 남겨 두면 새 프로젝트의 첫
     //   `NODE_COMPLETED` 판본이 «이미 가진 것» 으로 읽혀 첫 갱신을 통째로 건너뛴다.
     _lastStateVersion = '';
     set({
       currentProjectId: id, state: null, wbsData: null, logs: [],
+      isWbsError: false, wbsErrorCount: 0, isSuspendedQuota: false, suspendedTaskId: null,
       completed_agents: [], currentActivity: null, lastSprintFailure: null, supervisorFeed: [], healingRetryCount: 0, activeSprintId: null, hotlTaskId: null, currentTemplateData: null
     });
     if (id) {
@@ -349,29 +416,14 @@ export const useFactoryStore = create<FactoryStore>()((set, get) => ({
     }
   },
 
-  stopSprint: async (projectId: string, taskId: string) => {
-    try {
-      const res = await fetch(`${API_BASE_URL}/api/v1/factory/${projectId}/sprint/stop`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ task_id: taskId })
-      });
-      if (!res.ok) {
-        alert("스프린트 중지 요청이 서버에서 거부되었습니다.");
-      }
-    } catch (error) {
-      console.error('Stop sprint API failed, but UI state will be forcefully cleared:', error);
-      alert("서버에 연결할 수 없어 강제로 UI 상태를 초기화합니다.");
-    } finally {
-      // API 통신 성공/실패 여부와 관계없이 무조건 프론트엔드의 진행 중 상태를 초기화하여 UI 블로킹 해제
-      // needs_revision/current_sprint_task_id 까지 지워야 정지 후 'HOTL 대기 중' 유령 배너와
-      // 죽은 태스크에 대한 승인(resume) 버튼이 남지 않는다
-      set((prev) => ({
-        activeSprintId: null, hotlTaskId: null, currentActivity: null,
-        state: prev.state ? ({ ...prev.state, needs_revision: false, current_sprint_task_id: "" } as ProjectState) : null,
-      }));
-    }
-  },
+  startSprint: (projectId, taskId, input, feedback) =>
+    currentSprintCommand(get, projectId, () => startExistingTask(projectId, taskId, input, feedback)),
+
+  pauseSprint: (projectId, taskId) =>
+    currentSprintCommand(get, projectId, () => requestPauseSprint(projectId, taskId)),
+
+  stopSprint: (projectId, taskId) =>
+    currentSprintCommand(get, projectId, () => requestStopSprint(projectId, taskId)),
 
   copyProject: async (id: string, newName: string) => {
     try {
@@ -453,12 +505,13 @@ export const useFactoryStore = create<FactoryStore>()((set, get) => ({
   checkHotl: async () => {
     const pid = get().currentProjectId;
     if (!pid) return;
+    const isCurrent = currentProjectRequest(get, pid, 'hotl');
     try {
       const res = await fetch(`${API_BASE_URL}/api/v1/factory/${pid}/hotl/check`);
       if (res.ok) {
         const r = await res.json();
         // 전환 중 늦게 도착한 '이전 프로젝트' 응답이 새 프로젝트에 HOTL 대기를 주입하지 않도록 재검증
-        if (get().currentProjectId !== pid) return;
+        if (!isCurrent()) return;
         if (r.hotl_task_id) {
           set((prev) => ({
             hotlTaskId: r.hotl_task_id,
@@ -475,11 +528,12 @@ export const useFactoryStore = create<FactoryStore>()((set, get) => ({
   fetchFeed: async () => {
     const pid = get().currentProjectId;
     if (!pid) return;
+    const isCurrent = currentProjectRequest(get, pid, 'feed');
     try {
       const res = await fetch(`${API_BASE_URL}/api/v1/factory/${pid}/feed`);
       if (res.ok) {
         const r = await res.json();
-        if (get().currentProjectId !== pid) return; // 프로젝트 전환 중 stale 응답 차단
+        if (!isCurrent()) return;
         if (Array.isArray(r.data)) set({ supervisorFeed: r.data.slice(-200) });
       }
     } catch (error) {
@@ -488,11 +542,12 @@ export const useFactoryStore = create<FactoryStore>()((set, get) => ({
   },
 
   fetchReleases: async () => {
+    const isCurrent = currentProjectRequest(get, get().currentProjectId, 'releases');
     try {
       const res = await fetch(`${API_BASE_URL}/api/v1/factory/library/list`);
       if (res.ok) {
         const r = await res.json();
-        set({ releases: Array.isArray(r.data) ? r.data : [] });
+        if (isCurrent()) set({ releases: Array.isArray(r.data) ? r.data : [] });
       }
     } catch (error) {
       console.error("라이브러리 목록 로드 실패:", error);
@@ -509,33 +564,17 @@ export const useFactoryStore = create<FactoryStore>()((set, get) => ({
    *  ⚠️ 반환 타입을 바꿨으므로 호출부 둘(`ControlPanel`·`RunControls`)을 **함께** 고쳤다.
    *    한쪽만 고치면 그 화면만 계속 원인을 지어낸다. */
   saveRelease: async (projectId: string) => {
-    try {
-      const res = await fetch(`${API_BASE_URL}/api/v1/factory/${projectId}/release`, { method: 'POST' });
-      if (res.ok) {
-        const r = await res.json();
-        await get().fetchReleases();
-        return { ok: true as const, releaseId: r.release_id || null, message: '' };
-      }
-      const j = await res.json().catch(() => ({} as any));
-      const detail = typeof j?.detail === 'string' ? j.detail : '';
-      return {
-        ok: false as const,
-        releaseId: null,
-        // 서버가 이유를 말했으면 **그대로** 쓴다. 없을 때만 상태 코드로 갈라 쓴다.
-        message: detail || (res.status === 403 || res.status === 401
-          ? '이 프로젝트의 릴리스를 저장할 권한이 없습니다.'
-          : res.status === 409 ? '이미 저장된 릴리스가 있거나 저장할 수 없는 상태입니다.'
-            : `서버가 저장을 거부했습니다 (${res.status}).`),
-      };
-    } catch (error) {
-      console.error("최종 결과물 저장 실패:", error);
-      // ⚠️ 여기는 **서버에 닿지 못한 것**이다 — 산출물·권한 문제가 아니다.
-      return {
-        ok: false as const, releaseId: null,
-        message: '서버에 연결하지 못했습니다 — 산출물이나 권한 문제가 아닙니다. '
-          + '백엔드가 떠 있는지 확인한 뒤 다시 시도하십시오.',
-      };
+    if (!projectId || get().currentProjectId !== projectId) {
+      return { ...rejectedCommand('현재 선택한 프로젝트의 릴리스만 저장할 수 있습니다.', 'CURRENT_PROJECT_REQUIRED'),
+        releaseId: null };
     }
+    const isCurrent = currentProjectRequest(get, projectId);
+    const result = await saveProjectRelease(projectId);
+    if (!isCurrent()) return { ok: false, outcome: 'UNKNOWN', releaseId: null,
+      reasonCode: 'CONTEXT_CHANGED', status: result.status,
+      message: '저장 요청 중 문맥이 변경되었습니다. 원래 프로젝트의 릴리스 목록에서 결과를 확인하십시오.' };
+    if (result.outcome === 'ACCEPTED' || result.outcome === 'UNKNOWN') void get().fetchReleases();
+    return result;
   },
 
   viewRelease: async (releaseId: string) => {
@@ -869,46 +908,52 @@ export const useFactoryStore = create<FactoryStore>()((set, get) => ({
 
   triggerSelfHealing: async (errorMsg: string) => {
     const { currentProjectId, isConnected, healingRetryCount } = get();
-    if (!currentProjectId || !isConnected) return;
-
-    if (healingRetryCount >= 3) {
-       // window.onerror 는 에러마다 반복 발화하므로 경고는 정확히 1회만(alert 폭풍 방지)
-       if (healingRetryCount === 3) {
-         set({ healingRetryCount: 4 });
-         alert(`🚨 [자가 치유 실패] 3회 연속 복구에 실패했습니다.\n에러: ${errorMsg}\n수동 개입(코드 수정)이 필요합니다.`);
-       }
-       return;
-    }
-
+    if (!currentProjectId) return { ok: false, outcome: 'LOCAL_BLOCKED', reasonCode: 'PROJECT_REQUIRED',
+      message: '복구할 프로젝트를 선택하십시오.' };
+    if (!isConnected) return { ok: false, outcome: 'LOCAL_BLOCKED', reasonCode: 'CONNECTION_REQUIRED',
+      message: '연결이 끊겨 복구를 요청하지 않았습니다. 연결과 현재 상태를 확인하십시오.' };
+    if (healingRetryCount >= 3) return { ok: false, outcome: 'LOCAL_BLOCKED', reasonCode: 'LOCAL_RETRY_LIMIT',
+      message: '현재 화면의 복구 요청 3회 제한에 도달했습니다. 실패 근거를 확인하고 수동 검토하십시오.' };
+    if (_healingInFlight?.()) return { ok: false, outcome: 'LOCAL_BLOCKED', reasonCode: 'HEAL_IN_FLIGHT',
+      message: '복구 요청의 응답을 기다리고 있습니다. 중복 요청하지 마십시오.' };
+    if (isProjectCommandPending(currentProjectId)) return { ok: false, outcome: 'LOCAL_BLOCKED', reasonCode: 'COMMAND_PENDING',
+      message: '이 프로젝트의 다른 요청 결과를 기다리고 있어 복구 요청을 보내지 않았습니다.' };
+    const isCurrent = currentProjectRequest(get, currentProjectId);
+    _healingInFlight = isCurrent;
+    // 로컬 요청 횟수일 뿐, 서버 복구 예산이나 성공/실패 횟수의 증거가 아니다.
     set({ healingRetryCount: healingRetryCount + 1 });
-    console.warn(`🩹 [자가 치유 가동] AI가 에러를 감지하고 스스로 복구를 시도합니다. (시도: ${healingRetryCount + 1}/3)`);
-
     try {
-      await fetch(`${API_BASE_URL}/api/v1/factory/${currentProjectId}/heal`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ error_log: errorMsg })
-      });
-    } catch (error) {
-      console.error("자가 치유 트리거 실패:", error);
+      const result = await requestSelfHealing(currentProjectId, errorMsg, get().lastSprintFailure?.taskId || 'sprint_init');
+      if (!isCurrent()) return { ok: false, outcome: 'UNKNOWN', reasonCode: 'CONTEXT_CHANGED',
+        requestId: result.requestId,
+        message: '복구 요청 중 문맥이 변경되었습니다. 원래 프로젝트에서 작업 생성 여부를 확인하십시오.' };
+      // 반환 taskId는 새 관찰 대상이며, 원래 실패 task/근거를 지우거나 실행 완료로 간주하지 않는다.
+      if (result.outcome === 'HEAL_STARTED' || result.outcome === 'HOTL_PENDING' || result.outcome === 'UNKNOWN') {
+        refreshExecution(get);
+      }
+      return result;
+    } finally {
+      if (_healingInFlight === isCurrent) _healingInFlight = null;
     }
   },
 
-  fetchWBS: async () => {
+  fetchWBS: async (force = false) => {
     const { currentProjectId, isWbsError } = get();
-    if (isWbsError || !currentProjectId) return;
+    if ((isWbsError && !force) || !currentProjectId) return;
+    const isCurrent = currentProjectRequest(get, currentProjectId, 'wbs');
 
     try {
       const res = await fetch(`${API_BASE_URL}/api/v1/factory/${currentProjectId}/wbs`);
       if (!res.ok) throw new Error("Fetch Fail");
       const result = await res.json();
-      if (get().currentProjectId !== currentProjectId) return; // 프로젝트 전환 중 stale 응답 차단
+      if (!isCurrent()) return;
       if (result.status === "success") {
-        set({ wbsData: result.data, wbsErrorCount: 0 });
+        set({ wbsData: result.data, wbsErrorCount: 0, isWbsError: false });
       } else if (result.status === "not_found") {
-        set({ wbsData: null, wbsErrorCount: 0 }); 
+        set({ wbsData: null, wbsErrorCount: 0, isWbsError: false });
       }
     } catch (error) {
+      if (!isCurrent()) return;
       const newCount = get().wbsErrorCount + 1;
       set({ wbsErrorCount: newCount, isWbsError: newCount >= 3 });
     }
@@ -917,21 +962,28 @@ export const useFactoryStore = create<FactoryStore>()((set, get) => ({
   fetchLatestState: async () => {
     const pid = get().currentProjectId;
     if (!pid) return;
+    const isCurrent = currentProjectRequest(get, pid, 'state');
 
     try {
       const res = await fetch(`${API_BASE_URL}/api/v1/factory/${pid}/state/latest`);
       if (!res.ok) return;
       const result = await res.json();
       // 전환 중 늦게 도착한 '이전 프로젝트' 응답을 새 프로젝트 store 에 덮지 않도록 재검증
-      if (get().currentProjectId !== pid) return;
+      if (!isCurrent()) return;
       if (result.status === "success" && result.data) {
         // 머지(...prev.state) 금지 — 전체 교체. 빈 누적 필드가 이전 프로젝트 값으로 남는 stale 누수 차단.
         set({ state: { ...result.data } as ProjectState });
+        const execution = result.data.studio_execution_state;
+        if (execution && execution.task_id === result.data.current_sprint_task_id && typeof execution.running === 'boolean') {
+          if (execution.running) set({ activeSprintId: execution.task_id });
+          else if (get().activeSprintId === execution.task_id) set({ activeSprintId: null, currentActivity: null });
+        }
         const tid = result.data.template_id || 'default';
         try {
           const tRes = await fetch(`${API_BASE_URL}/api/v1/factory/templates/${tid}`);
           if (tRes.ok) {
             const tData = await tRes.json();
+            if (!isCurrent()) return;
             let templateData = tData.data;
             // 🎯 [서브 프로젝트 에이전트 필터링] domain_agents가 존재하면 해당 에이전트 + 프레임워크 에이전트만 남김
             const domainAgents: string[] = result.data.domain_agents || [];
@@ -952,12 +1004,15 @@ export const useFactoryStore = create<FactoryStore>()((set, get) => ({
             const tRes = await fetch(`${API_BASE_URL}/api/v1/factory/templates/${tid}`);
             if (tRes.ok) {
               const tData = await tRes.json();
+              if (!isCurrent()) return;
               set({ state: null, currentTemplateData: tData.data });
             } else {
+              if (!isCurrent()) return;
               set({ state: null, currentTemplateData: null });
             }
           } catch(e) { 
             console.error("템플릿 정보 로드 실패", e);
+            if (!isCurrent()) return;
             set({ state: null, currentTemplateData: null }); 
           }
         } else {
@@ -986,6 +1041,7 @@ export const useFactoryStore = create<FactoryStore>()((set, get) => ({
     // ⚠️ 표는 **연결할 때마다 새로 받는다.** 재사용하면 서버가 거절한다(1회 소비).
     // ⚠️ 발급에 실패하면 **연결하지 않는다** — `as_user` 로 되돌아가면 그것이 곧 우회로다.
     const myGen = ++_sseGeneration;
+    const identityGeneration = _identityGeneration;
 
     // ⚠️ 세션이 없으면 **아예 시도하지 않는다.** 로그인 전에 5초마다 발급 API 를 두드리면
     //   서버 로그가 401 로 뒤덮이고, 정작 진짜 문제가 묻힌다. 로그인하면 화면이 다시 부른다.
@@ -1008,7 +1064,7 @@ export const useFactoryStore = create<FactoryStore>()((set, get) => ({
       ticket = ((await r.json())?.data?.ticket) || '';
     } catch (e) {
       // 세션이 끊겼거나 서버가 죽었다. 조용히 익명 연결하지 않는다.
-      if (myGen !== _sseGeneration) return;        // 더 새 시도가 있으면 물러난다
+      if (myGen !== _sseGeneration || identityGeneration !== _identityGeneration) return;
       set({ isConnected: false });
       if (!_sseReconnectTimer) {
         _sseReconnectTimer = setTimeout(() => { _sseReconnectTimer = null; get().connectSSE(); }, 5000);
@@ -1018,16 +1074,22 @@ export const useFactoryStore = create<FactoryStore>()((set, get) => ({
 
     // ★ 표를 받아 오는 사이에 더 새 시도가 시작됐다면 **여기서 멈춘다.**
     //   그대로 진행하면 고아 EventSource 가 생긴다(닫히지 않고 이벤트는 계속 받는다).
-    if (myGen !== _sseGeneration) return;
+    if (myGen !== _sseGeneration || identityGeneration !== _identityGeneration) return;
     if (!ticket) { set({ isConnected: false }); return; }
 
     const eventSource = new EventSource(
       `${API_BASE_URL}/ws/timeline?ticket=${encodeURIComponent(ticket)}`);
     _sseConn = eventSource;
 
-    eventSource.onopen = () => { set({ isConnected: true }); get().checkHotl(); };
+    const isCurrentConnection = () => _sseConn === eventSource && myGen === _sseGeneration
+      && identityGeneration === _identityGeneration;
+    eventSource.onopen = () => {
+      if (!isCurrentConnection()) return;
+      set({ isConnected: true }); get().checkHotl();
+    };
 
     eventSource.onmessage = (event) => {
+      if (!isCurrentConnection()) return;
       const data = JSON.parse(event.data);
 
       // 🔒 SSE 프로젝트 격리(fail-closed): 프로젝트를 보고 있는데 이벤트의 project_id 가
@@ -1134,6 +1196,7 @@ export const useFactoryStore = create<FactoryStore>()((set, get) => ({
     };
 
     eventSource.onerror = () => {
+      if (!isCurrentConnection()) return;
       set({ isConnected: false });
       try { eventSource.close(); } catch (e) { /* noop */ }
       if (_sseConn === eventSource) _sseConn = null;

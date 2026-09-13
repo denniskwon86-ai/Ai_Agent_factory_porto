@@ -643,8 +643,14 @@ class OrgDirectory:
           첫 사용자가 등록되는 순간부터 정상 강제된다."""
         return not self.has_any_department() or not self.has_any_user()
 
-    def resolve_scope(self, user_id: str = "") -> AccessScope:
+    def resolve_scope(self, user_id: str = "", *, fresh: bool = False) -> AccessScope:
         """사용자의 확정 권한 스코프. 캐시되며 조직 쓰기 시 무효화된다."""
+        if fresh:
+            # 서명 명령은 다른 인스턴스가 회수한 권한도 재조회한다. 공유 캐시는 사용하지 않는다.
+            import copy
+            uncached = copy.copy(self)
+            uncached._scope_cache = {}
+            return uncached.resolve_scope(user_id)
         key = user_id or "__anon__"
         cached = self._scope_cache.get(key)
         if cached is not None:

@@ -6,7 +6,7 @@ export function catalogReleases(rows: any[], includeStopped = false, query = '')
       || String(row.release_id || '').toLowerCase().includes(key)));
 }
 
-export function releaseLifecycleView(row: any, kitApp?: { lifecycle_state?: string }) {
+export function releaseLifecycleView(row: any, kitApp?: { lifecycle_state?: string | null }) {
   if (row.lifecycle_status === 'disabled') {
     return { label: '사용 중단 · 보관', tone: 'var(--state-error-fg)',
       detail: row.lifecycle_reason || '코드와 이력은 보존되며 실행은 중단됐습니다.', executable: false };

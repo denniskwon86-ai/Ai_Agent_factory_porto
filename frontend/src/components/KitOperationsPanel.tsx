@@ -1,12 +1,13 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 
 import { HubDialog } from '../design/HubDialog';
 import { EmptyOrError } from '../design/DataState';
 import { DataPrepError, listInstances } from '../lib/dataPrepApi';
 import { HubShell, type RailItem } from '../design/HubShell';
 import { JarvisRail } from '../design/JarvisRail';
-import { getEnterpriseContext } from '../lib/api';
+import { studioIdentityKey } from '../factory/studioInputMemory';
 import { KitAppPanel } from './KitAppPanel';
+import { CompanySetupPanel } from './CompanySetupPanel';
 
 type Props = {
   onClose?: () => void;
@@ -15,6 +16,11 @@ type Props = {
   page?: boolean;
 };
 type OperationsView = 'all' | 'active' | 'candidate' | 'pending';
+type InstanceRow = Record<string, unknown> & { instance_id: string; label?: string; entity_mode?: string; status?: string };
+function subscribeKitOperationsContext(listener: () => void) {
+  for (const event of ['factory:enterprise-context-changed', 'factory:session-changed', 'factory:acting-user-changed']) window.addEventListener(event, listener);
+  return () => { for (const event of ['factory:enterprise-context-changed', 'factory:session-changed', 'factory:acting-user-changed']) window.removeEventListener(event, listener); };
+}
 
 const OPERATIONS_ITEMS: { id: OperationsView; label: string; hint: string }[] = [
   { id: 'all', label: '전체 앱', hint: '현재 회사에 적용된 업무 앱 전체' },
@@ -58,46 +64,48 @@ function instanceStatusLabel(value: unknown): string {
 }
 
 /** 현재 조직에 실제 적용된 업무키트 앱을 찾고 실행하는 제품 진입점. */
-export function KitOperationsPanel({
+export function KitOperationsPanel(props: Props) {
+  const identity = useSyncExternalStore(subscribeKitOperationsContext, studioIdentityKey, studioIdentityKey);
+  return <KitOperationsContent key={identity} {...props} identity={identity} />;
+}
+
+function KitOperationsContent({
   onClose, onOpenBuild, onOpenSimulation, page = false,
-}: Props) {
-  const [instances, setInstances] = useState<any[] | null>(null);
+  identity,
+}: Props & { identity: string }) {
+  const [instances, setInstances] = useState<InstanceRow[] | null>(null);
   const [selected, setSelected] = useState('');
   const [error, setError] = useState('');
   const [view, setView] = useState<OperationsView>('all');
   const [revision, setRevision] = useState(0);
-  const contextRef = useRef(getEnterpriseContext());
+  const [showProcessConfiguration, setShowProcessConfiguration] = useState(false);
+  const hideUnavailable = useCallback(() => {
+    setInstances(null); setSelected(''); setError(''); setRevision(value => value + 1);
+  }, []);
+  const processButton = useRef<HTMLButtonElement>(null);
+  const processWasOpen = useRef(false);
+  useEffect(() => {
+    if (!showProcessConfiguration && processWasOpen.current) processButton.current?.focus();
+    processWasOpen.current = showProcessConfiguration;
+  }, [showProcessConfiguration]);
 
   useEffect(() => {
     let alive = true;
-    setError('');
+    queueMicrotask(() => { if (alive) { setError(''); setInstances(null); } });
     listInstances().then((result) => {
-      if (!alive) return;
-      const rows = result.instances || [];
+      if (!alive || identity !== studioIdentityKey()) return;
+      if (!Array.isArray(result.instances) || result.instances.some((row: InstanceRow) => !row || typeof row.instance_id !== 'string')) throw new Error('적용본 목록 응답을 확인하지 못했습니다.');
+      const rows: InstanceRow[] = result.instances;
       setInstances(rows);
-      if (rows.length === 1) setSelected(String(rows[0].instance_id || ''));
+      setSelected((previous) => rows.some((row) => String(row.instance_id || '') === previous)
+        ? previous : rows.length === 1 ? String(rows[0].instance_id || '') : '');
     }).catch((reason: unknown) => {
-      if (!alive) return;
+      if (!alive || identity !== studioIdentityKey()) return;
       const err = reason as DataPrepError;
       setError(err?.message || '업무 앱을 확인하지 못했습니다.');
     });
     return () => { alive = false; };
-  }, [revision]);
-
-  useEffect(() => {
-    const refresh = () => {
-      const next = getEnterpriseContext();
-      if (next.tenantId !== contextRef.current.tenantId) {
-        // 회사가 바뀌는 동안 앞 회사의 적용본을 새 회사 화면에 남겨 두지 않는다.
-        setInstances(null);
-        setSelected('');
-      }
-      contextRef.current = next;
-      setRevision((value) => value + 1);
-    };
-    window.addEventListener('factory:enterprise-context-changed', refresh);
-    return () => window.removeEventListener('factory:enterprise-context-changed', refresh);
-  }, []);
+  }, [revision, identity]);
 
   const selectedInstance = (instances || []).find(
     (row) => String(row.instance_id || '') === selected,
@@ -144,6 +152,8 @@ export function KitOperationsPanel({
           })}
         </div>}
         <button className="primary-button" onClick={onOpenBuild}>＋ 새 업무키트 앱</button>
+        <button ref={processButton} type="button" className="secondary-button"
+          onClick={() => setShowProcessConfiguration(true)}>업무 구성 · L1/L2 수정</button>
       </div>
 
       <p style={{ fontSize: 12, color: 'var(--surface-text-faint)', margin: 0 }}>
@@ -193,6 +203,7 @@ export function KitOperationsPanel({
                 <div style={{ border: '1px solid var(--surface-border)', borderRadius: 8,
                   background: 'var(--surface-card)' }}>
                   <KitAppPanel instanceId={selected} mode="operate" statusFilter={view}
+                    onVisibilityLost={hideUnavailable}
                     onOpenSimulation={onOpenSimulation} />
                 </div>
               )}
@@ -201,6 +212,13 @@ export function KitOperationsPanel({
     </div>
   );
 
+  // 기존 운영 대화상자와 중첩하지 않고 같은 회사 설정 화면으로 전환한다.
+  if (showProcessConfiguration) return <CompanySetupPanel initialTab="thread"
+    onClose={() => {
+      setInstances(null);
+      setRevision((value) => value + 1);
+      setShowProcessConfiguration(false);
+    }} />;
   if (page) return (
     <HubShell layoutClassName="product-page-shell"
       kicker="APP OPERATIONS" title="앱 운영"

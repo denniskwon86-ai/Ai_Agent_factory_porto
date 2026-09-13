@@ -1,0 +1,53 @@
+{
+  "recorded_at": "2026-09-13T23:30:00+09:00",
+  "kind": "human_verified_summary_not_full_raw_evidence",
+  "data_delivery_status": "LOCAL_VERIFIED_PUBLIC_CIPHERTEXT_UPLOAD_AWAITING_EXPLICIT_APPROVAL",
+  "product_progress": {"complete": 21, "total": 40, "percent": 52.5},
+  "b5_server_last_feature_run": {
+    "report": "output/usage-holds-4w0j3fcs/isolation.json",
+    "passed": 260,
+    "pytest_seconds": 163.16,
+    "wrapper_seconds": 179.04851680001593,
+    "wrapper_exit_code": 0,
+    "sources": 790,
+    "protected_assets": 259,
+    "sources_unchanged": true,
+    "protected_assets_unchanged": true,
+    "sqlite_own_run": 535,
+    "blocked_sqlite": 0,
+    "blocked_writes": 0,
+    "full_repository_suite": false
+  },
+  "b5_frontend_last_feature_run": {
+    "report": "output/studio-contracts-4b7a3635-658e-4bae-b645-a38ecfaa32b2/report.json",
+    "passed": 127,
+    "failed": 0,
+    "elapsed_ms": 1005.8953,
+    "static_checks_included": 4,
+    "real_browser": "NOT_RUN"
+  },
+  "handoff_frontend_recheck": {
+    "report": "output/studio-contracts-d1389a79-221b-48f9-b102-76dcda0cd204/report.json",
+    "passed": 127,
+    "failed": 0
+  },
+  "encrypted_data_verification": {
+    "authenticated_decryption": true,
+    "file_hashes_verified": 164,
+    "sqlite_quick_checks_passed": 15,
+    "table_row_counts_verified": 107,
+    "snapshot_raw_checksums_verified": 38,
+    "missing_snapshot_raw_files": 0,
+    "restored_to_isolated_inspection_copy": true,
+    "application_acceptance": "NOT_RUN",
+    "different_root_runtime_migration": "NOT_SUPPORTED",
+    "snapshot_tool_unit_tests_passed": 12,
+    "source_main_and_wal_unchanged": true
+  },
+  "limitations": [
+    "Historical raw test reports remain in ignored output/ on the source workstation.",
+    "Historical full-suite results do not certify the newer B5 source snapshot.",
+    "No real browser/LLM/production migration/authentication/session transfer certification.",
+    "The decryption key is never committed and requires separate private transfer."
+  ]
+}

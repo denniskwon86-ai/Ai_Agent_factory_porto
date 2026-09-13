@@ -17,6 +17,7 @@
 """
 import os
 import tempfile
+from pathlib import Path
 
 import pytest
 
@@ -25,6 +26,7 @@ from core.data_preparation import models as m
 from core.data_preparation import ownership_binding as ob
 from core.data_preparation import snapshot_service as svc
 from core.data_preparation.store import DataPreparationStore
+from core.data_preparation import certification_authority as ca, certification_subject as cs
 
 OWNER_DEPT = "demo_smelting"
 ACTOR_OWNER = "owner@test.invalid"
@@ -36,7 +38,8 @@ ROWS = [{"a": "1"}]
 @pytest.fixture()
 def store(tmp_path):
     s = DataPreparationStore(db_path=str(tmp_path / "dp.db"))
-    assert "WorkSpace" not in s.db_path, "운영 저장소를 열었다"
+    # 경로의 단어가 아니라 pytest가 만든 실제 임시 디렉터리 경계를 검사한다.
+    assert Path(s.db_path).resolve().is_relative_to(tmp_path.resolve()), "격리 디렉터리 밖 저장소"
     return s
 
 
@@ -47,8 +50,16 @@ def authority(monkeypatch):
     ⚠️ 그냥 no-op 로 덮으면 「승인권을 안 봐도」 시험이 통과한다 — 관문을 빼먹은 것을
       못 잡는다. 호출을 세어 ③ 관문이 실제로 지나갔음을 확인한다."""
     calls = []
-    monkeypatch.setattr(ob, "_require_approval_authority", lambda actor: calls.append(actor))
-    monkeypatch.setattr(ob, "resolve", lambda conn, **kw: {"owner_dept_id": OWNER_DEPT})
+    monkeypatch.setattr(ca, "can_sign", lambda subject, actor, kind, **kw: calls.append(actor) or {"actor": actor})
+    monkeypatch.setattr(ca, "context_root", lambda *args: "S")
+    monkeypatch.setattr(ca, "resolve_policy", lambda conn, **kw: {
+        "policy_id": "unit-policy", "revision": 1, "digest": "unit-policy-digest",
+        "document": {"required_reviews": acp.DEFAULTS["required_reviews"],
+                     "allow_same_actor": False, "min_evidence_length": 10}})
+    monkeypatch.setattr(cs, "visible_snapshot", lambda conn, sid, *args: dict(conn.execute(
+        "SELECT * FROM dataset_snapshots WHERE snapshot_id=?", (sid,)).fetchone()))
+    monkeypatch.setattr(ob, "resolve", lambda conn, **kw: {
+        "owner_dept_id": OWNER_DEPT, "binding_id": "unit-owner", "fingerprint": "unit-owner-fp"})
     return calls
 
 
@@ -73,9 +84,14 @@ def _reconciled(store, tmp_path, *, data_kind=m.DATA_KIND_REAL, contract="FIN-03
 
 
 def _sign(store, sid, kind, actor, **kw):
+    import uuid
     args = dict(review_kind=kind, actor=actor, reconciliation_evidence=EVIDENCE,
-                use_kind=acp.USE_OPERATIONAL)
+                use_kind=acp.USE_OPERATIONAL, period_from="2026-08-01", period_to="2026-08-31")
     args.update(kw)
+    args["context"] = {"tenant_id": "T", "entity_mode": "REAL", "scope_node_id": "S"}
+    subject = cs.preview(store, sid, actor=actor, context=args["context"], use_kind=args["use_kind"],
+                         period_from=args["period_from"], period_to=args["period_to"])
+    args.update(subject_id=subject["subject_id"], expected_subject_digest=subject["digest"], client_request_id=str(uuid.uuid4()))
     return svc.sign_actual_certification(store, sid, **args)
 
 
@@ -113,7 +129,7 @@ def test_demo_data_gets_no_actual_certification(store, tmp_path, authority):
 
 
 # ── ② 소유 부서는 «찾는다» ─────────────────────────────────────────────────
-def test_an_unbound_dataset_cannot_be_signed(store, tmp_path, monkeypatch):
+def test_an_unbound_dataset_cannot_be_signed(store, tmp_path, monkeypatch, authority):
     """★★★ 「누구 데이터인지 모르는 실적」에 서명을 받으면 그 서명은 무엇에 대한 것인가."""
     monkeypatch.setattr(ob, "_require_approval_authority", lambda actor: None)
     monkeypatch.setattr(ob, "resolve", lambda conn, **kw: None)
@@ -258,10 +274,17 @@ def test_the_period_does_not_move_after_the_first_signature(store, tmp_path, aut
     sid = _reconciled(store, tmp_path)
     _sign(store, sid, acp.REVIEW_DATA_OWNER, ACTOR_OWNER, use_kind=acp.USE_MANAGEMENT,
           period_from="2026-08-01", period_to="2026-08-31")
-    _sign(store, sid, acp.REVIEW_EXECUTIVE, ACTOR_EXEC, use_kind=acp.USE_MANAGEMENT,
-          period_from="2026-09-01", period_to="2026-09-30")
+    with pytest.raises(m.StateConflict, match="귀속 기간"):
+        _sign(store, sid, acp.REVIEW_EXECUTIVE, ACTOR_EXEC, use_kind=acp.USE_MANAGEMENT,
+              period_from="2026-09-01", period_to="2026-09-30")
     row = store.get_snapshot(sid)
     assert row["period_from"] == "2026-08-01", "첫 서명의 기간이 남아야 한다"
+    assert row["state"] == m.RECONCILED
+    assert len(svc.actual_certifications(store, sid)) == 1
+    # 같은 기간을 확인한 서명만 최종 인증을 완성한다.
+    out = _sign(store, sid, acp.REVIEW_EXECUTIVE, ACTOR_EXEC, use_kind=acp.USE_MANAGEMENT,
+                period_from="2026-08-01", period_to="2026-08-31")
+    assert out["certified"] is True
 
 
 # ── 정정은 «새 판» 이다 ────────────────────────────────────────────────────

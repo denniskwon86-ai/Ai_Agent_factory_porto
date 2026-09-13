@@ -48,7 +48,8 @@ def _as(user):
 
 def _ws(tmp_path):
     import os
-    ws = os.path.join("projects", "P1")
+    # strict RUN 감사에서는 dir_fd와 혼동할 수 없는 절대 시험 경로를 쓴다.
+    ws = os.path.join(str(tmp_path.resolve()), "projects", "P1")
     os.makedirs(os.path.join(ws, "contracts", "drafts"), exist_ok=True)
     return ws
 

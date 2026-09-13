@@ -108,6 +108,68 @@ class WBSManager:
 
         return new_task_id
 
+    def accept_revision_request(self, *, project_id, actor_id, boundary, submission, before_write):
+        """B5 엄격 접수 전용. 같은 파일의 영수증+task를 잠금 아래 한 번에 교체한다.
+
+        before_write(replay)는 현재 권한을 확인하고, 신규 접수에서는 저장 초안의
+        읽기 락을 교체까지 유지하는 context manager다. 외부 DB 분산 원자성은 아니다.
+        """
+        import tempfile
+        from filelock import Timeout
+        from core import studio_revision_requests as requests
+        command = requests.Submission.model_validate(submission).model_dump()
+        path = requests.wbs_path(self.workspace_root)
+        temporary = None
+        try:
+            with self._lock.acquire(timeout=10):
+                with before_write(True):
+                    pass  # 락 대기 동안 철회된 권한으로 기존 접수 여부를 판단하지 않는다.
+                document, original_digest = requests.read_wbs_strict(path)
+                previous = requests.verified_record(document, command["client_request_id"],
+                    project_id=project_id, actor_id=actor_id, boundary=boundary)
+                if previous:
+                    stored = document[requests.RECORDS_KEY][command["client_request_id"]]
+                    if stored["command_digest"] != requests.digest(command):
+                        requests.fail("IDEMPOTENCY_CONFLICT", "같은 요청 ID의 제출 내용이 다릅니다.")
+                    with before_write(True):
+                        return previous
+                requests.reject_duplicate_draft(document, project_id=project_id, actor_id=actor_id,
+                    boundary=boundary, command=command)
+                record, task = requests.make_record(self, document, project_id=project_id,
+                    actor_id=actor_id, boundary=boundary, command=command)
+                document.setdefault(requests.RECORDS_KEY, {})[command["client_request_id"]] = record
+                document["tasks"].append(task)
+                document["total_tasks"] = len(document["tasks"])
+                raw = json.dumps(document, ensure_ascii=False, indent=4, allow_nan=False).encode("utf-8")
+                if len(raw) > requests.MAX_WBS_BYTES:
+                    requests.fail("CAPACITY", "WBS 접수 크기 제한을 초과했습니다. 기존 원본은 보존합니다.")
+                with tempfile.NamedTemporaryFile(mode="wb", prefix=".revision-request-", suffix=".tmp",
+                                                 dir=str(path.parent), delete=False) as stream:
+                    temporary = stream.name
+                    stream.write(raw)
+                    stream.flush()
+                    os.fsync(stream.fileno())
+                # FileLock 대기와 임시파일 준비 뒤 같은 worker에서 최종 재검증한다.
+                with before_write(False):
+                    _, current_digest = requests.read_wbs_strict(path)
+                    if current_digest != original_digest:
+                        requests.fail("CONFLICT", "접수 직전 WBS가 변경되었습니다. 원본을 보존합니다.")
+                    os.replace(temporary, path)
+                    temporary = None
+                return record["receipt"]
+        except Timeout as exc:
+            raise requests.ProcessError("REVISION_REQUEST_BUSY", "다른 WBS 처리가 진행 중입니다. 같은 요청 ID를 보존하십시오.", 409) from exc
+        except requests.ProcessError:
+            raise
+        except (OSError, TypeError, ValueError) as exc:
+            raise requests.ProcessError("REVISION_REQUEST_WBS_UNAVAILABLE", "수정 요청을 원자 저장하지 못했습니다. 같은 요청 ID로 결과를 확인하십시오.", 503) from exc
+        finally:
+            if temporary is not None:
+                try:
+                    os.unlink(temporary)
+                except OSError:
+                    pass
+
     def add_data_task(self, title: str, goal: str,
                       required_agents: List[str] = None) -> str:
         """데이터 준비·연계·검증 태스크를 WBS에 추가합니다 (명세서 §4.7 / M0 백로그 4).

@@ -375,6 +375,9 @@ class DataPreparationStore:
             #:   ⚠️ 옛 행을 승인된 것으로 백필하지 않는다 — 격리하고 UNBOUND 로 둔다.
             _ob.migrate(conn)
             conn.executescript(_ob.DDL)
+            from core.data_preparation import certification_authority, certification_subject
+            conn.executescript(certification_authority.DDL)
+            conn.executescript(certification_subject.DDL)
             conn.commit()
         finally:
             conn.close()
@@ -408,6 +411,9 @@ class DataPreparationStore:
             raise m.DataPreparationError(
                 f"키트 모드는 {list(m.KIT_MODES)} 중 하나여야 합니다 — 시연용 합성 "
                 f"데이터와 실제 업무 데이터를 섞으면 둘 다 못 쓴다.")
+        if profile.get("process_pack") or profile.get("setup_only") is True:
+            from core.enterprise_context.process_schema import ProcessError
+            raise ProcessError("PROCESS_PACK_SETUP_REQUIRED", "프로세스 팩은 불변 원본 설치 경로에서 등록하십시오.")
         now = _now()
         row = {"kit_version_id": f"kv_{uuid.uuid4().hex[:14]}", "kit_id": kit_id,
                "version": version, "name": name, "mode": mode,
@@ -415,6 +421,14 @@ class DataPreparationStore:
                "profile_json": json.dumps(profile, ensure_ascii=False, sort_keys=True),
                "status": "active", "created_at": now, "updated_at": now}
         with self.transaction() as conn:
+            # B2 전용 색인이 있을 때만 충돌을 검사한다. 기존 테이블 ALTER/트리거는 없다.
+            # 최초 색인 생성과도 경합하므로 존재 조회 전 쓰기 잠금을 잡는다.
+            if not conn.in_transaction:
+                conn.execute("BEGIN IMMEDIATE")
+            if conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='kit_process_artifacts'").fetchone():
+                if conn.execute("SELECT 1 FROM kit_process_artifacts WHERE kit_id=? AND version=?", (kit_id, version)).fetchone():
+                    from core.enterprise_context.process_schema import ProcessError
+                    raise ProcessError("IMMUTABLE_VERSION_CONFLICT", "불변 프로세스 팩과 같은 버전을 레거시 등록으로 덮을 수 없습니다.")
             existing = conn.execute(
                 "SELECT kit_version_id, created_at FROM kit_registry_versions "
                 "WHERE kit_id=? AND version=?", (kit_id, version)).fetchone()
@@ -691,17 +705,28 @@ class DataPreparationStore:
                          f"({', '.join('?' * len(row))})", tuple(row.values()))
         return self._public(row)
 
-    def get_snapshot(self, snapshot_id: str) -> Optional[Dict[str, Any]]:
-        with self.transaction() as conn:
-            r = conn.execute("SELECT * FROM dataset_snapshots WHERE snapshot_id=?",
-                             (snapshot_id,)).fetchone()
-            return self._snapshot_public(conn, dict(r)) if r else None
+    def get_snapshot(self, snapshot_id: str, *, conn: Any = None) -> Optional[Dict[str, Any]]:
+        """호출자 transaction 안에서는 conn을 명시한다. 그 연결은 닫거나 커밋하지 않는다."""
+        if conn is None:
+            with self.transaction() as owned_conn:
+                return self.get_snapshot(snapshot_id, conn=owned_conn)
+        # SELECT는 자동 BEGIN을 하지 않는다. 보류도 같은 읽기 시점에 투영한다.
+        if not conn.in_transaction:
+            conn.execute("BEGIN")
+        r = conn.execute("SELECT * FROM dataset_snapshots WHERE snapshot_id=?",
+                         (snapshot_id,)).fetchone()
+        return self._snapshot_public(conn, dict(r)) if r else None
 
-    def list_snapshots(self, instance_id: str) -> List[Dict[str, Any]]:
-        with self.transaction() as conn:
-            rows = conn.execute("SELECT * FROM dataset_snapshots WHERE instance_id=? "
-                                "ORDER BY created_at ASC", (instance_id,)).fetchall()
-            return [self._snapshot_public(conn, dict(r)) for r in rows]
+    def list_snapshots(self, instance_id: str, *, conn: Any = None) -> List[Dict[str, Any]]:
+        """목록 전체를 같은 읽기 시점으로 투영한다. 호출자는 열린 conn을 명시할 수 있다."""
+        if conn is None:
+            with self.transaction() as owned_conn:
+                return self.list_snapshots(instance_id, conn=owned_conn)
+        if not conn.in_transaction:
+            conn.execute("BEGIN")
+        rows = conn.execute("SELECT * FROM dataset_snapshots WHERE instance_id=? "
+                            "ORDER BY created_at ASC", (instance_id,)).fetchall()
+        return [self._snapshot_public(conn, dict(r)) for r in rows]
 
     def _snapshot_public(self, conn: Any, row: Dict[str, Any]) -> Dict[str, Any]:
         # 현재 결속의 보류를 투영할 뿐 저장된 상태·본문을 변경하지 않는다.
@@ -710,74 +735,76 @@ class DataPreparationStore:
     def advance_snapshot(self, snapshot_id: str, target: str,
                          on_commit: Optional[Any] = None,
                          **payload: Any) -> Dict[str, Any]:
-        """Snapshot 을 다음 단계로 옮긴다.
-
-        ★★★ [2026-08-21 P1] `on_commit(conn, row)` 은 **같은 트랜잭션 안**에서 돈다.
-          상태 전환과 그에 딸린 기록(예: 범위 색인)을 **한 번에** 커밋하기 위해서다.
-        ⚠️⚠️ 나누면 「인증됐는데 색인이 없는」 구간이 아무리 짧아도 생긴다. 그 사이에
-          읽은 쪽은 색인 없는 인증판을 보고, 승인된 관계의 끝점이면 **503** 을 만난다 —
-          아무도 아무것도 잘못하지 않았는데.
-
-        ★★★ **인증 뒤에는 원문도 본문도 바꾸지 않는다.** `raw_path`·`checksum`·
-          `row_count` 는 여기서 아예 손대지 않는다 — 갱신하는 것은 그 단계가 «새로
-          알아낸 것»(프로파일·대사·격리)뿐이다.
-        ⚠️ 인증 뒤 수정을 허용하면 「우리가 인증한 그 숫자」가 무엇이었는지 아무도
-          답할 수 없다. 정정은 **새 Snapshot** 이다."""
-        now = _now()
+        """상태 전환과 on_commit 기록을 하나의 쓰기 transaction에서 확정한다."""
         with self.transaction() as conn:
-            # SELECT만으로는 SQLite 쓰기 트랜잭션이 시작되지 않는다.
-            # 인증 판정 직후 다른 연결이 보류를 커밋하는 틈을 먼저 잠근다.
-            if target in m.CERTIFIED_STATES:
-                conn.execute("BEGIN IMMEDIATE")
-            cur = conn.execute("SELECT * FROM dataset_snapshots WHERE snapshot_id=?",
-                               (snapshot_id,)).fetchone()
-            if cur is None:
-                raise m.DataPreparationError(f"존재하지 않는 Snapshot 입니다: {snapshot_id}")
-            m.assert_snapshot_transition(cur["state"], target)
+            conn.execute("BEGIN IMMEDIATE")
+            return self._advance_snapshot_conn(conn, snapshot_id, target,
+                                               on_commit=on_commit, **payload)
 
-            sets = ["state=?", "updated_at=?"]
-            args: List[Any] = [target, now]
-            for key, col in (("profile", "profile_json"),
-                             ("control_total", "control_total_json"),
-                             ("quarantine", "quarantine_json")):
-                if key in payload:
-                    sets.append(f"{col}=?")
-                    args.append(json.dumps(payload[key] or {}, ensure_ascii=False,
-                                           sort_keys=True))
-            if target in m.CERTIFIED_STATES:
-                usage_policy.require_usable_conn(conn, dict(cur))
-                #: ★★★ 인증 종점마다 «허용되는 자료 성격» 이 다르다. 여기서 막지 않으면
-                #:   시연 자료가 원천 인증을 받거나 실물이 시연 인증을 받는다 — 둘을 섞으면
-                #:   어느 것이 시연이었는지 영영 가릴 수 없다.
-                #: ⚠️ 이 검사를 응용층(`snapshot_service`)에만 두지 «않는다». 저장소가
-                #:   자기 상태를 지키지 못하면, 다른 경로가 하나 생기는 날 조용히 뚫린다.
-                want = m.CERTIFICATION_DATA_KIND.get(target, "")
-                have = str(cur["data_kind"] if "data_kind" in cur.keys() else "")
-                if want and have != want:
-                    raise m.StateConflict(
-                        f"«{have or '성격 미상'}» 자료는 {target} 를 받을 수 없습니다 — "
-                        f"이 종점은 «{want}» 전용입니다. 시연 자료와 실물이 섞이면 "
-                        f"어느 것이 시연이었는지 가릴 수 없습니다.")
-                #: ★★★ 인증은 「이 판을 써도 된다」는 **사람의 판단**이다. 이름이 없으면
-                #:   나중에 「누가 이걸 통과시켰나」에 답할 수 없다 — `approve_source` 와
-                #:   같은 이유로 필수다.
-                who = str(payload.get("certified_by") or "").strip()
-                if not who:
-                    raise m.DataPreparationError(
-                        f"{target} 에는 certified_by 가 필요합니다 — 인증은 「이 판을 써도 "
-                        f"된다」는 사람의 판단이고, 누가 했는지 없으면 근거가 없습니다.")
-                sets.append("certified_at=?")
-                args.append(now)
-                sets.append("certified_by=?")
-                args.append(who)
-            args.append(snapshot_id)
-            conn.execute(f"UPDATE dataset_snapshots SET {', '.join(sets)} "
-                         f"WHERE snapshot_id=?", tuple(args))
-            out = conn.execute("SELECT * FROM dataset_snapshots WHERE snapshot_id=?",
-                               (snapshot_id,)).fetchone()
-            if on_commit is not None:
-                #: ⚠️ 여기서 예외가 나면 **상태 전환도 함께 되돌아간다.** 그것이 의도다.
-                on_commit(conn, dict(out))
+    def _advance_snapshot_conn(self, conn: Any, snapshot_id: str, target: str,
+                                on_commit: Optional[Any] = None,
+                                **payload: Any) -> Dict[str, Any]:
+        """호출자의 쓰기 transaction을 사용한다. BEGIN/commit/연결 종료를 하지 않는다.
+
+        인증의 상태·보류·성격·인증자 관문을 서명 경로에서도 그대로 재사용한다.
+        호출자는 첫 SELECT 전에 BEGIN IMMEDIATE로 경합 쓰기를 직렬화해야 한다.
+        인증 뒤 RAW/checksum은 바꾸지 않으며 on_commit 실패는 함께 롤백한다.
+        """
+        if not conn.in_transaction:
+            raise m.DataPreparationError("상태 전환에는 열린 쓰기 transaction이 필요합니다.")
+        now = _now()
+        cur = conn.execute("SELECT * FROM dataset_snapshots WHERE snapshot_id=?",
+                           (snapshot_id,)).fetchone()
+        if cur is None:
+            raise m.DataPreparationError(f"존재하지 않는 Snapshot 입니다: {snapshot_id}")
+        m.assert_snapshot_transition(cur["state"], target)
+
+        sets = ["state=?", "updated_at=?"]
+        args: List[Any] = [target, now]
+        for key, col in (("profile", "profile_json"),
+                         ("control_total", "control_total_json"),
+                         ("quarantine", "quarantine_json")):
+            if key in payload:
+                sets.append(f"{col}=?")
+                args.append(json.dumps(payload[key] or {}, ensure_ascii=False,
+                                       sort_keys=True))
+        if target in m.CERTIFIED_STATES:
+            usage_policy.require_usable_conn(conn, dict(cur))
+            #: ★★★ 인증 종점마다 «허용되는 자료 성격» 이 다르다. 여기서 막지 않으면
+            #:   시연 자료가 원천 인증을 받거나 실물이 시연 인증을 받는다 — 둘을 섞으면
+            #:   어느 것이 시연이었는지 영영 가릴 수 없다.
+            #: ⚠️ 이 검사를 응용층(`snapshot_service`)에만 두지 «않는다». 저장소가
+            #:   자기 상태를 지키지 못하면, 다른 경로가 하나 생기는 날 조용히 뚫린다.
+            want = m.CERTIFICATION_DATA_KIND.get(target, "")
+            have = str(cur["data_kind"] if "data_kind" in cur.keys() else "")
+            if want and have != want:
+                raise m.StateConflict(
+                    f"«{have or '성격 미상'}» 자료는 {target} 를 받을 수 없습니다 — "
+                    f"이 종점은 «{want}» 전용입니다. 시연 자료와 실물이 섞이면 "
+                    f"어느 것이 시연이었는지 가릴 수 없습니다.")
+            #: ★★★ 인증은 「이 판을 써도 된다」는 **사람의 판단**이다. 이름이 없으면
+            #:   나중에 「누가 이걸 통과시켰나」에 답할 수 없다 — `approve_source` 와
+            #:   같은 이유로 필수다.
+            who = str(payload.get("certified_by") or "").strip()
+            if not who:
+                raise m.DataPreparationError(
+                    f"{target} 에는 certified_by 가 필요합니다 — 인증은 「이 판을 써도 "
+                    f"된다」는 사람의 판단이고, 누가 했는지 없으면 근거가 없습니다.")
+            sets.append("certified_at=?")
+            if target == m.OWNER_CERTIFIED:
+                from core.data_preparation.certification_subject import assert_complete
+                assert_complete(conn, dict(cur))
+            args.append(now)
+            sets.append("certified_by=?")
+            args.append(who)
+        args.append(snapshot_id)
+        conn.execute(f"UPDATE dataset_snapshots SET {', '.join(sets)} "
+                     f"WHERE snapshot_id=?", tuple(args))
+        out = conn.execute("SELECT * FROM dataset_snapshots WHERE snapshot_id=?",
+                           (snapshot_id,)).fetchone()
+        if on_commit is not None:
+            #: ⚠️ 여기서 예외가 나면 **상태 전환도 함께 되돌아간다.** 그것이 의도다.
+            on_commit(conn, dict(out))
         return self._public(dict(out))
 
     def replace_demo_snapshot(self, old_snapshot_id: str, new_snapshot_id: str,

@@ -79,7 +79,7 @@ def _check_state(release_id: str, lifecycle: Any) -> Check:
     return Check(CHECK_STATE, True)
 
 
-def _check_contract(release: Any, release_id: str, plane: Any = None) -> Check:
+def _check_contract(release: Any, release_id: str, plane: Any = None, *, actor="", context=None) -> Check:
     """계약 원문과 물질화가 **지금도** 맞는가.
 
     ★ 승인 시점이 아니라 **승격 시점**에 본다 — 그 사이에 계약이 개정되거나 결속이
@@ -92,7 +92,7 @@ def _check_contract(release: Any, release_id: str, plane: Any = None) -> Check:
     from core import app_contract_gate
 
     try:
-        v = app_contract_gate.evaluate(release, release_id, plane=plane)
+        v = app_contract_gate.evaluate(release, release_id, plane=plane, actor=actor, context=context, for_action="RELEASE")
     except Exception as e:
         return Check(CHECK_CONTRACT, False, f"판정할 수 없습니다: {str(e)[:100]}")
     if not v.ok:
@@ -268,6 +268,15 @@ def data_fingerprint(readiness_state: Any) -> str:
         #: 「확인하지 못했다」는 봉인할 것이 없다. 검사(`_check_readiness`)가 이미
         #: 막지만, 여기서도 빈 값을 지어내지 않는다.
         return ""
+    if readiness_state.get("runtime_document_version") == "2.0":
+        from core.app_contract_gate import NO_DATA
+        rows = readiness_state.get("datasets") or []
+        if not rows:
+            return NO_DATA
+        if any(d.get("state") not in rd.OFFICIAL_STATES or not all(d.get(k) for k in
+               ("instance_id", "dataset_contract_key", "snapshot_id")) for d in rows):
+            return ""
+        return fingerprint_for([f"{d['instance_id']}:{d['dataset_contract_key']}={d['snapshot_id']}" for d in rows])
     ids = [str(d.get("snapshot_id") or "")
            for d in (readiness_state.get("datasets") or [])
            if str(d.get("state") or "") in rd.OFFICIAL_STATES
@@ -277,18 +286,23 @@ def data_fingerprint(readiness_state: Any) -> str:
 
 def run_checks(*, release: Any, release_id: str, lifecycle: Any,
                code_paths: Optional[List[str]] = None,
-               readiness_state: Any = None, plane: Any = None) -> Verdict:
+               readiness_state: Any = None, plane: Any = None, actor: str = "", context: Any = None) -> Verdict:
     """다섯 가지를 **전부** 본다. 하나라도 어긋나면 승격하지 않는다.
 
     ★ 첫 실패에서 멈추지 않는다 — 사용자가 같은 화면을 다섯 번 보게 하지 않으려면
       한 번에 다 알려 줘야 한다."""
     checks = [
         _check_state(release_id, lifecycle),
-        _check_contract(release, release_id, plane),
+        _check_contract(release, release_id, plane, actor=actor, context=context),
         _check_static(code_paths, release),
         _check_review(release),
         _check_readiness(readiness_state),
     ]
+    if isinstance(release, dict) and (release.get("runtime_contract") or {}).get("schema_version") == "2.0":
+        from core import app_contract_gate
+        actual = app_contract_gate.data_fingerprint(release_id, plane, contract=release["runtime_contract"])
+        if actual == app_contract_gate.UNREADABLE or actual != data_fingerprint(readiness_state):
+            checks[-1] = Check(CHECK_READINESS, False, "운영 전환 준비도와 실제 고정 데이터 판이 다릅니다.")
     #: 목록과 구현이 갈라지지 않게 — 이름이 빠지면 시험이 잡는다.
     assert {c.name for c in checks} == set(CHECK_NAMES)
     return Verdict(ok=all(c.ok for c in checks), checks=checks)
@@ -297,7 +311,7 @@ def run_checks(*, release: Any, release_id: str, lifecycle: Any,
 def promote(*, release: Any, release_id: str, lifecycle: Any, actor: str,
             code_paths: Optional[List[str]] = None,
             readiness_state: Any = None, reason: str = "", plane: Any = None,
-            on_promote: Any = None) -> Dict[str, Any]:
+            on_promote: Any = None, context: Any = None) -> Dict[str, Any]:
     """후보 → 운영. **검사가 전부 통과할 때만 상태를 바꾼다.**
 
     ★★★ 검사와 전이를 나눈 이유가 ②·③ 이다 — 검사에서 던지면 상태는 손대지 않았고,
@@ -313,9 +327,18 @@ def promote(*, release: Any, release_id: str, lifecycle: Any, actor: str,
 
     verdict = run_checks(release=release, release_id=release_id, lifecycle=lifecycle,
                          code_paths=code_paths, readiness_state=readiness_state,
-                         plane=plane)
+                         plane=plane, actor=actor, context=context)
     if not verdict.ok:
         raise PromotionError(verdict.summary())
+
+    def _fresh_published_v2():
+        if isinstance(release, dict) and (release.get("runtime_contract") or {}).get("schema_version") == "2.0":
+            from core.studio_release_context import require_published_release
+            try:
+                require_published_release(release, release_id=release_id, actor=actor, context=context)
+            except Exception as exc:
+                raise PromotionError("게시된 고정 계약 또는 현재 사용권이 변경됐습니다.") from exc
+    _fresh_published_v2()
 
     #: ★★★ [I-4 7 / F-3] **승격과 바인딩 전환의 원자성.**
     #:
@@ -332,6 +355,8 @@ def promote(*, release: Any, release_id: str, lifecycle: Any, actor: str,
             raise PromotionError(f"운영 평면 물질화에 실패했습니다: {str(e)[:200]}")
 
     from core.program_lifecycle import ACTIVE
+
+    _fresh_published_v2()
 
     #: ★★★ **무엇 위에서 올렸는지를 함께 못박는다.** 검사만 하고 지나가면 「그때
     #:   준비돼 있었다」는 말은 남지만 「그때 무엇이었나」는 남지 않는다.

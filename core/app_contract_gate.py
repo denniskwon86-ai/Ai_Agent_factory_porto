@@ -135,6 +135,7 @@ def _materialized(release_id: str, plane: Any = None) -> Dict[str, Dict[str, Any
     rows = _plane(plane)._store.query(
         "SELECT b.runtime_name AS name, b.allowed_actions AS actions, b.contract_bound AS bound, "
         "       b.data_role AS data_role, b.source_intent AS source_intent, "
+        "       b.enterprise_contract_key AS enterprise_contract_key, b.kit_instance_id AS kit_instance_id, "
         "       d.dataset_key AS dataset_key, COALESCE(v.schema_fingerprint,'') AS schema_fp "
         "  FROM app_release_dataset_bindings b "
         "  JOIN app_datasets d ON d.dataset_id = b.dataset_id "
@@ -143,7 +144,7 @@ def _materialized(release_id: str, plane: Any = None) -> Dict[str, Dict[str, Any
     return {str(r["name"]): dict(r) for r in rows}
 
 
-def data_fingerprint(release_id: str, plane: Any = None) -> str:
+def data_fingerprint(release_id: str, plane: Any = None, *, contract: Any = None) -> str:
     """이 릴리스가 **지금 읽는 인증판 집합**의 지문.
 
     ★★★ [§4.2] 계약 원문도 DB 결속도 그대로인데 **새 판이 인증되면** 앱이 읽는 숫자만
@@ -165,6 +166,14 @@ def data_fingerprint(release_id: str, plane: Any = None) -> str:
             "  FROM app_release_dataset_bindings WHERE release_id=?", (rid,))
     except Exception:
         return UNREADABLE
+
+    if isinstance(contract, dict) and contract.get("schema_version") == "2.0":
+        try:
+            from core.studio_runtime_data import data_fingerprint as fixed_data_fingerprint
+            from core.data_preparation.store import data_preparation_store
+            return fixed_data_fingerprint(contract, rows, data_preparation_store)
+        except Exception:
+            return UNREADABLE
 
     pairs = sorted({(str(r["key"] or "").strip(), str(r["inst"] or "").strip())
                     for r in rows
@@ -222,6 +231,18 @@ def _compare(contract: Dict[str, Any], bound: Dict[str, Dict[str, Any]]) -> List
             if str(g.get(key) or "") != str(w.get(key, "") or ""):
                 reasons.append(f"{name}: {label}이 다릅니다"
                                f"(계약 {w.get(key) or '(없음)'} · 결속 {g.get(key) or '(없음)'})")
+        if contract.get("schema_version") == "2.0":
+            expected_key = str(w.get("enterprise_contract_key") or "")
+            if str(g.get("enterprise_contract_key") or "") != expected_key:
+                reasons.append(f"{name}: 승인된 업무 데이터 키와 물질화 결속이 다릅니다.")
+            if expected_key:
+                try:
+                    from core.studio_runtime_data import fixed_reference
+                    fixed_reference(contract["process_context"], expected_key, g.get("kit_instance_id"))
+                except Exception:
+                    reasons.append(f"{name}: 승인된 고정 적용본과 물질화 결속이 다릅니다.")
+            elif g.get("kit_instance_id"):
+                reasons.append(f"{name}: 내부 데이터에 승인되지 않은 적용본이 있습니다.")
         want_key = str(w.get("dataset_key", "") or name)
         if str(g.get("dataset_key") or "") != want_key:
             reasons.append(f"{name}: 안정 키가 다릅니다"
@@ -293,12 +314,19 @@ def is_executable_app_in_app(release: Any) -> bool:
     return True
 
 
-def evaluate(release: Any, release_id: str, plane: Any = None) -> GateVerdict:
+def evaluate(release: Any, release_id: str, plane: Any = None, *, actor: str = "",
+             context: Any = None, for_action: str = "RUN") -> GateVerdict:
     """★★★ **발급해도 되는가.** 던지지 않는다 — 호출부가 HTTP 로 바꾼다.
 
     ★ [F-3] `plane` 은 **그 증명이 만질 데이터 평면**이다. 안 주면 운영을 본다."""
     rid = (release_id or "").strip()
     contract = release_contract(release)
+
+    try:
+        from core.studio_release_context import require_release_context
+        require_release_context(release, release_id=rid, actor=actor, context=context, for_action=for_action)
+    except Exception as exc:
+        return GateVerdict(ok=False, reasons=[getattr(exc, "reason_code", "STUDIO_CONTEXT_UNAVAILABLE")])
 
     try:
         bound = _materialized(rid, plane)
@@ -312,7 +340,9 @@ def evaluate(release: Any, release_id: str, plane: Any = None) -> GateVerdict:
         return GateVerdict(ok=False, reasons=[f"물질화 지문을 만들 수 없습니다: {str(e)[:80]}"])
 
     #: ★★★ [§4.2] 「지금 읽는 판」도 함께 본다. 판독 실패면 **발급하지 않는다.**
-    data_fp = data_fingerprint(rid, plane)
+    data_fp = (data_fingerprint(rid, plane, contract=contract)
+               if isinstance(contract, dict) and contract.get("schema_version") == "2.0"
+               else data_fingerprint(rid, plane))
     if data_fp == UNREADABLE:
         return GateVerdict(ok=False, materialization_fingerprint=mat_fp, data_fingerprint=data_fp,
                            reasons=["업무 데이터 판 상태를 읽을 수 없습니다 — "
@@ -384,4 +414,8 @@ def sealed_triple(release: Any, release_id: str, plane: Any = None) -> Tuple[str
     ⚠️ 판독 실패는 `UNREADABLE` 로 남긴다. 봉인된 값과 절대 같지 않으므로(발급 때는
       `UNREADABLE` 로 봉인되지 않는다) 그 프레임은 닫힌다 — 「모르니까 통과」가 아니다."""
     c_fp, m_fp = sealed_pair(release, release_id, plane)
-    return c_fp, m_fp, data_fingerprint(release_id, plane)
+    contract = release_contract(release)
+    data_fp = (data_fingerprint(release_id, plane, contract=contract)
+               if isinstance(contract, dict) and contract.get("schema_version") == "2.0"
+               else data_fingerprint(release_id, plane))
+    return c_fp, m_fp, data_fp

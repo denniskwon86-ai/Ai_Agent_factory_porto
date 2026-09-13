@@ -1,0 +1,26 @@
+{
+  "format": 1,
+  "created_at": "2026-09-13T14:27:45.717150+00:00",
+  "cipher": "AES-256-GCM",
+  "bundle_sha256": "c0dded58abf4eb0b8e30ba0c8f2504b70024651b38c32f657cd6bac718809790",
+  "bundle_bytes": 13672011,
+  "file_count": 164,
+  "database_count": 15,
+  "raw_file_count": 143,
+  "snapshot_raw_references": 38,
+  "plaintext_bytes": 105391236,
+  "source_main_and_wal_unchanged": true,
+  "excluded": [
+    ".env and credentials",
+    "auth.db/passwords/sessions",
+    "connectors.db",
+    "advisor.db/private conversations",
+    "interaction/access/LLM logs",
+    "projects and running checkpoints",
+    "library and knowledge caches",
+    "external_raw and archives",
+    "outputs and test runtime databases"
+  ],
+  "key_committed": false,
+  "requires_separate_key": true
+}

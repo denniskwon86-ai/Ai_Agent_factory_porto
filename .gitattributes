@@ -29,3 +29,7 @@ requirements*.txt text eol=lf
 *.docx          binary
 *.pptx          binary
 *.db            binary
+
+# B2 불변 원본의 raw-byte SHA-256. 체크아웃/커밋에서 개행 변환하지 않는다.
+process_packs/**/*.json -text
+data_sync/*.aesgcm binary

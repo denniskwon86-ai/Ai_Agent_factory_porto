@@ -28,6 +28,7 @@ I-4 는 계약을 «쓰고 · 합산하고 · 검토하고 · 승인하고 · �
   범위 밖이 되면 Dispatch 가 막는다(`api/routes/app_data_runtime.py::_dispatch`).
   못 박기와 대조는 **둘 다** 있어야 한다 — 못 박기만 하면 낡고, 대조만 하면 흔들린다.
 """
+import copy
 from typing import Any, Dict, List, NamedTuple, Optional, Sequence
 
 from core import app_runtime_contract as arc
@@ -110,6 +111,58 @@ def resolve_kit_instance(store: Any, *, contract_key: str, tenant_id: str,
     return serving[0]
 
 
+def _process_boundary(process_context: Any, *, tenant_id: str, scope_node_id: str,
+                      entity_mode: str) -> Dict[str, str]:
+    errors = arc.process_context_errors(process_context)
+    if errors:
+        raise MaterializeError("업무 문맥 형식 오류: " + " / ".join(errors))
+    context = process_context["context_key"]
+    # ECM root 선택은 DTO에서 scope="", DP 저장소에서는 실제 root id다.
+    expected = {"tenant_id": context["tenant_id"], "entity_mode": context["entity_mode"],
+                "scope_node_id": context["scope_node_id"] or context["context_root_id"]}
+    if expected != {"tenant_id": tenant_id, "scope_node_id": scope_node_id,
+                    "entity_mode": entity_mode}:
+        raise MaterializeError("고정 업무 문맥과 물질화 대상 경계가 다릅니다.")
+    return expected
+
+
+def resolve_process_binding(store: Any, *, process_context: Any, contract_key: str,
+                            tenant_id: str, scope_node_id: str, entity_mode: str) -> Dict[str, Any]:
+    """2.0의 고정 참조만 해석한다. 현재 후보를 열거하거나 대체 결속을 고르지 않는다.
+
+    여러 업무가 같은 물리 근거를 참조할 수 있다. process/requirement 두 키를
+    제외한 모든 증거가 같을 때만 하나로 해석하며 반환은 canonical 첫 참조의 복사다.
+    서명·현재 정책·인증판의 진위 및 권한은 소비 직전 서버 revalidate가 담당한다.
+    이 함수의 형식/ID 대조 성공은 데이터 사용권을 발급하지 않는다.
+    """
+    expected = _process_boundary(process_context, tenant_id=tenant_id,
+                                 scope_node_id=scope_node_id, entity_mode=entity_mode)
+    refs = [ref for ref in process_context["verified_binding_refs"]
+            if ref["contract_key"] == contract_key]
+    if not refs:
+        raise MaterializeError(f"«{contract_key}» 의 고정 검증 결속이 없습니다. 현재 후보로 대체하지 않습니다.")
+    identities = {arc.canonical_json({k: v for k, v in ref.items()
+                                      if k not in ("process_id", "requirement_key")}) for ref in refs}
+    if len(identities) != 1:
+        raise MaterializeError(f"«{contract_key}» 의 고정 데이터 근거가 여러 개입니다. 하나를 임의 선택하지 않습니다.")
+    ref = refs[0]
+    try:
+        instance = store.get_instance(ref["instance_id"])
+        binding = store.get_binding(ref["binding_id"])
+    except Exception as exc:
+        raise MaterializeError("고정 업무 데이터 저장소를 읽을 수 없습니다.") from exc
+    instance_expected = {**expected, "instance_id": ref["instance_id"],
+                         "kit_fingerprint": ref["artifact_digest"], "status": "active"}
+    binding_expected = {**expected, "instance_id": ref["instance_id"],
+                        "binding_id": ref["binding_id"], "dataset_contract_key": contract_key,
+                        "fingerprint": ref["binding_fingerprint"], "state": dpm.ACTIVE}
+    if not isinstance(instance, dict) or any(instance.get(k) != v for k, v in instance_expected.items()):
+        raise MaterializeError("고정 instance의 정체성·경계·artifact가 다르거나 사용할 수 없습니다.")
+    if not isinstance(binding, dict) or any(binding.get(k) != v for k, v in binding_expected.items()):
+        raise MaterializeError("고정 binding의 정체성·경계·지문이 다르거나 활성 상태가 아닙니다.")
+    return copy.deepcopy(ref)
+
+
 def plan(contract: Any, *, store: Any, tenant_id: str, scope_node_id: str,
          entity_mode: str) -> List[Resolved]:
     """무엇을 만들지 **먼저 전부 정한다.** 여기서 던지면 아무것도 만들어지지 않았다.
@@ -118,7 +171,21 @@ def plan(contract: Any, *, store: Any, tenant_id: str, scope_node_id: str,
     out: List[Resolved] = []
     problems: List[str] = []
 
-    for ds in _contract_datasets(contract):
+    datasets = _contract_datasets(contract)
+    version = contract.get("schema_version", arc.SCHEMA_VERSION)
+    if version not in (arc.SCHEMA_VERSION, arc.PROCESS_DOCUMENT_VERSION):
+        raise MaterializeError("알 수 없는 계약 판본은 1.0 물질화로 대체하지 않습니다.")
+    if version == arc.PROCESS_DOCUMENT_VERSION:
+        errors = arc.validate(contract)
+        if errors:
+            raise MaterializeError("2.0 계약 검증 실패: " + " / ".join(errors))
+        if contract["approval"]["status"] != "APPROVED":
+            raise MaterializeError("2.0 계약의 승인 증거가 아직 승인 상태가 아닙니다.")
+        # AFS_NATIVE만 있는 계약도 다른 tenant/mode/scope로 물질화할 수 없다.
+        _process_boundary(contract["process_context"], tenant_id=tenant_id,
+                          scope_node_id=scope_node_id, entity_mode=entity_mode)
+
+    for ds in datasets:
         name = str(ds.get("name") or "").strip()
         intent = str(ds.get("source_intent") or "").strip()
         key = str(ds.get("enterprise_contract_key") or "").strip()
@@ -133,9 +200,15 @@ def plan(contract: Any, *, store: Any, tenant_id: str, scope_node_id: str,
             continue
         if intent == arc.ENTERPRISE_READ:
             try:
-                instance_id = resolve_kit_instance(
-                    store, contract_key=key, tenant_id=tenant_id,
-                    scope_node_id=scope_node_id, entity_mode=entity_mode)
+                if version == arc.PROCESS_DOCUMENT_VERSION:
+                    ref = resolve_process_binding(
+                        store, process_context=contract["process_context"], contract_key=key,
+                        tenant_id=tenant_id, scope_node_id=scope_node_id, entity_mode=entity_mode)
+                    instance_id = ref["instance_id"]
+                else:
+                    instance_id = resolve_kit_instance(
+                        store, contract_key=key, tenant_id=tenant_id,
+                        scope_node_id=scope_node_id, entity_mode=entity_mode)
             except MaterializeError as e:
                 problems.append(f"{name}: {e}")
                 continue

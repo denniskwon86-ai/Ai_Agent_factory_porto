@@ -1,0 +1,329 @@
+{
+  "kit_id": "KIT-MFG-NONFERROUS-PROCUREMENT",
+  "version": "1.1.0",
+  "name": "비철금속 업무 골격 참조 후보 — 데이터 없음",
+  "mode": "REAL",
+  "data_class": "NO_DATA",
+  "setup_only": true,
+  "status": "DOMAIN_REVIEW_REQUIRED",
+  "datasets": [
+    {
+      "dataset_contract_key": "FND-01",
+      "label": "기업·조직 계층",
+      "required": true,
+      "reference_status": "CONTRACT_CANDIDATE"
+    },
+    {
+      "dataset_contract_key": "FND-02",
+      "label": "사용자·역할·권한",
+      "required": true,
+      "reference_status": "CONTRACT_CANDIDATE"
+    },
+    {
+      "dataset_contract_key": "FND-03",
+      "label": "달력·통화·단위·환산",
+      "required": true,
+      "reference_status": "CONTRACT_CANDIDATE"
+    },
+    {
+      "dataset_contract_key": "MDM-01",
+      "label": "품목·제품·원료",
+      "required": true,
+      "reference_status": "CONTRACT_CANDIDATE"
+    },
+    {
+      "dataset_contract_key": "MDM-02",
+      "label": "공급사·파트너",
+      "required": true,
+      "reference_status": "CONTRACT_CANDIDATE"
+    },
+    {
+      "dataset_contract_key": "MDM-03",
+      "label": "고객·시장",
+      "required": true,
+      "reference_status": "CONTRACT_CANDIDATE"
+    },
+    {
+      "dataset_contract_key": "MDM-04",
+      "label": "공장·창고·저장 위치",
+      "required": true,
+      "reference_status": "CONTRACT_CANDIDATE"
+    },
+    {
+      "dataset_contract_key": "MDM-05",
+      "label": "BOM·수율·부산물",
+      "required": true,
+      "reference_status": "CONTRACT_CANDIDATE"
+    },
+    {
+      "dataset_contract_key": "MDM-06",
+      "label": "Routing·설비·생산능력",
+      "required": true,
+      "reference_status": "CONTRACT_CANDIDATE"
+    },
+    {
+      "dataset_contract_key": "MDM-07",
+      "label": "계정·원가요소·원가센터",
+      "required": true,
+      "reference_status": "CONTRACT_CANDIDATE"
+    },
+    {
+      "dataset_contract_key": "MDM-08",
+      "label": "계약조건·Incoterms·항만·운송구간",
+      "required": true,
+      "reference_status": "CONTRACT_CANDIDATE"
+    },
+    {
+      "dataset_contract_key": "PRC-01",
+      "label": "구매계약·가격조건",
+      "required": true,
+      "reference_status": "CONTRACT_CANDIDATE"
+    },
+    {
+      "dataset_contract_key": "PRC-02",
+      "label": "구매주문·납기 일정",
+      "required": true,
+      "reference_status": "CONTRACT_CANDIDATE"
+    },
+    {
+      "dataset_contract_key": "LOG-01",
+      "label": "파트너 제출 상태",
+      "required": true,
+      "reference_status": "CONTRACT_CANDIDATE"
+    },
+    {
+      "dataset_contract_key": "LOG-02",
+      "label": "선적 헤더·운송편",
+      "required": true,
+      "reference_status": "CONTRACT_CANDIDATE"
+    },
+    {
+      "dataset_contract_key": "LOG-03",
+      "label": "선적 Milestone",
+      "required": true,
+      "reference_status": "CONTRACT_CANDIDATE"
+    },
+    {
+      "dataset_contract_key": "LOG-04",
+      "label": "통관·검사·관세",
+      "required": true,
+      "reference_status": "CONTRACT_CANDIDATE"
+    },
+    {
+      "dataset_contract_key": "LOG-05",
+      "label": "내륙 운송 Milestone",
+      "required": true,
+      "reference_status": "CONTRACT_CANDIDATE"
+    },
+    {
+      "dataset_contract_key": "INV-01",
+      "label": "재고 스냅샷",
+      "required": true,
+      "reference_status": "CONTRACT_CANDIDATE"
+    },
+    {
+      "dataset_contract_key": "INV-02",
+      "label": "재고 이동·Lot",
+      "required": true,
+      "reference_status": "CONTRACT_CANDIDATE"
+    },
+    {
+      "dataset_contract_key": "MFG-01",
+      "label": "생산계획·소요량",
+      "required": true,
+      "reference_status": "CONTRACT_CANDIDATE"
+    },
+    {
+      "dataset_contract_key": "MFG-02",
+      "label": "생산실적·수율",
+      "required": true,
+      "reference_status": "CONTRACT_CANDIDATE"
+    },
+    {
+      "dataset_contract_key": "MFG-03",
+      "label": "가동·고장·정비",
+      "required": true,
+      "reference_status": "CONTRACT_CANDIDATE"
+    },
+    {
+      "dataset_contract_key": "QLT-01",
+      "label": "입고·공정·제품 품질",
+      "required": true,
+      "reference_status": "CONTRACT_CANDIDATE"
+    },
+    {
+      "dataset_contract_key": "SLS-01",
+      "label": "판매계획·수주·출하",
+      "required": true,
+      "reference_status": "CONTRACT_CANDIDATE"
+    },
+    {
+      "dataset_contract_key": "FIN-01",
+      "label": "표준원가·실제원가",
+      "required": true,
+      "reference_status": "CONTRACT_CANDIDATE"
+    },
+    {
+      "dataset_contract_key": "FIN-02",
+      "label": "매입·미지급·매출채권",
+      "required": true,
+      "reference_status": "CONTRACT_CANDIDATE"
+    },
+    {
+      "dataset_contract_key": "FIN-03",
+      "label": "예산·회계실적·현금흐름",
+      "required": true,
+      "reference_status": "CONTRACT_CANDIDATE"
+    },
+    {
+      "dataset_contract_key": "EXT-01",
+      "label": "환율·금리·물가",
+      "required": true,
+      "reference_status": "CONTRACT_CANDIDATE"
+    },
+    {
+      "dataset_contract_key": "EXT-02",
+      "label": "원자재·제품 기준가격",
+      "required": true,
+      "reference_status": "CONTRACT_CANDIDATE"
+    },
+    {
+      "dataset_contract_key": "EXT-03",
+      "label": "운임·에너지·기상·산업지표",
+      "required": true,
+      "reference_status": "CONTRACT_CANDIDATE"
+    },
+    {
+      "dataset_contract_key": "KNW-01",
+      "label": "표준서·계약·규정·연구자료",
+      "required": true,
+      "reference_status": "CONTRACT_CANDIDATE"
+    },
+    {
+      "dataset_contract_key": "SIM-01",
+      "label": "Driver·계산식·제약",
+      "required": true,
+      "reference_status": "CONTRACT_CANDIDATE"
+    },
+    {
+      "dataset_contract_key": "SIM-02",
+      "label": "기준·위험·대안 시나리오",
+      "required": true,
+      "reference_status": "CONTRACT_CANDIDATE"
+    },
+    {
+      "dataset_contract_key": "DEC-01",
+      "label": "결정·실행과제·효과",
+      "required": true,
+      "reference_status": "CONTRACT_CANDIDATE"
+    }
+  ],
+  "outputs": [
+    {
+      "output": "APP-01",
+      "label": "원료 도입계획·추적",
+      "requires": [
+        "PRC-01",
+        "PRC-02",
+        "LOG-01",
+        "LOG-02",
+        "LOG-03",
+        "LOG-04",
+        "LOG-05",
+        "EXT-01",
+        "EXT-02",
+        "EXT-03"
+      ],
+      "reference_status": "REFERENCE_ONLY"
+    },
+    {
+      "output": "APP-02",
+      "label": "물류 사건 확인·입력",
+      "requires": [
+        "LOG-01",
+        "LOG-02",
+        "LOG-03",
+        "LOG-04",
+        "LOG-05",
+        "INV-02"
+      ],
+      "reference_status": "REFERENCE_ONLY"
+    },
+    {
+      "output": "APP-03",
+      "label": "재고·생산 영향 분석",
+      "requires": [
+        "INV-01",
+        "INV-02",
+        "MFG-01",
+        "MFG-02",
+        "MFG-03",
+        "QLT-01"
+      ],
+      "reference_status": "REFERENCE_ONLY"
+    },
+    {
+      "output": "APP-04",
+      "label": "구매원가·현금 전망",
+      "requires": [
+        "PRC-01",
+        "FIN-01",
+        "FIN-02",
+        "FIN-03",
+        "EXT-01",
+        "EXT-02"
+      ],
+      "reference_status": "REFERENCE_ONLY"
+    },
+    {
+      "output": "APP-05",
+      "label": "공급 위험·대체안",
+      "requires": [
+        "MDM-02",
+        "PRC-01",
+        "PRC-02",
+        "EXT-02",
+        "EXT-03",
+        "SIM-02"
+      ],
+      "reference_status": "REFERENCE_ONLY"
+    },
+    {
+      "output": "APP-06",
+      "label": "판매·납기·매출 영향",
+      "requires": [
+        "SLS-01",
+        "MFG-01",
+        "INV-01",
+        "FIN-02",
+        "FIN-03",
+        "EXT-01"
+      ],
+      "reference_status": "REFERENCE_ONLY"
+    },
+    {
+      "output": "APP-07",
+      "label": "전사 시나리오·실적 통합",
+      "requires": [
+        "PRC-02",
+        "LOG-02",
+        "INV-01",
+        "MFG-01",
+        "SLS-01",
+        "FIN-01",
+        "FIN-02",
+        "FIN-03",
+        "EXT-01",
+        "EXT-02",
+        "SIM-01",
+        "SIM-02",
+        "DEC-01"
+      ],
+      "reference_status": "REFERENCE_ONLY"
+    }
+  ],
+  "source_refs": [
+    "docs/design_business_kit_l2_process_setup_2026-09-12.md#5",
+    "starter_kits/KIT-MFG-NONFERROUS-PROCUREMENT/1.0.0/manifest.json#datasets"
+  ]
+}

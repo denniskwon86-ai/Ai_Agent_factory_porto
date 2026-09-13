@@ -77,6 +77,13 @@ PROJECT_RELEASE = "project.release"
 
 PROJECT_CAPS = (PROJECT_CREATE, PROJECT_RUN, PROJECT_EDIT, PROJECT_RELEASE)
 
+# B1: 표시용 직함이 아닌 기존 역할 등록부에 정식 등록한다. 범위는 서비스가 재검사한다.
+PROCESS_CONFIG_READ = "process_config.read"
+PROCESS_CONFIG_PROPOSE = "process_config.propose"
+PROCESS_CONFIG_EDIT = "process_config.edit"
+PROCESS_CONFIG_PUBLISH = "process_config.publish"
+PROCESS_CONFIG_CAPS = (PROCESS_CONFIG_READ, PROCESS_CONFIG_PROPOSE, PROCESS_CONFIG_EDIT, PROCESS_CONFIG_PUBLISH)
+
 #: 관리자 센터 탭 접근(설계 §8.2). **탭마다 따로 둔다** — 하나로 묶으면 «조직 관리자» 가
 #: 모델 정책까지 바꿀 수 있게 되고, 그것이 D-017 이 분리하려던 바로 그 상태다.
 ADMIN_ORGANIZATION = "admin.organization"
@@ -94,7 +101,7 @@ ALL_CAPABILITIES = (
     AGENT_READ, AGENT_CREATE, AGENT_UPDATE, AGENT_PUBLISH, AGENT_RETIRE, AGENT_EXECUTE,
     WORKFLOW_READ, WORKFLOW_CREATE, WORKFLOW_UPDATE, WORKFLOW_PUBLISH, WORKFLOW_RETIRE,
     WORKFLOW_BIND, SKILL_PROPOSE, SKILL_APPROVE, MODEL_POLICY_MANAGE, SYSTEM_DEFAULT_EDIT,
-) + PROJECT_CAPS + ADMIN_TABS
+) + PROJECT_CAPS + ADMIN_TABS + PROCESS_CONFIG_CAPS
 
 #: 관리자 센터 URL → 필요한 capability(설계 §8.2 표). Route Guard 와 서버가 **같은 표**를 본다.
 TAB_ROUTES: Dict[str, str] = {
@@ -227,22 +234,22 @@ _ROLE_CAPS: Dict[str, FrozenSet[str]] = {
     # ⚠️ **프로젝트 권한이 하나도 없다.** 실측에서 viewer 가 프로젝트를 지우고 스프린트를
     #   돌릴 수 있었던 것이 이 줄이 비어 있어서가 아니라, 라우트가 아무 코드도 요구하지
     #   않았기 때문이다 — 표가 없으면 역할을 아무리 좁혀도 소용이 없다.
-    "viewer": frozenset({AGENT_READ, WORKFLOW_READ, AGENT_EXECUTE}),
+    "viewer": frozenset({AGENT_READ, WORKFLOW_READ, AGENT_EXECUTE, PROCESS_CONFIG_READ}),
     # 부서 member — 개인/조직 초안까지. 승인은 «요청» 만 할 수 있으므로 publish 가 없다.
     # 프로젝트는 **만들고 돌리고 고칠 수 있다.** 게시(`PROJECT_RELEASE`)는 남에게 나가는
     # 일이므로 여기 없다 — Agent 에서 `publish` 를 뺀 것과 같은 기준이다.
     "member": frozenset({AGENT_READ, AGENT_CREATE, AGENT_UPDATE, AGENT_EXECUTE,
                          WORKFLOW_READ, WORKFLOW_CREATE, SKILL_PROPOSE,
-                         PROJECT_CREATE, PROJECT_RUN, PROJECT_EDIT}),
+                         PROJECT_CREATE, PROJECT_RUN, PROJECT_EDIT, PROCESS_CONFIG_READ, PROCESS_CONFIG_PROPOSE}),
     # 부서 manager — 자기 조직 승인까지. 전사 공개(승격)는 «요청» 이므로 여기 없다.
     "manager": frozenset({AGENT_READ, AGENT_CREATE, AGENT_UPDATE, AGENT_PUBLISH, AGENT_RETIRE,
                           AGENT_EXECUTE, WORKFLOW_READ, WORKFLOW_CREATE, WORKFLOW_UPDATE,
                           WORKFLOW_PUBLISH, WORKFLOW_BIND, SKILL_PROPOSE,
-                          ADMIN_USERS, ADMIN_ORGANIZATION}) | frozenset(PROJECT_CAPS),
+                          ADMIN_USERS, ADMIN_ORGANIZATION}) | frozenset(PROJECT_CAPS + PROCESS_CONFIG_CAPS),
 }
 
 #: 경영진 — **만들지 않고 본다.** 실행과 결과 열람만(설계 §4.2).
-_EXECUTIVE_CAPS = frozenset({AGENT_READ, WORKFLOW_READ, AGENT_EXECUTE, ADMIN_AUDIT})
+_EXECUTIVE_CAPS = frozenset({AGENT_READ, WORKFLOW_READ, AGENT_EXECUTE, ADMIN_AUDIT, PROCESS_CONFIG_READ})
 
 #: AI 거버넌스 관리자 — 승인 권한은 있으나 **시스템 기본 정의를 직접 수정하지 못한다.**
 _AI_ADMIN_CAPS = frozenset({

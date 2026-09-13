@@ -167,6 +167,11 @@ class CloneService:
                 raise SandboxError(f"알 수 없는 복사 항목입니다: {k} (가능: {sorted(COPY_POLICY)})")
             chosen[k] = bool(v)
 
+        # B1: 지원하지 않는 v2 복제를 자산 생성 전에 거절한다. payload/실행 참조 자동 복사 금지.
+        if chosen["profiles"]:
+            for node in self._source_nodes(src.entity_id, src.tenant_id or tenant_id):
+                self._repo.assert_legacy_process_reader(node.node_id)
+
         scenario_id = f"scn_{uuid.uuid4().hex[:12]}"
         prefix = f"V{scenario_id[-4:]}_"
 

@@ -674,6 +674,8 @@ export function buildFactoryViewModel(
         : snap.isSuspendedQuota ? '쿼터 소진으로 동결'
         : snap.lastSprintFailure ? '마지막 실행 실패'
         : running ? '가동 중'
+        : st?.studio_execution_state?.task_id === st?.current_sprint_task_id
+          && st?.studio_execution_state?.pause.status === 'PAUSED' ? '일시정지'
         : terminalComplete || allDeclaredStagesComplete ? '산출물 생성 완료'
         : '대기',
     },

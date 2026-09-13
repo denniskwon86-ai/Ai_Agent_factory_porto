@@ -55,7 +55,7 @@ export function WbsSpine({ vm, onSelectTask }: WbsSpineProps) {
       <aside className="work-map">
         <header className="map-head">
           <b>제작 준비 현황</b>
-          <span>WBS 생성 전</span>
+          <span>작업 목록 준비 전</span>
         </header>
         {vm.loadState === 'forbidden' || vm.loadState === 'error' ? (
           // 못 읽은 것을 «아직 만들지 않았다» 로 말하면 거짓이 된다(§8).
@@ -66,16 +66,16 @@ export function WbsSpine({ vm, onSelectTask }: WbsSpineProps) {
         ) : (
           <div className="pre-wbs">
             <article className="pre-wbs-card">
-              <h3>아직 WBS를 만들지 않았습니다</h3>
+              <h3>요구사항부터 함께 정리합니다</h3>
               <p>
                 요구사항을 명확히 한 뒤 승인된 RFP와 기획서를 기준으로 작업을 분할합니다.
                 분할 전에는 표시할 작업이 없습니다 — <b>작업 0개와는 다릅니다.</b>
               </p>
               <div className="deliverable-contract">
                 <div><b>1</b> 선택형 요구 명확화</div>
-                <div><b>2</b> RFP 초안과 사용자 승인</div>
+                <div><b>2</b> 요구사항 초안과 사용자 확인</div>
                 <div><b>3</b> 기획·아키텍처 확정</div>
-                <div><b>4</b> WBS와 의존관계 생성</div>
+                <div><b>4</b> 작업 목록과 진행 순서 생성</div>
               </div>
             </article>
           </div>
@@ -87,7 +87,7 @@ export function WbsSpine({ vm, onSelectTask }: WbsSpineProps) {
   return (
     <aside className="work-map">
       <header className="map-head">
-        <b>WBS · 실행 구조</b>
+        <b>작업 목록 · 진행 순서</b>
         {/* ★ 내가 답해야 하는 것이 있으면 그것을 먼저 말한다 — «활성 N» 보다 급한 정보다. */}
         <span>{counts.awaiting ? `내 승인 대기 ${counts.awaiting}`
           : counts.active ? `활성 ${counts.active}` : '활성 없음'}</span>

@@ -1,0 +1,142 @@
+{
+  "schema_version": 1,
+  "kit_id": "KIT-MFG-NONFERROUS-PROCUREMENT",
+  "version": "1.1.0",
+  "review_status": "DOMAIN_REVIEW_REQUIRED",
+  "blueprints": [
+    {
+      "app_id": "APP-01",
+      "name": "원료 도입계획·추적",
+      "datasets": [
+        "PRC-01",
+        "PRC-02",
+        "LOG-01",
+        "LOG-02",
+        "LOG-03",
+        "LOG-04",
+        "LOG-05",
+        "EXT-01",
+        "EXT-02",
+        "EXT-03"
+      ],
+      "reference_status": "REFERENCE_ONLY",
+      "source_refs": [
+        "starter_kits/KIT-MFG-NONFERROUS-PROCUREMENT/1.0.0/manifest.json#app_blueprints/APP-01",
+        "docs/design_business_kit_l2_process_setup_2026-09-12.md#4.1"
+      ]
+    },
+    {
+      "app_id": "APP-02",
+      "name": "물류 사건 확인·입력",
+      "datasets": [
+        "LOG-01",
+        "LOG-02",
+        "LOG-03",
+        "LOG-04",
+        "LOG-05",
+        "INV-02"
+      ],
+      "reference_status": "REFERENCE_ONLY",
+      "source_refs": [
+        "starter_kits/KIT-MFG-NONFERROUS-PROCUREMENT/1.0.0/manifest.json#app_blueprints/APP-02",
+        "docs/design_business_kit_l2_process_setup_2026-09-12.md#4.1"
+      ]
+    },
+    {
+      "app_id": "APP-03",
+      "name": "재고·생산 영향 분석",
+      "datasets": [
+        "INV-01",
+        "INV-02",
+        "MFG-01",
+        "MFG-02",
+        "MFG-03",
+        "QLT-01"
+      ],
+      "reference_status": "REFERENCE_ONLY",
+      "source_refs": [
+        "starter_kits/KIT-MFG-NONFERROUS-PROCUREMENT/1.0.0/manifest.json#app_blueprints/APP-03",
+        "docs/design_business_kit_l2_process_setup_2026-09-12.md#4.1"
+      ]
+    },
+    {
+      "app_id": "APP-04",
+      "name": "구매원가·현금 전망",
+      "datasets": [
+        "PRC-01",
+        "FIN-01",
+        "FIN-02",
+        "FIN-03",
+        "EXT-01",
+        "EXT-02"
+      ],
+      "reference_status": "REFERENCE_ONLY",
+      "source_refs": [
+        "starter_kits/KIT-MFG-NONFERROUS-PROCUREMENT/1.0.0/manifest.json#app_blueprints/APP-04",
+        "docs/design_business_kit_l2_process_setup_2026-09-12.md#4.1"
+      ]
+    },
+    {
+      "app_id": "APP-05",
+      "name": "공급 위험·대체안",
+      "datasets": [
+        "MDM-02",
+        "PRC-01",
+        "PRC-02",
+        "EXT-02",
+        "EXT-03",
+        "SIM-02"
+      ],
+      "reference_status": "REFERENCE_ONLY",
+      "source_refs": [
+        "starter_kits/KIT-MFG-NONFERROUS-PROCUREMENT/1.0.0/manifest.json#app_blueprints/APP-05",
+        "docs/design_business_kit_l2_process_setup_2026-09-12.md#4.1"
+      ]
+    },
+    {
+      "app_id": "APP-06",
+      "name": "판매·납기·매출 영향",
+      "datasets": [
+        "SLS-01",
+        "MFG-01",
+        "INV-01",
+        "FIN-02",
+        "FIN-03",
+        "EXT-01"
+      ],
+      "reference_status": "REFERENCE_ONLY",
+      "source_refs": [
+        "starter_kits/KIT-MFG-NONFERROUS-PROCUREMENT/1.0.0/manifest.json#app_blueprints/APP-06",
+        "docs/design_business_kit_l2_process_setup_2026-09-12.md#4.1"
+      ]
+    },
+    {
+      "app_id": "APP-07",
+      "name": "전사 시나리오·실적 통합",
+      "datasets": [
+        "PRC-02",
+        "LOG-02",
+        "INV-01",
+        "MFG-01",
+        "SLS-01",
+        "FIN-01",
+        "FIN-02",
+        "FIN-03",
+        "EXT-01",
+        "EXT-02",
+        "SIM-01",
+        "SIM-02",
+        "DEC-01"
+      ],
+      "reference_status": "REFERENCE_ONLY",
+      "source_refs": [
+        "starter_kits/KIT-MFG-NONFERROUS-PROCUREMENT/1.0.0/manifest.json#app_blueprints/APP-07",
+        "docs/design_business_kit_l2_process_setup_2026-09-12.md#4.1"
+      ]
+    }
+  ],
+  "source_refs": [
+    "docs/design_business_kit_l2_process_setup_2026-09-12.md#5.3",
+    "starter_kits/KIT-MFG-NONFERROUS-PROCUREMENT/1.0.0/manifest.json#app_blueprints"
+  ]
+}

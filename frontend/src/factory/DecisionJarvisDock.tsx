@@ -1,37 +1,15 @@
-/**
- * [트랙 E · 4단계] Decision Dock + Jarvis Dock — 하단 Interaction Dock.
- *
- * 근거: 구현 명세 §2.3 · §4(`HOTLInput` → `DecisionDock`, Supervisor Chat → `JarvisDock`).
- * 시각 SSOT: `adaptive-production-studio/index.html` 의 `.interaction-dock`.
- *
- * ## 명세가 못 박은 네 가지
- *
- * 1. **결정이 0건이면 Decision Dock 을 완전히 접고 높이를 Canvas 에 반환한다.** 빈 상자를
- *    남겨 두면 좁은 화면에서 실행 미리보기가 그만큼 줄어든다 — «결정 없음» 을 표시하는 데
- *    62px 를 쓸 이유가 없다.
- * 2. **Jarvis 는 하나만.** 그래서 기존 `lib/jarvisApi.ts` 의 `jarvisSession`(모듈 스코프 이력)을
- *    그대로 쓴다. 별도 이력을 만들면 화면을 옮길 때 대화가 끊기고, 사용자는 같은 질문을 다시 한다.
- * 3. **Task ID 를 요구하지 않는다.** 서버 계약이 `task_id_required: false` 이고, 문맥은 화면이
- *    자동으로 싣는다(회사·프로젝트·현재 단계·선택 작업).
- * 4. **결정 설명·미결정 영향·검토 행동을 같은 시야에 둔다.** «무엇을 결정하는가» 만 있으면
- *    사용자는 미루고, «안 하면 무엇이 멈추는가» 를 알아야 결정한다.
- *
- * ⚠️ 제출은 **실제 파이프라인을 재개한다**(`POST /{pid}/hotl/resume`). 기존 `HOTLInput` 과
- *   동일한 엔드포인트·동일한 직렬화(`factory/clarifyAnswers.ts`)를 쓴다 — 두 화면이 다르게
- *   보내면 백엔드가 한쪽 답변만 이해한다.
- */
+// 결정별 고정 차수 패널과 기존 Jarvis를 같은 작업면에 둔다.
 import { useEffect, useRef, useState } from 'react';
 
 import { jarvisApi, jarvisSession } from '../lib/jarvisApi';
-import { decisionDraft } from './decisionDraft';
-import { useFactoryStore } from '../store/useFactoryStore';
-import { serializeClarifyAnswers, unansweredCount } from './clarifyAnswers';
+import { StudioDecisionPanel } from './StudioDecisionPanel';
+import { studioIdentityKey } from './studioInputMemory';
+import { decisionError } from './studioDecisionApi';
 
 import type { JarvisTurn } from '../lib/jarvisApi';
 import { ASSISTANT_NAME } from '../lib/brand';
 import type { ClarifySelections } from './clarifyAnswers';
 import type { FactoryStudioViewModel } from './factoryViewModel';
-import { API_BASE_URL } from '../lib/api';
 
 
 export interface DecisionJarvisDockProps {
@@ -41,30 +19,34 @@ export interface DecisionJarvisDockProps {
   /** 지금 보고 있는 단계 — Jarvis 문맥에 싣는다. */
   shownStageId: string;
   shownStageLabel: string;
+  /** 서버 GET으로 확인한 실제 HOTL 차수. 상위 질문 선택을 이 키로 분리한다. */
+  onDecisionKeyChange?: (key: string) => void;
+  onRestoreSelections?: (selections: ClarifySelections) => void;
 }
 
 export function DecisionJarvisDock({
-  vm, selections, shownStageId, shownStageLabel,
+  vm, selections, shownStageId, shownStageLabel, onDecisionKeyChange, onRestoreSelections,
 }: DecisionJarvisDockProps) {
-  // ★ [7단계 전환 게이트] 작성 중이던 초안은 **화면 밖**에 있다 — Studio 를 닫았다 열어도
-  //   살아남아야 한다(기존 3패널은 언마운트되지 않아 원래 보존됐다. 여기서 잃으면 회귀다).
-  const [note, setNoteState] = useState(() => decisionDraft.get(vm.project.id));
-  const setNote = (v: string) => { setNoteState(v); decisionDraft.set(vm.project.id, v); };
-
-  // 프로젝트가 바뀌면 그 프로젝트의 초안으로 갈아 끼운다 — 한 칸을 공유하면 A 에 쓰던
-  //   승인 조건이 B 의 승인 칸에 나타난다(보존이 아니라 오입력 유도다).
-  useEffect(() => { setNoteState(decisionDraft.get(vm.project.id)); }, [vm.project.id]);
-
-  const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState('');
-  const [ok, setOk] = useState('');
-
   const [turns, setTurns] = useState<JarvisTurn[]>(jarvisSession.turns());
   const [ask, setAsk] = useState('');
   const [askBusy, setAskBusy] = useState(false);
   const [askErr, setAskErr] = useState('');
   const [drawer, setDrawer] = useState(false);
   const logRef = useRef<HTMLDivElement>(null);
+  const requestGeneration = useRef(0);
+  const identity = studioIdentityKey();
+  useEffect(() => {
+    const invalidate = () => { requestGeneration.current += 1; };
+    window.addEventListener('factory:session-changed', invalidate);
+    window.addEventListener('factory:acting-user-changed', invalidate);
+    window.addEventListener('factory:enterprise-context-changed', invalidate);
+    return () => {
+      invalidate();
+      window.removeEventListener('factory:session-changed', invalidate);
+      window.removeEventListener('factory:acting-user-changed', invalidate);
+      window.removeEventListener('factory:enterprise-context-changed', invalidate);
+    };
+  }, [vm.project.id, identity]);
 
   useEffect(() => jarvisSession.subscribe(() => setTurns(jarvisSession.turns())), []);
   useEffect(() => {
@@ -72,52 +54,12 @@ export function DecisionJarvisDock({
   }, [turns, drawer]);
 
   const decision = vm.decisions[0];
-  const isClarify = vm.clarify.awaiting;
-  const left = isClarify ? unansweredCount(vm.clarify.questions, selections) : 0;
-
-  /** 제출 — 기존 `HOTLInput` 과 **같은 경로·같은 형식**이다. */
-  const submit = async () => {
-    if (!decision || !vm.project.id || busy) return;
-    setBusy(true); setErr(''); setOk('');
-    try {
-      const feedback = isClarify
-        ? serializeClarifyAnswers(vm.clarify.questions, selections, note)
-        : note.trim();
-      const r = await fetch(
-        `${API_BASE_URL}/api/v1/factory/${encodeURIComponent(vm.project.id)}/hotl/resume`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ task_id: decision.id, feedback }),
-        });
-      if (!r.ok) {
-        const j = await r.json().catch(() => ({}));
-        throw new Error(j?.detail || `서버 응답 오류 (${r.status})`);
-      }
-      // 제출에 **성공했을 때만** 지운다 — 남겨 두면 이미 보낸 문장이 다시 떠서
-      //   «아직 안 보냈나» 로 읽힌다.
-      decisionDraft.clear(vm.project.id);
-      setNoteState('');
-      setOk('제출했습니다 — 파이프라인이 이어서 진행합니다.');
-      // 종전 화면과 **같은 방식**으로 store 를 맞춘다. 여기서 다르게 두면 두 화면의 상태 표시가
-      // 갈라진다(한쪽은 «대기», 다른 쪽은 «가동 중»).
-      useFactoryStore.setState((prev) => ({
-        state: prev.state ? { ...prev.state, needs_revision: false } : null,
-        hotlTaskId: null,
-        activeSprintId: decision.id,
-      }));
-    } catch (e: any) {
-      // 실패를 성공처럼 보이게 두지 않는다 — 무엇이 안 됐는지 그대로 적는다.
-      setErr(e?.message || String(e));
-    } finally {
-      setBusy(false);
-    }
-  };
-
   /** Jarvis 질문 — 문맥을 **화면이** 싣는다. 사용자가 id 를 입력하지 않는다(§2.3). */
   const sendAsk = async (message: string) => {
     const m = message.trim();
     if (!m || askBusy) return;
+    const version = requestGeneration.current;
+    const stillCurrent = () => version === requestGeneration.current && identity === studioIdentityKey();
     setAskBusy(true); setAskErr('');
     const objectId = vm.selectedWbsId || shownStageId || vm.project.id;
     jarvisSession.push({ role: 'user', text: m, at: new Date().toISOString(), objectId });
@@ -142,62 +84,26 @@ export function DecisionJarvisDock({
           ...(vm.generated.runnable ? ['생성 앱 실행 확인'] : []),
         ],
       }, vm.project.id);
+      if (!stillCurrent()) return;
       jarvisSession.push({
         role: 'assistant', text: r.reply || '(빈 응답)',
         at: new Date().toISOString(), objectId,
       });
-    } catch (e: any) {
-      setAskErr(e?.status === 401
+    } catch (error) {
+      if (!stillCurrent()) return;
+      const e = decisionError(error);
+      setAskErr(e.status === 401
         ? '사용자를 지정해야 비서가 답할 수 있습니다.'
         : `비서 응답을 받지 못했습니다: ${e?.message || e}`);
     } finally {
-      setAskBusy(false); setAsk('');
+      if (stillCurrent()) { setAskBusy(false); setAsk(''); }
     }
   };
 
   return (
     <section className="interaction-dock">
-      {/* ① 결정이 있을 때만 렌더한다 — 0건이면 이 요소가 **아예 없다**(§2.3: 완전 접힘). */}
-      {decision && (
-        <article className="decision-dock">
-          <header>
-            <b>사용자 결정 대기</b>
-            <span>{vm.decisions.length}건</span>
-          </header>
-          <div className="decision-body">
-            <p>
-              {isClarify
-                ? '요구 확인 질문에 답해야 합니다.'
-                : (decision.prompt || `«${shownStageLabel || decision.impact}» 단계의 산출물을 검토하고 승인해야 합니다.`)}
-              {/* 미결정 영향 — «안 하면 무엇이 멈추는가». 이것이 없으면 사용자는 미룬다. */}
-              <small>
-                {isClarify
-                  ? (left
-                      ? `아직 고르지 않은 질문 ${left}개 — 비워 두면 추천안대로 진행합니다.`
-                      : '모두 골랐습니다. 제출하면 RFP 초안 작성이 시작됩니다.')
-                  : '제출하기 전까지 다음 단계가 시작되지 않습니다.'}
-              </small>
-            </p>
-            <label className="decision-note">
-              <span>추가 의견 (선택)</span>
-              <input
-                value={note}
-                onChange={(e) => setNote(e.target.value)}
-                placeholder={isClarify ? '고른 것 외에 덧붙일 내용' : '승인 조건이나 수정 요청'}
-                disabled={busy}
-              />
-            </label>
-          </div>
-          <div className="decision-actions">
-            <button type="button" onClick={submit} disabled={busy}>
-              {busy ? '제출 중…' : isClarify ? '답변 제출하고 재개' : '승인하고 재개'}
-            </button>
-          </div>
-          {/* 결과를 같은 자리에서 말한다. 사라지는 알림으로 두면 실패를 놓친다. */}
-          {err && <p className="dock-error" role="alert">제출하지 못했습니다: {err}</p>}
-          {ok && <p className="dock-ok">{ok}</p>}
-        </article>
-      )}
+      <StudioDecisionPanel key={`${vm.project.id}:${identity}`} vm={vm} selections={selections}
+        onDecisionKeyChange={onDecisionKeyChange} onRestoreSelections={onRestoreSelections} />
 
       <article className="jarvis-dock">
         <div className="jarvis-head">

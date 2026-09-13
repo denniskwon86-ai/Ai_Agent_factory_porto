@@ -165,6 +165,13 @@ class EcmRepository:
         conn = self._connect()
         try:
             conn.executescript(_DDL)
+            # B1: 기존 프로필은 빈 문맥 그대로 보존한다. 운영 데이터 자동 이관 없음.
+            columns = {r[1] for r in conn.execute("PRAGMA table_info(enterprise_profiles)")}
+            for column in ("context_root_id", "entity_mode", "configuration_id"):
+                if column not in columns:
+                    conn.execute(f"ALTER TABLE enterprise_profiles ADD COLUMN {column} TEXT NOT NULL DEFAULT ''")
+            from core.enterprise_context.process_schema import DDL as process_ddl
+            conn.executescript(process_ddl)
             conn.commit()
         finally:
             conn.close()
@@ -611,6 +618,7 @@ class EcmRepository:
         tid = str(tenant_id or "").strip()
         now = self._now()
         with self._lock, self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
             sql = "SELECT * FROM enterprise_profiles WHERE profile_id=?"
             params: List[Any] = [pid]
             if tid:
@@ -621,6 +629,10 @@ class EcmRepository:
                 return None
 
             current = dict(row)
+            self._guard_legacy_process_write(conn, current)
+            if current["profile_kind"] == "process_profile" and current["status"] != "DRAFT":
+                from core.enterprise_context.process_schema import ProcessError
+                raise ProcessError("PROCESS_PROFILE_IMMUTABLE", "승인 이력은 새 판으로만 복원할 수 있습니다.")
             # ★ 같은 적용 자리의 승인본은 하나뿐이다. 새 판을 올리면서 옛 ACTIVE 를
             #   그대로 두면 조회 순서에 따라 서로 다른 구성이 홈에 뜬다.
             conn.execute(
@@ -653,18 +665,29 @@ class EcmRepository:
             node = self.get_node(p.scope_node_id)
             if not node or node.tenant_id != p.tenant_id:
                 raise EcmError(f"현재 회사에 속하지 않은 노드입니다: {p.scope_node_id}")
-        if p.profile_id:
-            existing = self._query(
-                "SELECT tenant_id, status FROM enterprise_profiles WHERE profile_id=?",
-                (p.profile_id,))
-            if existing and existing[0]["tenant_id"] != p.tenant_id:
-                raise EcmError("다른 회사의 프로필은 변경할 수 없습니다.")
-            if existing and existing[0]["status"] == STATUS_ACTIVE and p.status != STATUS_ACTIVE:
-                raise EcmError("승인된 구성은 직접 수정할 수 없습니다. 새 판을 만드십시오.")
         now = self._now()
         if not p.profile_id:
             p.profile_id = self._uid("prof")
         with self._lock, self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            old = conn.execute("SELECT * FROM enterprise_profiles WHERE profile_id=?", (p.profile_id,)).fetchone()
+            if old:
+                # 검사와 INSERT 사이 다른 연결이 같은 ID를 선점해도 tenant를 넘지 않는다.
+                if old["tenant_id"] != p.tenant_id:
+                    raise EcmError("다른 회사의 프로필은 변경할 수 없습니다.")
+                self._guard_legacy_process_write(conn, dict(old))
+                if old["profile_kind"] != p.profile_kind or old["scope_node_id"] != p.scope_node_id or old["industry_code"] != p.industry_code:
+                    raise EcmError("프로필 ID의 종류·적용 범위는 바꿀 수 없습니다. 새 판을 만드십시오.")
+                if old["status"] == STATUS_ACTIVE and p.status != STATUS_ACTIVE:
+                    raise EcmError("승인된 구성은 직접 수정할 수 없습니다. 새 판을 만드십시오.")
+                if old["profile_kind"] == "process_profile" and (old["approved_at"] or old["status"] in ("ACTIVE", "ARCHIVED")):
+                    from core.enterprise_context.process_schema import ProcessError
+                    raise ProcessError("PROCESS_PROFILE_IMMUTABLE", "승인된 업무 구성은 새 판으로 변경하십시오.")
+            self._guard_legacy_process_write(conn, {**p.model_dump(), "payload_json": json.dumps(p.payload)})
+            if p.scope_node_id:
+                node = conn.execute("SELECT tenant_id FROM organization_nodes WHERE node_id=?", (p.scope_node_id,)).fetchone()
+                if not node or node[0] != p.tenant_id:
+                    raise EcmError("현재 회사의 조직 범위를 확인하십시오.")
             conn.execute(
                 "INSERT INTO enterprise_profiles (profile_id, tenant_id, scope_node_id, "
                 "industry_code, profile_kind, payload_json, inheritance_mode, status, version, "
@@ -678,10 +701,51 @@ class EcmRepository:
                  int(p.version), p.approved_by, p.approved_at, now, now))
         return p
 
+    @staticmethod
+    def _guard_legacy_process_write(conn, row):
+        """v1 저장/승인과 첫 v2 승인 모두 같은 ECM 쓰기 잠금을 사용한다."""
+        from core.enterprise_context.process_schema import ProcessError
+        if row["profile_kind"] != "process_profile":
+            return
+        payload = json.loads(row.get("payload_json") or "{}")
+        # 구 API는 문맥 경계와 CAS를 모르므로 v2 제출 자체도 금지한다.
+        if (row.get("configuration_id") or row.get("context_root_id") or row.get("entity_mode")
+                or payload.get("schema_version", 1) != 1):
+            raise ProcessError("PROCESS_SCHEMA_UPGRADE_REQUIRED", "업무 구성 v2 API를 사용하십시오.")
+        # v1 빈 scope의 root/mode는 불명확하다. 겹칠 수 있는 v2 하나라도 있으면 닫는다.
+        active = conn.execute(
+            "SELECT 1 FROM enterprise_process_heads WHERE tenant_id=? AND active_profile_id<>'' "
+            "AND (scope_node_id=? OR scope_node_id='' OR ?='') LIMIT 1",
+            (row["tenant_id"], row["scope_node_id"], row["scope_node_id"])).fetchone()
+        if active:
+            raise ProcessError("PROCESS_SCHEMA_UPGRADE_REQUIRED", "새 업무 구성 편집기를 사용하십시오. 기존 L2는 보존됩니다.")
+
+    def assert_legacy_process_reader(self, node_id):
+        """일반 resolver/복제가 v2를 평면 목록으로 오인하거나 조용히 생략하지 않게 한다."""
+        from core.enterprise_context.process_schema import ProcessError
+        try:
+            with self._connect() as conn:
+                conn.execute("BEGIN")
+                row = conn.execute(
+                    "WITH RECURSIVE ancestors(node_id) AS (SELECT ? UNION SELECT e.from_node_id "
+                    "FROM organization_edges e JOIN ancestors a ON e.to_node_id=a.node_id "
+                    "WHERE e.relation_type='OPERATING_PARENT' AND e.status='ACTIVE') "
+                    "SELECT 1 FROM enterprise_process_heads h JOIN organization_nodes n ON n.node_id=? "
+                    "JOIN enterprise_entities ent ON ent.entity_id=n.entity_id "
+                    "WHERE h.tenant_id=n.tenant_id AND h.entity_mode=ent.entity_mode AND h.active_profile_id<>'' "
+                    "AND h.context_root_id IN (SELECT node_id FROM ancestors) "
+                    "AND (h.scope_node_id='' OR h.scope_node_id IN (SELECT node_id FROM ancestors)) LIMIT 1",
+                    (node_id, node_id)).fetchone()
+                if row:
+                    raise ProcessError("PROCESS_SCHEMA_UPGRADE_REQUIRED", "업무 구성 v2 전용 조회를 사용하십시오. 평면 상속은 지원하지 않습니다.")
+        except sqlite3.Error as exc:
+            raise ProcessError("PROCESS_STORAGE_UNAVAILABLE", "업무 구성 판본을 확인하지 못했습니다.", 503) from exc
+
     def list_profiles(self, scope_node_id: str = "", industry_code: str = "",
                       profile_kind: str = "", tenant_id: str = "",
                       company_wide: bool = False) -> List[EnterpriseProfile]:
-        sql, where, params = "SELECT * FROM enterprise_profiles", [], []
+        # v2는 전용 문맥/권한 해석으로만 노출한다. 기존 API/일반 상속에는 섞지 않는다.
+        sql, where, params = "SELECT * FROM enterprise_profiles", ["configuration_id=''"], []
         if tenant_id:
             where.append("tenant_id=?")
             params.append(tenant_id)

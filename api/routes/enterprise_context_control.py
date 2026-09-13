@@ -28,7 +28,7 @@ E1 범위: 조직 트리 조회, 엔터티/노드/엣지 등록·승인, 문맥 
 import asyncio
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, Field
 
 from api.deps import (
@@ -50,6 +50,11 @@ from core.enterprise_context import (ENTITY_MODES, NODE_TYPES, PROFILE_KINDS, RE
 #   알려 주지 않는다. 표는 `core/route_authority.ROUTE_CAPS` 하나뿐이며,
 #   `tests/test_route_authority_table.py` 가 표와 라우터를 **양방향으로** 대조한다.
 router = APIRouter(prefix="/api/v1/enterprise-context", tags=["EnterpriseContext"], dependencies=[Depends(_route_authority_guard)])
+from api.routes import process_configuration_control as process_api
+from core.enterprise_context.process_schema import ProcessError
+router.include_router(process_api.router)
+from api.routes import process_installation_control as installation_api
+router.include_router(installation_api.router)
 
 #: 사용자에게 보일 자료 이름. 조사(을/를)는 `deps.eul` 이 맞춘다.
 WHAT = "전사 컨텍스트"
@@ -357,21 +362,24 @@ class ProfileIn(BaseModel):
 
 
 @router.post("/profiles")
-async def create_profile(req: ProfileIn, p: Principal = Depends(current_principal),
+async def create_profile(req: ProfileIn, request: Request, p: Principal = Depends(current_principal),
                          ctx: EnterpriseContext = Depends(enterprise_context)):
     assert_can_edit_org(p)
     if req.status != "DRAFT":
         raise HTTPException(status_code=400, detail="프로필은 초안으로 저장한 뒤 승인하십시오.")
     try:
+        await asyncio.to_thread(process_api.guard_old_profile_target, req.profile_id, request, ctx, p.user_id)
         pr = await asyncio.to_thread(ecm_repository.upsert_profile, EnterpriseProfile(
             tenant_id=ctx.tenant_id, **req.model_dump()))
+    except ProcessError as ex:
+        process_api.error(ex, p.user_id, req.profile_id)
     except EcmError as ex:
         raise HTTPException(status_code=400, detail=str(ex))
     return {"status": "success", "data": pr.model_dump()}
 
 
 @router.get("/profiles")
-async def list_profiles(scope_node_id: str = "", industry_code: str = "", profile_kind: str = "",
+async def list_profiles(request: Request, scope_node_id: str = "", industry_code: str = "", profile_kind: str = "",
                         company_wide: bool = False,
                         p: Principal = Depends(current_principal),
                         ctx: EnterpriseContext = Depends(enterprise_context)):
@@ -384,12 +392,19 @@ async def list_profiles(scope_node_id: str = "", industry_code: str = "", profil
         d = pr.model_dump()
         d["is_effective"] = pr.is_effective
         out.append(d)
+    if profile_kind in ("", "process_profile") and not industry_code:
+        try:
+            projection = await asyncio.to_thread(process_api.legacy_projection, request, ctx, p.user_id,
+                                                  scope_node_id, company_wide)
+            out.extend(projection)
+        except ProcessError as exc:
+            process_api.error(exc, p.user_id, scope_node_id)
     return {"status": "success", "data": out,
             "note": "프로필 상속 병합은 ECM 로드맵 E2 에서 제공됩니다. 여기는 저장된 원본입니다."}
 
 
 @router.post("/profiles/{profile_id}/approve")
-async def approve_profile(profile_id: str, p: Principal = Depends(current_principal),
+async def approve_profile(profile_id: str, request: Request, p: Principal = Depends(current_principal),
                           ctx: EnterpriseContext = Depends(enterprise_context)):
     """프로필 승인 — **엔터티와 같은 규약**(§4.1 승인 가능한 버전).
 
@@ -399,8 +414,12 @@ async def approve_profile(profile_id: str, p: Principal = Depends(current_princi
     ⚠️ 엔터티에는 `POST /entities/{id}/approve` 가 있는데 프로필에는 없었다.
       「통제는 있는데 부르는 경로가 없다」의 또 한 자리다."""
     assert_can_edit_org(p)
-    pr = await asyncio.to_thread(ecm_repository.approve_profile, profile_id, p.user_id,
-                                 ctx.tenant_id)
+    try:
+        await asyncio.to_thread(process_api.guard_old_profile_target, profile_id, request, ctx, p.user_id)
+        pr = await asyncio.to_thread(ecm_repository.approve_profile, profile_id, p.user_id,
+                                     ctx.tenant_id)
+    except ProcessError as ex:
+        process_api.error(ex, p.user_id, profile_id)
     if not pr:
         raise HTTPException(status_code=404, detail="프로필을 찾을 수 없습니다.")
     d = pr.model_dump()
@@ -448,6 +467,8 @@ async def get_resolved_profile(scope_id: str, profile_kind: str = "data_profile"
             base = playbook_industry_base(pb)
     try:
         out = await asyncio.to_thread(profile_resolver.resolve, node_id, profile_kind, base)
+    except ProcessError as e:
+        process_api.error(e, p.user_id, node_id)
     except EcmError as e:
         raise HTTPException(status_code=400, detail=str(e))
     out["scope_ref"] = resolved_ref
@@ -538,6 +559,8 @@ async def clone_entity(entity_id: str, req: CloneIn,
             clone_service.clone_to_virtual, entity_id, req.name_ko, req.purpose,
             req.valid_until, (p.user_id or ""), req.copy_options, ctx.tenant_id,
             req.assumption_set_id, req.snapshot_id)
+    except ProcessError as e:
+        process_api.error(e, p.user_id, entity_id)
     except (SandboxError, EcmError) as e:
         _sandbox_err(e)
     return {"status": "success", "data": data}

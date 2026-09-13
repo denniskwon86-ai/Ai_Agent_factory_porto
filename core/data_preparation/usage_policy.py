@@ -14,6 +14,12 @@ NEXT_ACTION = "가격·시점·소유권 보류 근거를 검토하고 승인된
 class UsageHoldError(m.StateConflict):
     """준비된 데이터라도 사용 보류가 남아 있으면 승격·소비하지 않는다."""
 
+    def __init__(self, message: str, *, codes: Tuple[str, ...] = ()):
+        super().__init__(message)
+        self.codes = codes
+        self.reason_code = INVALID if INVALID in codes else "DATA_USAGE_HOLD"
+        self.category = "unavailable" if INVALID in codes else "conflict"
+
 
 def _codes(value: Any) -> Tuple[str, ...]:
     if not isinstance(value, list) or any(
@@ -62,7 +68,8 @@ def snapshot_holds(conn: Any, snapshot: Dict[str, Any]) -> Tuple[str, ...]:
 def require_no_holds(holds: Any) -> None:
     codes = _codes(holds)
     if codes:
-        raise UsageHoldError("사용 보류: " + ", ".join(codes) + ". " + NEXT_ACTION)
+        raise UsageHoldError("사용 보류: " + ", ".join(codes) + ". " + NEXT_ACTION,
+                             codes=codes)
 
 
 def require_usable_conn(conn: Any, snapshot: Dict[str, Any]) -> None:

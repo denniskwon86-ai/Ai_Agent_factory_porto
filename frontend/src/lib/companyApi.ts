@@ -104,7 +104,7 @@ export async function createNode(body: {
  *   그래서 이 호출은 «허가» 를 받는 것이고, 통과한 뒤에 클라이언트 문맥을 바꾼다.
  * ★ 통과하지 않은 문맥으로 화면을 바꾸면, 보이는 것과 권한이 갈린다. */
 export async function selectContext(enterpriseScopeId: string, entityMode: string) {
-  return unwrap<any>(await apiFetch(`${BASE}/contexts/select`, {
+  return unwrap<{ headers: Record<string, string>; tenant_id: string; entity_mode: string }>(await apiFetch(`${BASE}/contexts/select`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ enterprise_scope_id: enterpriseScopeId, entity_mode: entityMode }),
   }), '문맥 선택');
@@ -153,6 +153,7 @@ export type ThreadNode = {
 };
 
 export type Profile = {
+  read_only?: boolean; editor_schema_required?: number;
   profile_id: string; tenant_id: string; scope_node_id: string; industry_code?: string;
   profile_kind: string; payload: { nodes?: ThreadNode[] };
   inheritance_mode: string; status: string;
@@ -187,3 +188,6 @@ export async function approveProfile(profileId: string) {
     `${BASE}/profiles/${encodeURIComponent(profileId)}/approve`, { method: 'POST' }),
     '연결구성 승인');
 }
+
+// v2는 구조화 오류·문맥 수명을 보존하는 별도 계약을 쓴다. 기존 Profile writer와 혼합하지 않는다.
+export { createProcessInstallationApi } from './processInstallationApi';

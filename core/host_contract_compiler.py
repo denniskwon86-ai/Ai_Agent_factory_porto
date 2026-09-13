@@ -28,6 +28,7 @@ LLM 0콜.
 from __future__ import annotations
 
 import hashlib
+import copy
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -302,7 +303,8 @@ def _unsupported(intents: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
 
 
 def compile_contract(draft: Any, *, project_id: str, task_id: str = "",
-                     previous: Optional[Dict[str, Any]] = None) -> CompileResult:
+                     previous: Optional[Dict[str, Any]] = None,
+                     document_version: str = "1.0", process_context: Any = None) -> CompileResult:
     """초안 → 계약. **결정론적이고, 던지지 않는다.**
 
     같은 입력에 같은 출력을 준다(id·지문·순서 모두 내용에서 유도한다).
@@ -312,6 +314,19 @@ def compile_contract(draft: Any, *, project_id: str, task_id: str = "",
     errors: List[str] = []
     if not isinstance(draft, dict):
         errors.append("초안이 객체가 아닙니다.")
+    # 이 두 값은 인증된 서버 생산자가 전달한다. LLM 초안의 같은 이름은 읽지 않는다.
+    errors.extend(arc.runtime_document_errors(document_version, process_context))
+    if document_version == arc.PROCESS_DOCUMENT_VERSION and previous is not None:
+        if not isinstance(previous, dict):
+            errors.append("이전 계약이 객체가 아닙니다.")
+            previous = None
+        elif previous.get("schema_version", arc.SCHEMA_VERSION) not in (arc.SCHEMA_VERSION, arc.PROCESS_DOCUMENT_VERSION):
+            errors.append("이전 계약의 판본을 확인할 수 없습니다.")
+    if isinstance(previous, dict) and previous.get("schema_version") == arc.PROCESS_DOCUMENT_VERSION:
+        if document_version != arc.PROCESS_DOCUMENT_VERSION:
+            errors.append("2.0 계약을 1.0으로 낮춰 업무 문맥 검사를 우회할 수 없습니다.")
+        else:
+            errors.extend("이전 2.0 계약: " + item for item in arc.validate(previous))
 
     intents, ierr, pending = _compile_intents(d)
     datasets, derr = _compile_datasets(d)
@@ -342,7 +357,7 @@ def compile_contract(draft: Any, *, project_id: str, task_id: str = "",
             + " 있습니다.")
 
     contract: Dict[str, Any] = {
-        "schema_version": arc.SCHEMA_VERSION,
+        "schema_version": document_version,
         "contract_id": arc.contract_id_for(project_id, task_id),
         "revision": 1,
         "project_id": str(project_id or ""),
@@ -357,9 +372,17 @@ def compile_contract(draft: Any, *, project_id: str, task_id: str = "",
         "semantic_fingerprint": "",
         "approval": {"status": "PENDING"},
     }
+    if document_version == arc.PROCESS_DOCUMENT_VERSION:
+        contract["process_context"] = copy.deepcopy(process_context)
 
     prev_fp = str((previous or {}).get("semantic_fingerprint", ""))
-    prev_rev = int((previous or {}).get("revision", 0) or 0)
+    try:
+        prev_rev = int((previous or {}).get("revision", 0) or 0)
+    except (ValueError, TypeError, OverflowError):
+        if document_version != arc.PROCESS_DOCUMENT_VERSION and (previous or {}).get("schema_version") != arc.PROCESS_DOCUMENT_VERSION:
+            raise  # 기존 1.0의 입력·예외 계약은 바꾸지 않는다.
+        prev_rev = 0
+        errors.append("이전 2.0 계약의 revision 형식이 잘못되었습니다.")
 
     if errors:
         # DRAFT 로 남긴다. 지문 없음 = 승인할 대상 없음.
@@ -369,7 +392,9 @@ def compile_contract(draft: Any, *, project_id: str, task_id: str = "",
     fp = arc.semantic_fingerprint(contract)
     contract["semantic_fingerprint"] = fp
     contract["status"] = "COMPILED"
-    changed = bool(previous) and fp != prev_fp
+    changed = bool(previous) and (fp != prev_fp or (
+        document_version == arc.PROCESS_DOCUMENT_VERSION and
+        previous.get("schema_version", arc.SCHEMA_VERSION) != document_version))
     contract["revision"] = (prev_rev + 1) if changed else max(prev_rev, 1)
 
     # ★★★ 지문이 같을 때만 이전 승인을 잇는다. 다르면 PENDING 으로 돌아간다.

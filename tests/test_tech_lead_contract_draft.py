@@ -237,11 +237,23 @@ def test_사유에_진짜_원인이_담긴다(tmp_path):
     assert "계약 초안이 없습니다" in reason, reason
 
 
-def test_종결_노드가_그_사유를_덮지_않는다(tmp_path):
-    """★ 상태를 세워도 종결 노드가 덮어쓰면 소용없다 — 거기까지 확인한다."""
+def test_종결_노드가_그_사유를_덮지_않는다(tmp_path, monkeypatch):
+    """종결 사유와 실제 임시 번들만 확인한다. Git 롤백은 명시적 대역이다."""
     import asyncio
 
     import nodes.execution as ex
+    from pathlib import Path
+    monkeypatch.chdir(tmp_path)
+    # 이 시험의 진단 data 경로만 절대 임시 경로로 연결한다. 실제 번들 작성은 그대로다.
+    # native 상대 os.open/dir_fd 차단을 느슨하게 하거나 생산 코드를 바꾸지 않는다.
+    monkeypatch.setattr(ex, "Path", lambda value: tmp_path / "data" if value == "data" else Path(value))
+    rollbacks = []
+    class RollbackStub:
+        def __init__(self, workspace_root):
+            assert Path(workspace_root).resolve() == tmp_path.resolve()
+        def rollback_to_safe_state(self, revision):
+            rollbacks.append(revision)
+    monkeypatch.setattr(ex, "GitManager", RollbackStub)
 
     out = _compile_with_no_draft(tmp_path)
     fin = asyncio.run(ex.run_terminal_handler({
@@ -251,6 +263,13 @@ def test_종결_노드가_그_사유를_덮지_않는다(tmp_path):
     }))
     assert fin.get("terminal_status") == "CONTRACT_BLOCKED"
     assert "자가복구" not in (fin.get("terminal_reason") or "")
+    assert len(rollbacks) == 1
+    bundle = Path(fin["failure_bundle_path"]).resolve()
+    assert bundle.is_relative_to(tmp_path.resolve()) and bundle.is_file()
+    assert bundle.parent.parent == tmp_path / "data" / "failures"
+    saved = json.loads(bundle.read_text(encoding="utf-8"))
+    assert saved["terminal_status"] == fin["terminal_status"]
+    assert saved["terminal_reason"] == fin["terminal_reason"]
 
 
 def test_WBS_를_못_읽으면_그렇게_말한다(tmp_path):

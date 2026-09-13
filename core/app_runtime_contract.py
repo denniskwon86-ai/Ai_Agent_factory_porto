@@ -35,6 +35,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import copy
 from typing import Any, Dict, List, Tuple
 
 from core import app_manifest, host_runtime_wire
@@ -43,6 +44,7 @@ from core import app_manifest, host_runtime_wire
 #: `runtime_contract_version`(앱↔Host 런타임 계약 세대)과 **다른 것**이다.
 #: ⚠️ 셋을 한 숫자로 묶으면 이후 한쪽만 올릴 수 없게 된다.
 SCHEMA_VERSION = "1.0"
+PROCESS_DOCUMENT_VERSION = "2.0"
 
 #: 앱↔Host 런타임 계약 세대. `host_runtime_wire.WIRE_VERSION` 과 짝이다.
 RUNTIME_CONTRACT_VERSION = 1
@@ -316,6 +318,155 @@ class ContractError(ValueError):
     """계약 위반 — 4xx 로 전달한다."""
 
 
+# B3: 이 문서 형식은 기존 1.0 schema 객체를 변경하지 않는 별도 판본이다.
+# DTO의 진위·현재 권한·실제 참조 재검증은 서버 ProcessContext 서비스가 담당한다.
+_CONTEXT_ID = {"type": "string", "minLength": 1, "maxLength": 200}
+_CONTEXT_SHA = {"type": "string", "minLength": 64, "maxLength": 64, "pattern": FINGERPRINT_PATTERN}
+_CONTEXT_ACTION = {"enum": ["READ", "DRAFT", "BOOTSTRAP", "GENERATE", "RUN", "RELEASE"]}
+
+
+def _context_object(properties: Dict[str, Any]) -> Dict[str, Any]:
+    return {"type": "object", "additionalProperties": False,
+            "required": list(properties), "properties": copy.deepcopy(properties)}
+
+
+def _context_nullable(schema: Dict[str, Any]) -> Dict[str, Any]:
+    return {"anyOf": [copy.deepcopy(schema), {"type": "null"}]}
+
+
+# core.enterprise_context 초기화는 저장소를 열 수 있으므로 순수 계약 검증에서
+# import하지 않는다. ProcessContextDTO의 strict wire 형식과 교차 참조 규칙을
+# 그대로 대응하며 parity 회귀로 두 정의의 이탈을 검출한다. 권한 판정은 하지 않는다.
+_CONTEXT_REQUIREMENT = _context_object({
+    "process_id": _CONTEXT_ID, "requirement_key": _CONTEXT_ID,
+    "logical_requirement": {"type": "string"}, "mandatory": {"type": "boolean"},
+    "candidate_contract_keys": {"type": "array", "items": _CONTEXT_ID},
+    "unresolved_requirement": {"type": "boolean"},
+})
+_CONTEXT_BINDING = _context_object({
+    "process_id": _CONTEXT_ID, "requirement_key": _CONTEXT_ID,
+    "instance_id": _CONTEXT_ID, "contract_key": _CONTEXT_ID,
+    "artifact_digest": _CONTEXT_SHA, "binding_id": _CONTEXT_ID,
+    "binding_fingerprint": _CONTEXT_SHA, "snapshot_id": _CONTEXT_ID,
+    "snapshot_fingerprint": _CONTEXT_SHA, "checksum": _CONTEXT_SHA,
+    "ownership_binding_id": _CONTEXT_ID, "ownership_fingerprint": _CONTEXT_SHA,
+    "certification_state": {"enum": ["OWNER_CERTIFIED", "SOURCE_CERTIFIED", "DEMO_CERTIFIED"]},
+    "certification_subject_id": _context_nullable(_CONTEXT_ID),
+    "certification_subject_digest": _context_nullable(_CONTEXT_SHA),
+    "signing_policy_id": _context_nullable(_CONTEXT_ID),
+    "signing_policy_digest": _context_nullable(_CONTEXT_SHA),
+    "certified_use_kind": _context_nullable({"enum": ["OPERATIONAL", "MANAGEMENT"]}),
+    "usage_policy_fingerprint": _CONTEXT_SHA,
+})
+_CONTEXT_BLOCKER = _context_object({
+    "reason_code": _CONTEXT_ID, "process_id": _context_nullable(_CONTEXT_ID),
+    "requirement_key": _context_nullable(_CONTEXT_ID),
+    "blocking_actions": {"type": "array", "items": _CONTEXT_ACTION},
+    "next_action": {"type": "string"},
+})
+_CONTEXT_PROFILE_SOURCE = _context_object({
+    "kind": {"const": "PROCESS_PROFILE"}, "configuration_id": _CONTEXT_ID,
+    "profile_id": _CONTEXT_ID, "fingerprint": _CONTEXT_SHA,
+})
+_CONTEXT_PACK_SOURCE = _context_object({
+    "kind": {"const": "PROCESS_PACK"}, "artifact_digest": _CONTEXT_SHA,
+    "pack_id": _CONTEXT_ID, "pack_version": _CONTEXT_ID, "pack_digest": _CONTEXT_SHA,
+    "instance_id": _CONTEXT_ID, "template_keys": {"type": "array", "items": _CONTEXT_ID},
+})
+PROCESS_CONTEXT_SCHEMA: Dict[str, Any] = {
+    "type": "object", "additionalProperties": False,
+    "required": ["schema_version", "configuration_id", "profile_id", "process_ids",
+                 "process_semantic_fingerprint", "configuration_fingerprint", "context_key",
+                 "data_requirements", "verified_binding_refs", "blockers", "permitted_actions", "sources"],
+    "properties": {
+        "schema_version": {"type": "integer", "const": 1},
+        "configuration_id": copy.deepcopy(_CONTEXT_ID),
+        "profile_id": copy.deepcopy(_CONTEXT_ID),
+        "process_ids": {"type": "array", "minItems": 1, "maxItems": 200, "uniqueItems": True,
+                        "items": copy.deepcopy(_CONTEXT_ID)},
+        "process_semantic_fingerprint": copy.deepcopy(_CONTEXT_SHA),
+        "configuration_fingerprint": copy.deepcopy(_CONTEXT_SHA),
+        "context_key": {
+            "type": "object", "additionalProperties": False,
+            "required": ["tenant_id", "context_root_id", "entity_mode", "scope_node_id"],
+            "properties": {
+                "tenant_id": copy.deepcopy(_CONTEXT_ID),
+                "context_root_id": copy.deepcopy(_CONTEXT_ID),
+                "entity_mode": {"enum": ["REAL", "VIRTUAL", "COMPETITOR_REFERENCE"]},
+                "scope_node_id": {"type": "string"},
+            },
+        },
+        "data_requirements": {"type": "array", "items": _CONTEXT_REQUIREMENT},
+        "verified_binding_refs": {"type": "array", "items": _CONTEXT_BINDING},
+        "blockers": {"type": "array", "items": _CONTEXT_BLOCKER},
+        "permitted_actions": {"type": "array", "uniqueItems": True,
+                              "items": _CONTEXT_ACTION},
+        "sources": {"type": "array", "items": {"oneOf": [
+            _CONTEXT_PROFILE_SOURCE, _CONTEXT_PACK_SOURCE]}},
+    },
+}
+CONTRACT_SCHEMA_V2: Dict[str, Any] = copy.deepcopy(CONTRACT_SCHEMA)
+CONTRACT_SCHEMA_V2["$id"] = "afs://contracts/app_runtime_contract/2.0"
+CONTRACT_SCHEMA_V2["properties"]["schema_version"] = {"const": PROCESS_DOCUMENT_VERSION}
+CONTRACT_SCHEMA_V2["properties"]["process_context"] = PROCESS_CONTEXT_SCHEMA
+CONTRACT_SCHEMA_V2["required"] = [*CONTRACT_SCHEMA["required"], "process_context"]
+
+
+def process_context_errors(value: Any) -> List[str]:
+    """ProcessContext DTO 형식만 검사한다. 지문 자체를 출처·권한 증명으로 믿지 않는다."""
+    try:
+        import jsonschema
+    except ImportError:
+        return ["ProcessContext를 검증할 jsonschema가 없습니다."]
+    validator = jsonschema.Draft202012Validator(PROCESS_CONTEXT_SCHEMA)
+    errors = ["process_context/" + "/".join(str(p) for p in error.path) + ": " + error.message
+              for error in sorted(validator.iter_errors(value), key=lambda e: tuple(str(p) for p in e.path))]
+    if errors:
+        return errors
+    if type(value["schema_version"]) is not int:
+        return ["process_context/schema_version: 정확한 정수 판본이 필요합니다."]
+    ids = value["process_ids"]
+    requirements = [(r["process_id"], r["requirement_key"]) for r in value["data_requirements"]]
+    refs = [(r["process_id"], r["requirement_key"], r["instance_id"], r["contract_key"])
+            for r in value["verified_binding_refs"]]
+    if (ids != sorted(set(ids)) or len(set(requirements)) != len(requirements)
+            or refs != sorted(set(refs))):
+        errors.append("process_context: 중복 또는 비정규 순서의 업무 참조입니다.")
+    if any(pid not in ids for pid, _ in requirements):
+        errors.append("process_context/data_requirements: 선택 업무 밖의 요구사항입니다.")
+    if any((r["process_id"], r["requirement_key"]) not in requirements
+           for r in value["verified_binding_refs"]):
+        errors.append("process_context/verified_binding_refs: 논리 요구사항 없는 결속입니다.")
+    proof_keys = ("certification_subject_id", "certification_subject_digest",
+                  "signing_policy_id", "signing_policy_digest", "certified_use_kind")
+    for ref in value["verified_binding_refs"]:
+        values = [ref[key] for key in proof_keys]
+        if ref["certification_state"] == "OWNER_CERTIFIED":
+            if any(v is None for v in values):
+                errors.append("process_context/verified_binding_refs: 소유자 인증 증거가 빠졌습니다.")
+        elif any(v is not None for v in values):
+            errors.append("process_context/verified_binding_refs: 비소유자 인증에 서명 증거를 넣을 수 없습니다.")
+    if errors:
+        return errors
+    try:
+        # 새 2.0에만 적용한다. 1.0 canonical_json의 직렬화 규칙은 보존한다.
+        json.dumps(value, ensure_ascii=False, sort_keys=True, allow_nan=False).encode("utf-8")
+    except (ValueError, TypeError, UnicodeError, RecursionError):
+        return ["process_context: 유한한 UTF-8 JSON 값만 허용합니다."]
+    return []
+
+
+def runtime_document_errors(document_version: Any, process_context: Any = None) -> List[str]:
+    """서버가 명시한 문서 판본을 확인한다. LLM 초안에서 판본을 추론하지 않는다."""
+    if document_version == SCHEMA_VERSION:
+        if process_context is not None and process_context != {}:
+            return ["문서 1.0에 업무 문맥을 버리고 저장할 수 없습니다. 명시적 2.0 전환이 필요합니다."]
+        return []
+    if document_version != PROCESS_DOCUMENT_VERSION:
+        return ["지원하지 않는 runtime document_version입니다. 1.0으로 대체하지 않습니다."]
+    return process_context_errors(process_context)
+
+
 # ── 판정 ──────────────────────────────────────────────────────────────────
 def decide(capability: Any) -> Tuple[str, str]:
     """capability → (상태, 근거). **결정론적이고 부작용이 없다.**
@@ -400,7 +551,7 @@ def canonical_json(obj: Any) -> str:
     return json.dumps(obj, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
 
 
-def semantic_material(contract: Dict[str, Any]) -> Dict[str, Any]:
+def _semantic_material_v1(contract: Dict[str, Any]) -> Dict[str, Any]:
     """지문에 **들어가는 것만** 추린다.
 
     ★ `label`·`purpose`·`reason` 같은 설명 문구는 **들어가지 않는다.** 문구를 다듬었다고
@@ -465,6 +616,28 @@ def semantic_material(contract: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+def semantic_material(contract: Dict[str, Any]) -> Dict[str, Any]:
+    """1.0 재료는 원형 보존하고 명시적 2.0에만 업무 의미를 추가한다."""
+    c = contract if isinstance(contract, dict) else {}
+    version = c.get("schema_version", SCHEMA_VERSION)
+    if version == SCHEMA_VERSION:
+        return _semantic_material_v1(contract)
+    if version != PROCESS_DOCUMENT_VERSION:
+        raise ContractError("지원하지 않는 계약 문서 판본의 의미 지문은 만들지 않습니다.")
+    context = c.get("process_context")
+    errors = process_context_errors(context)
+    if errors:
+        raise ContractError(" / ".join(errors))
+    material = _semantic_material_v1(contract)
+    material["process_context"] = {
+        "context_key": copy.deepcopy(context["context_key"]),
+        "process_ids": sorted(context["process_ids"]),
+        "process_semantic_fingerprint": context["process_semantic_fingerprint"],
+        "verified_binding_refs": sorted(copy.deepcopy(context["verified_binding_refs"]), key=canonical_json),
+    }
+    return material
+
+
 def semantic_fingerprint(contract: Dict[str, Any]) -> str:
     """의미 지문(전체 sha256). **이 값이 바뀔 때만** 재승인이 필요하다.
 
@@ -490,7 +663,8 @@ def _schema_errors(contract: Any) -> List[str]:
     except ImportError:  # pragma: no cover - 의존성 누락은 배포 사고다
         return ["jsonschema 가 설치되어 있지 않아 계약을 검증할 수 없습니다 — "
                 "검증 없이 통과시키지 않습니다."]
-    validator = jsonschema.Draft202012Validator(CONTRACT_SCHEMA)
+    schema = CONTRACT_SCHEMA_V2 if isinstance(contract, dict) and contract.get("schema_version") == PROCESS_DOCUMENT_VERSION else CONTRACT_SCHEMA
+    validator = jsonschema.Draft202012Validator(schema)
     out: List[str] = []
     for e in sorted(validator.iter_errors(contract), key=lambda x: list(x.path)):
         where = "/".join(str(p) for p in e.path) or "(최상위)"
@@ -656,6 +830,10 @@ def validate(contract: Any) -> List[str]:
     # ⚠️ 스키마가 깨진 문서에 조건부 규칙을 돌리면 오류가 두 배로 늘어 원인을 가린다.
     if errs:
         return errs
+    if contract.get("schema_version") == PROCESS_DOCUMENT_VERSION:
+        errors = process_context_errors(contract.get("process_context"))
+        if errors:
+            return errors
     return conditional_errors(contract)
 
 

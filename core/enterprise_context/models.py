@@ -144,6 +144,9 @@ class EnterpriseProfile(BaseModel):
       나중에 추가하면 이미 쌓인 프로필의 승인 여부를 알 수 없다."""
     profile_id: str = ""
     tenant_id: str = "tenant_default"
+    context_root_id: str = ""               # 빈 값은 문맥 미확정 v1; 추정 이관 금지
+    entity_mode: str = ""
+    configuration_id: str = ""
     scope_node_id: str = ""                  # process_profile 에서는 비면 회사 전체
     industry_code: str = ""
     profile_kind: str = "business_profile"

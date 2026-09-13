@@ -37,6 +37,12 @@ from core.data_preparation import usage_policy
 class SealedDatasetError(Exception):
     """봉인된 판을 읽을 수 없다. ⚠️ 「자료 없음」으로 접지 않는다."""
 
+    def __init__(self, message: str, *, reason_code: str = "DATA_CONTRACT_INVALID",
+                 category: str = "invalid"):
+        super().__init__(message)
+        self.reason_code = reason_code
+        self.category = category
+
 
 def _read_rows(path: str, *, key: str) -> List[Dict[str, str]]:
     """RAW CSV 를 읽는다. **문자열 그대로** 돌려준다.
@@ -94,9 +100,10 @@ def load_sealed(store: Any, *, sealed_snapshots: Mapping[str, str],
                 f"자료로 만든 숫자는 검증되지 않았습니다.")
 
         try:
-            usage_policy.require_usable(store, row)
+            usage_policy.require_no_holds(row.get("usage_holds"))
         except usage_policy.UsageHoldError as exc:
-            raise SealedDatasetError(str(exc)) from exc
+            raise SealedDatasetError(str(exc), reason_code=exc.reason_code,
+                                     category=exc.category) from exc
 
         #: ④ 원본 체크섬. RAW 는 디스크에 있고 디스크는 바뀔 수 있다.
         #: ★ 제품이 이미 쓰는 `snapshot_service.verify_raw` 를 쓴다 — 같은 판정을 두 벌로
@@ -134,7 +141,8 @@ def active_seals(store: Any, *, instance_id: str, contract_keys: Sequence[str]
     # 보류된 최신판을 빼고 옛 판으로 조용히 폴백하지 않는다.
     for row in latest.values():
         try:
-            usage_policy.require_usable(store, row)
+            usage_policy.require_no_holds(row.get("usage_holds"))
         except usage_policy.UsageHoldError as exc:
-            raise SealedDatasetError(str(exc)) from exc
+            raise SealedDatasetError(str(exc), reason_code=exc.reason_code,
+                                     category=exc.category) from exc
     return {k: str(v["snapshot_id"]) for k, v in sorted(latest.items())}

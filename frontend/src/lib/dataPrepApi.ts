@@ -212,9 +212,12 @@ export async function decideBinding(bindingId: string, action: string, reason = 
 //   「보여 주는 것」과 「되는 것」이 다르면, 보여 주는 쪽이 거짓말을 한다.
 
 /** 앱 계약 상태. ★ `null` 은 «계약이 아직 없다» 다 — 빈 문자열이 아니다. */
-export type AppContractStatus = 'DRAFT' | 'APPROVED' | 'SUPERSEDED' | null;
+export type AppContractStatus = 'DRAFT' | 'APPROVED' | 'SUPERSEDED' | 'REJECTED' | null;
 
 export interface KitAppRow {
+  /** 서버 적용본에서 결정한 계약 버전. 미제공은 기존 v1 경로다. */
+  contract_schema_version?: '1.0' | '2.0';
+  permitted_actions?: string[];
   app_id: string;
   label: string;
   /** 준비도(만들 수 있는가). ★ 계약 상태와 **다른 사실**이다. */
@@ -235,7 +238,7 @@ export interface KitAppRow {
    * ★★★ 만든 앱은 **시연 평면의 후보 판**이다. 실제 업무 데이터를 읽으려면 운영으로
    *   올려야 한다 — 그 전에는 앱을 열어도 표만 있고 레코드가 0 이다.
    */
-  lifecycle_state: string;
+  lifecycle_state: string | null;
 }
 
 export async function listKitApps(instanceId: string) {

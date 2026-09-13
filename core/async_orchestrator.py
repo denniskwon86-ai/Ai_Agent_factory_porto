@@ -8,6 +8,7 @@ from typing import Optional, Dict, Any
 
 from core.agent_graph import get_runtime_app
 from core.broadcaster import factory_broadcaster
+from core.studio_execution_guard import execution_command, finish_before_cancel
 
 def _node_completed_payload(project_id: str, task_id: str, node_name: str,
                             state_data, full_state) -> dict:
@@ -76,6 +77,22 @@ class AsyncFactoryOrchestrator:
         self.active_tasks: Dict[str, asyncio.Task] = {}
         self.task_projects: Dict[str, str] = {}  # task_id -> project_id (삭제 시 취소·격리용)
 
+    def _forget_task(self, key, task):
+        """이전 실행의 완료 콜백이 같은 ID의 새 실행을 지우지 않는다."""
+        if self.active_tasks.get(key) is task:
+            self.active_tasks.pop(key, None)
+            self.task_projects.pop(key, None)
+
+    def _register_task(self, project_id, task_id, task):
+        key = _skey(project_id, task_id)
+        self.active_tasks[key] = task
+        self.task_projects[key] = project_id
+        task.add_done_callback(lambda done: self._forget_task(key, done))
+
+    def _project_running(self, project_id):
+        return any(not task.done() and (self.task_projects.get(key) == project_id
+                   or key.startswith(project_id + "__")) for key, task in self.active_tasks.items())
+
     async def _save_latest_state(self, state_data: Any, workspace_root: str):
         # 전체 상태(생성 코드 포함 - 수 MB 가능)의 json 직렬화+쓰기는 동기 작업이라
         # 매 노드마다 이벤트 루프(SSE/전체 API)를 멈추게 하므로 스레드로 내린다
@@ -86,11 +103,28 @@ class AsyncFactoryOrchestrator:
             with open(state_path, "w", encoding="utf-8") as f:
                 json.dump(data_to_save, f, ensure_ascii=False, indent=2)
         try:
-            await asyncio.to_thread(_write)
+            await finish_before_cancel(asyncio.to_thread(_write))
         except Exception as e:
             print(f" 상태 백업 실패: {e}")
 
+    @execution_command("workspace_root")
     async def start_sprint(self, task_id: str, project_state_payload: dict, workspace_root: str) -> bool:
+        # 중복 확인은 요청 본문 변경·아카이브·WBS 쓰기보다 먼저 한다.
+        pid = _pid(workspace_root)
+        if self._project_running(pid):
+            return False
+        if task_id.startswith("PLANNING") and len(task_id.split("_")) == 2 and os.path.isdir(workspace_root):
+            from core import studio_pause_state as pauses
+            from core.enterprise_context.process_schema import ProcessError
+            if await asyncio.to_thread(pauses.read, workspace_root, task_id):
+                return False
+            try:
+                engine = await self._bound_engine(pid)
+                prior = await engine.aget_state({"configurable": {"thread_id": _thread(pid, task_id)}})
+            except Exception as exc:
+                raise ProcessError("STUDIO_CHECKPOINT_UNAVAILABLE", "기존 기획 체크포인트를 확인하지 못했습니다.", 503) from exc
+            if getattr(prior, "values", None):
+                return False  # 기존 기획은 완료/실패 여부와 무관하게 새 기획으로 덮지 않는다.
         # ── ★★★ 새 가동은 **직전 판정을 물려받지 않는다** ────────────────────
         #
         # ⚠️⚠️ [2026-08-26 실측] 이것이 「생성 실패」가 영영 안 풀리던 이유다.
@@ -131,7 +165,8 @@ class AsyncFactoryOrchestrator:
                         #   ⚠️ 이력이 목적이므로 **누적돼야** 한다. 기획을 다시 돌릴 때마다
                         #     비워지면 「3주 전 산출물은 무엇으로 만들었나」에 답할 수 없다.
                         if item in [".git", ".archive", "project_meta.json",
-                                    "config_snapshot.json"]:
+                                    "config_snapshot.json", ".studio_setup.json",
+                                    ".studio_pause_state.json", ".studio_pause_state.json.lock"]:
                             continue
                         src_path = os.path.join(workspace_root, item)
                         dst_path = os.path.join(archive_dir, item)
@@ -140,7 +175,7 @@ class AsyncFactoryOrchestrator:
                         except Exception as e:
                             print(f"⚠️ [Orchestrator] 아카이브 이동 실패 ({item}): {e}")
                 # 디스크 이동은 동기 작업 - 이벤트 루프 동결 방지 위해 스레드로
-                await asyncio.to_thread(_archive)
+                await finish_before_cancel(asyncio.to_thread(_archive))
 
             os.makedirs(workspace_root, exist_ok=True)
             print(f" [Orchestrator] 신규 기획을 위해 기존 산출물을 .archive/ 폴더로 안전하게 백업했습니다.")
@@ -160,60 +195,244 @@ class AsyncFactoryOrchestrator:
             return False
         config = {"configurable": {"thread_id": _thread(pid, task_id)}}
         task = asyncio.create_task(self._run_sprint_loop(config, project_state_payload, task_id, workspace_root))
-        self.active_tasks[skey] = task
-        self.task_projects[skey] = pid
-        # 완료 시 레지스트리에서 제거(무한 누적 방지). pause 가 먼저 지웠어도 pop(None) 이라 무해.
-        task.add_done_callback(lambda t, k=skey: (self.active_tasks.pop(k, None), self.task_projects.pop(k, None)))
+        self._register_task(pid, task_id, task)
         return True
 
     async def cancel_project(self, project_id: str) -> int:
         """해당 프로젝트의 실행 중 스프린트를 모두 취소 (삭제/이탈 시 좀비 스프린트 방지)."""
         cancelled = 0
+        pending = []
         for tid, t in list(self.active_tasks.items()):
             if self.task_projects.get(tid) == project_id:
                 if t and not t.done():
                     t.cancel()
                     cancelled += 1
-                self.active_tasks.pop(tid, None)
-                self.task_projects.pop(tid, None)
+                    pending.append((tid, t))
+                # 취소 전달만으로 실행을 등록부에서 지우지 않는다.
+                if t.done():
+                    self._forget_task(tid, t)
+        if pending:
+            try:
+                await finish_before_cancel(asyncio.gather(*(t for _, t in pending), return_exceptions=True))
+            finally:
+                for tid, t in pending:
+                    if t.done():
+                        self._forget_task(tid, t)
         if cancelled:
             print(f" [Orchestrator] 프로젝트 '{project_id}'의 실행 중 스프린트 {cancelled}건을 취소했습니다.")
         return cancelled
 
-    #  [Phase 3] 세션 인지형 프로세스 강제 일시정지 (Pause) 메서드 추가
+    @execution_command("project_id")
     async def pause_sprint(self, task_id: str, project_id: str, reason: str = "") -> bool:
+        """취소를 전달한 실행의 실제 종료와 정지 증거 저장까지 확인한다."""
         skey = _skey(project_id, task_id)
         task = self.active_tasks.get(skey)
-        if task and not task.done():
-            task.cancel()  # 비동기 태스크 강제 종료
-            pid = self.task_projects.get(skey, project_id)
-            del self.active_tasks[skey]
-            self.task_projects.pop(skey, None)
-            print(f" [Orchestrator] Task {task_id} (project={project_id}) 프로세스가 강제 일시정지 되었습니다. 사유: {reason}")
-            
-            # 슈퍼바이저 인터럽트 발생 시 LangGraph State에 기록하여 UI가 인지하도록 함
-            if reason:
-                try:
-                    #: ★ `aupdate_state` 로 **쓴다** — 노드를 모르는 그래프로 쓰면
-                    #:   체크포인트의 다음 노드 정보가 어긋난다.
-                    langgraph_engine = await self._bound_engine(project_id)
-                    config = {"configurable": {"thread_id": _thread(project_id, task_id)}}
-                    snapshot = await langgraph_engine.aget_state(config)
-                    if snapshot.values:
-                        current_state = snapshot.values
-                        queue = current_state.get("human_feedback_queue", []) if isinstance(current_state, dict) else getattr(current_state, "human_feedback_queue", [])
-                        queue.append({"task_id": task_id, "feedback": f"[SUPERVISOR] {reason}", "status": "pending", "priority": 5})
-                        await langgraph_engine.aupdate_state(config, {"human_feedback_queue": queue, "needs_revision": True, "supervisor_feedback": reason})
-                        
-                        new_snapshot = await langgraph_engine.aget_state(config)
-                        ws_root = current_state.get("workspace_root", f"./projects/{project_id}") if isinstance(current_state, dict) else getattr(current_state, "workspace_root", f"./projects/{project_id}")
-                        await self._save_latest_state(new_snapshot.values, ws_root)
-                except Exception as e:
-                    print(f"⚠️ [Orchestrator] 슈퍼바이저 인터럽트 상태 기록 실패: {e}")
+        if not task or task.done():
+            return False
+        task.cancel()
 
-            await factory_broadcaster.broadcast("SPRINT_PAUSED", {"task_id": task_id, "project_id": pid, "reason": reason})
+        async def settle():
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+            except Exception:
+                pass  # 종료된 오류를 취소 성공 증거로 바꾸지 않는다.
+            if (getattr(task, "_studio_stream_completed", False) or getattr(task, "_studio_at_hotl", False)
+                    or not (task.cancelled() or getattr(task, "_studio_cancelled", False))):
+                return False
+            from core import studio_pause_state as pauses
+            from core.enterprise_context.process_schema import ProcessError
+            engine = await self._bound_engine(project_id)
+            config = {"configurable": {"thread_id": _thread(project_id, task_id)}}
+            snapshot = await engine.aget_state(config)
+            if reason:
+                values = jsonable_encoder(snapshot.values)
+                queue = list(values.get("human_feedback_queue", []))
+                queue.append({"task_id": task_id, "feedback": f"[SUPERVISOR] {reason}", "status": "pending", "priority": 5})
+                await engine.aupdate_state(config, {"human_feedback_queue": queue,
+                    "needs_revision": True, "supervisor_feedback": reason})
+                snapshot = await engine.aget_state(config)
+            # 종료 확인과 재개 가능성은 다르다. 게이트/종결 상태에는 재개 증거를 만들지 않는다.
+            try:
+                root, evidence = self._pause_evidence(snapshot, engine, task_id, project_id)
+            except ProcessError as exc:
+                if exc.status_code != 409:
+                    raise
+            else:
+                await asyncio.to_thread(pauses.record, root, evidence)
+            await factory_broadcaster.broadcast("SPRINT_PAUSED", {"task_id": task_id, "project_id": project_id, "reason": reason})
             return True
-        return False
+        try:
+            return await finish_before_cancel(settle())
+        finally:
+            if task.done():
+                self._forget_task(skey, task)
+
+    def _pause_evidence(self, snapshot, engine, task_id, project_id):
+        """현재 서버 체크포인트의 동일성 및 전용 승인 경계를 검증한다."""
+        from pathlib import Path
+        from core.paths import workspace_path
+        from core import studio_pause_state as pauses
+        values = jsonable_encoder(getattr(snapshot, "values", None))
+        config = getattr(snapshot, "config", None)
+        configurable = config.get("configurable", {}) if isinstance(config, dict) else {}
+        checkpoint_id = configurable.get("checkpoint_id")
+        if not isinstance(values, dict) or not values:
+            pauses.fail("CHECKPOINT_REQUIRED", "재개할 기존 체크포인트가 없습니다.")
+        if not isinstance(checkpoint_id, str) or not checkpoint_id:
+            pauses.fail("UNAVAILABLE", "체크포인트 판본을 확인하지 못했습니다.", 503)
+        root = values.get("workspace_root")
+        if (not isinstance(root, str) or Path(root).resolve() != Path(workspace_path(project_id)).resolve()
+                or values.get("current_sprint_task_id") != task_id
+                or configurable.get("thread_id") != _thread(project_id, task_id)):
+            pauses.fail("CONTEXT_CONFLICT", "체크포인트의 프로젝트 또는 작업 결속이 다릅니다.")
+        try:
+            meta_path = Path(root, "project_meta.json")
+            if meta_path.is_symlink() or getattr(meta_path, "is_junction", lambda: False)():
+                raise ValueError("연결된 프로젝트 메타")
+            with meta_path.open("r", encoding="utf-8-sig") as stream:
+                meta = json.load(stream, object_pairs_hook=pauses._pairs)
+            if not isinstance(meta, dict):
+                raise ValueError("프로젝트 메타 형식")
+        except (OSError, ValueError, TypeError) as exc:
+            from core.enterprise_context.process_schema import ProcessError
+            raise ProcessError("STUDIO_PAUSE_UNAVAILABLE", "프로젝트의 실행 결속을 확인하지 못했습니다.", 503) from exc
+        if values.get("template_id", "default") != (meta.get("template_id") or "default"):
+            pauses.fail("CONTEXT_CONFLICT", "체크포인트와 프로젝트의 워크플로우가 다릅니다.")
+        next_nodes = getattr(snapshot, "next", None)
+        if not isinstance(next_nodes, (tuple, list)) or not next_nodes:
+            pauses.fail("FINISHED", "다음 실행 노드가 없는 작업은 일반 재개할 수 없습니다.")
+        if not all(isinstance(n, str) and n for n in next_nodes):
+            pauses.fail("UNAVAILABLE", "체크포인트의 다음 노드가 손상되었습니다.", 503)
+        if values.get("factory_mode") == "SUSPENDED_QUOTA":
+            pauses.fail("QUOTA_REQUIRED", "쿼터 회복 전용 경로가 필요합니다.")
+        if (values.get("current_stage") in {"CONTRACT_REVIEW", "CLARIFICATION"}
+                or values.get("contract_review_request_event_id")
+                or values.get("app_runtime_contract_status") in {"APPROVAL_PENDING", "REJECTED"}):
+            pauses.fail("REVIEW_REQUIRED", "현재 사람 검토의 전용 결정 경로가 필요합니다.")
+        if values.get("terminal_status") or values.get("current_stage") == "COMPLETED":
+            pauses.fail("TERMINAL", "종결 판정을 지우는 일반 재개는 허용하지 않습니다.")
+        tasks = getattr(snapshot, "tasks", ())
+        if any(getattr(t, "interrupts", ()) for t in tasks):
+            pauses.fail("HOTL_REQUIRED", "HOTL 응답 전용 경로가 필요합니다.")
+        before = getattr(engine, "interrupt_before_nodes", None)
+        after = getattr(engine, "interrupt_after_nodes", None)
+        metadata = getattr(snapshot, "metadata", None)
+        if before is None or after is None or not isinstance(metadata, dict):
+            pauses.fail("UNAVAILABLE", "그래프의 사람 검토 경계를 확인하지 못했습니다.", 503)
+        writes = metadata.get("writes") or {}
+        if not isinstance(writes, dict):
+            pauses.fail("UNAVAILABLE", "체크포인트 쓰기 근거를 확인하지 못했습니다.", 503)
+        if (before == "*" or after == "*" or set(next_nodes).intersection(before)
+                or set(writes).intersection(after)):
+            pauses.fail("HOTL_REQUIRED", "HOTL 중단점은 일반 재개할 수 없습니다.")
+        try:
+            state_digest = pauses.digest(values)
+        except (ValueError, TypeError) as exc:
+            from core.enterprise_context.process_schema import ProcessError
+            raise ProcessError("STUDIO_PAUSE_UNAVAILABLE", "체크포인트 상태 지문을 확인하지 못했습니다.", 503) from exc
+        return root, {"project_id": project_id, "task_id": task_id,
+            "thread_id": _thread(project_id, task_id), "checkpoint_id": checkpoint_id,
+            "state_digest": state_digest, "next_nodes": list(next_nodes),
+            "factory_mode": values.get("factory_mode"), "template_id": values.get("template_id", "default"),
+            "config_fingerprint": values.get("config_fingerprint", "")}
+
+    async def read_pause_state(self, task_id: str, project_id: str) -> dict:
+        """명시적 정지의 조회 투영. 현재 권한과 재개 구성 검사는 API 책임이다."""
+        from core import studio_pause_state as pauses
+        from core.paths import workspace_path
+        from core.enterprise_context.process_schema import ProcessError
+        result = {"status": "NOT_PAUSED", "resumable": False, "reason_code": "STUDIO_PAUSE_EVIDENCE_REQUIRED"}
+        row = await asyncio.to_thread(pauses.read, workspace_path(project_id), task_id)
+        if not row or row["status"] != "PAUSED":
+            return result
+        result["status"] = "PAUSED"
+        if self._project_running(project_id):
+            return {**result, "reason_code": "STUDIO_COMMAND_BUSY"}
+        engine = await self._bound_engine(project_id)
+        snapshot = await engine.aget_state({"configurable": {"thread_id": _thread(project_id, task_id)}})
+        try:
+            _, evidence = self._pause_evidence(snapshot, engine, task_id, project_id)
+        except ProcessError as exc:
+            if exc.status_code != 409:
+                raise
+            return {**result, "reason_code": exc.reason_code}
+        return {**result, "resumable": evidence == row["evidence"],
+            "reason_code": "" if evidence == row["evidence"] else "STUDIO_PAUSE_CONFLICT"}
+
+    async def _manual_stop_snapshot(self, snapshot, task_id, project_id):
+        """정지·재개 접수된 판본을 HOTL 승인 대상으로 오인하지 않는다."""
+        from pathlib import Path
+        from core.paths import workspace_path
+        from core import studio_pause_state as pauses
+        root = workspace_path(project_id)
+        values = jsonable_encoder(getattr(snapshot, "values", None))
+        if (not isinstance(values, dict) or not isinstance(values.get("workspace_root"), str)
+                or Path(values["workspace_root"]).resolve() != Path(root).resolve()):
+            return False
+        if not Path(root, pauses.FILENAME).exists():
+            return False
+        row = await asyncio.to_thread(pauses.read, root, task_id)
+        if not row:
+            return False
+        config = getattr(snapshot, "config", None) or {}
+        return (row["evidence"]["checkpoint_id"] == config.get("configurable", {}).get("checkpoint_id")
+            and row["evidence"]["state_digest"] == pauses.digest(values))
+
+    @staticmethod
+    def _failed_retry(snapshot):
+        """현재 다음 노드의 실제 오류만 실패 재시도의 근거로 삼는다."""
+        return any(getattr(t, "name", None) in snapshot.next
+            and isinstance(getattr(t, "error", None), str) and bool(t.error)
+            and not getattr(t, "interrupts", ()) for t in getattr(snapshot, "tasks", ()))
+
+    @execution_command("project_id")
+    async def resume_existing(self, task_id: str, project_id: str) -> bool:
+        """같은 체크포인트를 그대로 재개한다. 새 기획·WBS·판정 초기화는 없다."""
+        from core import studio_pause_state as pauses
+        from core.paths import workspace_path
+        from core.enterprise_context.process_schema import ProcessError
+        if self._project_running(project_id):
+            return False
+        row = await asyncio.to_thread(pauses.read, workspace_path(project_id), task_id)
+        config = {"configurable": {"thread_id": _thread(project_id, task_id)}}
+        try:
+            engine = await self._bound_engine(project_id)
+            snapshot = await engine.aget_state(config)
+            root, evidence = self._pause_evidence(snapshot, engine, task_id, project_id)
+            # 오류 재시도는 현재 판본의 실제 노드 오류가 있을 때만 인정한다.
+            failed = self._failed_retry(snapshot)
+            paused = bool(row and row["status"] == "PAUSED" and row["evidence"] == evidence)
+            if row and row["status"] == "PAUSED" and not paused:
+                pauses.fail("CONFLICT", "정지한 체크포인트가 변경되었습니다.")
+            if not paused and not failed:
+                return False
+            tid, expected_fp = evidence["template_id"], evidence["config_fingerprint"]
+            engine = await get_runtime_app(tid, expected_fp)
+            latest = await engine.aget_state(config)
+            _, current = self._pause_evidence(latest, engine, task_id, project_id)
+            if current != evidence:
+                pauses.fail("CONFLICT", "실행 직전 체크포인트가 변경되었습니다.")
+            if not paused and not self._failed_retry(latest):
+                pauses.fail("CONFLICT", "현재 판본의 실패 재시도 근거가 바뀌었습니다.")
+            if paused:
+                await finish_before_cancel(asyncio.to_thread(pauses.consume, root, row))
+                # 파일 잠금 대기 후에도 같은 판본이어야 한다. 소비 뒤 실패는 결과 불명으로 남긴다.
+                try:
+                    final = await engine.aget_state(config)
+                    _, final_evidence = self._pause_evidence(final, engine, task_id, project_id)
+                    if final_evidence != evidence:
+                        raise ValueError("재개 접수 후 체크포인트 변경")
+                except Exception as exc:
+                    raise ProcessError("STUDIO_PAUSE_OUTCOME_UNKNOWN", "재개 접수 후 판본을 확인하지 못했습니다. 상태를 다시 조회하십시오.", 503) from exc
+            task = asyncio.create_task(self._resume_stream(config, task_id, root, tid, expected_fp))
+            self._register_task(project_id, task_id, task)
+            return True
+        except ProcessError:
+            raise
+        except Exception as exc:
+            raise ProcessError("STUDIO_PAUSE_UNAVAILABLE", "기존 작업 재개 상태를 확인하지 못했습니다.", 503) from exc
 
     async def _broadcast_stream_end(self, langgraph_engine, config: dict, task_id: str, workspace_root: str):
         """스트림 종료 시 결과 브로드캐스트. 빌드 재시도(3회) 소진 실패를 '완료'로 위장하지 않고
@@ -335,7 +554,8 @@ class AsyncFactoryOrchestrator:
             import json
 
             from core.project_visibility import project_meta_path
-            with open(project_meta_path(f"./projects/{project_id}"), "r",
+            from core.paths import workspace_path
+            with open(project_meta_path(workspace_path(project_id)), "r",
                       encoding="utf-8") as f:
                 meta = json.load(f)
             if isinstance(meta, dict):
@@ -366,6 +586,8 @@ class AsyncFactoryOrchestrator:
             running = self.active_tasks.get(skey)
             if running is not None and not running.done():
                 return False  # 아직 스트리밍 중 = 가동 중이지 HOTL 대기 아님(오탐 차단)
+            if await self._manual_stop_snapshot(snapshot, task_id, project_id):
+                return False
             return True
         except Exception:
             return False
@@ -395,10 +617,68 @@ class AsyncFactoryOrchestrator:
                 "app_runtime_contract_status": get("app_runtime_contract_status", ""),
                 "contract_review_request_event_id": get("contract_review_request_event_id", ""),
                 "runtime_contract_profile": get("runtime_contract_profile", ""),
+                "runtime_document_version": get("runtime_document_version", "1.0"),
+                "process_context": get("process_context", {}),
+                "approved_blueprint_revision_id": get("approved_blueprint_revision_id", ""),
+                "approved_blueprint_digest": get("approved_blueprint_digest", ""),
+                "bootstrap_operation_id": get("bootstrap_operation_id", ""),
             }
         except Exception as e:
             print(f"⚠️ [Orchestrator] 계약 상태 조회 실패({project_id}/{task_id}): {e}")
             return {}
+
+    async def _reconcile_snapshot(self, task_id: str, project_id: str):
+        """복구는 프로젝트에 결속된 그래프의 현재 task만 읽는다."""
+        from core.enterprise_context.process_schema import ProcessError
+        try:
+            engine = await self._bound_engine(project_id)
+            config = {"configurable": {"thread_id": _thread(project_id, task_id)}}
+            snapshot = await engine.aget_state(config)
+            values = getattr(snapshot, "values", None)
+            if not values:
+                raise ProcessError("CONTRACT_CHECKPOINT_NOT_FOUND", "복구할 작업 상태가 없습니다.", 404)
+            state = jsonable_encoder(values)
+            if not isinstance(state, dict):
+                raise ValueError("checkpoint shape")
+            return engine, config, state
+        except ProcessError:
+            raise
+        except Exception as exc:
+            raise ProcessError("CONTRACT_CHECKPOINT_UNAVAILABLE", "복구할 작업 상태를 확인하지 못했습니다.", 503) from exc
+
+    async def read_reconcile_state(self, task_id: str, project_id: str):
+        return (await self._reconcile_snapshot(task_id, project_id))[2]
+
+    async def apply_reconciled_contract_decision(self, task_id: str, project_id: str, *,
+                                                fingerprint: str, request_event_id: str,
+                                                expected_state: Dict[str, Any]) -> bool:
+        """이미 승인된 사건의 투영만 고정 task에 재적용한다. 실행을 시작하지 않는다."""
+        from core.enterprise_context.process_schema import ProcessError
+        from core.studio_execution_guard import is_reconciling
+        if not is_reconciling(self, project_id):
+            raise ProcessError("CONTRACT_RECONCILE_REQUIRED", "복구 예약 없이 계약 상태를 반영할 수 없습니다.", 409)
+        engine, config, state = await self._reconcile_snapshot(task_id, project_id)
+        keys = ("app_runtime_contract_fingerprint", "contract_review_request_event_id",
+                "runtime_document_version", "process_context", "approved_blueprint_revision_id",
+                "approved_blueprint_digest", "bootstrap_operation_id")
+        if (not fingerprint or state.get("app_runtime_contract_fingerprint") != fingerprint
+                or state.get("contract_review_request_event_id", "") not in ("", request_event_id)
+                or any(state.get(k) != expected_state.get(k) for k in keys)):
+            raise ProcessError("CONTRACT_RECONCILE_CONFLICT", "검토한 계약 또는 작업 문맥이 바뀌었습니다.", 409)
+        updates = {"approved_contract_fingerprint": fingerprint,
+                   "app_runtime_contract_status": "APPROVED", "contract_review_request_event_id": ""}
+        if all(state.get(k) == value for k, value in updates.items()):
+            return True
+        try:
+            await engine.aupdate_state(config, updates)
+            _, _, after = await self._reconcile_snapshot(task_id, project_id)
+        except ProcessError:
+            raise
+        except Exception as exc:
+            raise ProcessError("CONTRACT_CHECKPOINT_UNAVAILABLE", "승인 투영을 반영하지 못했습니다. 같은 사건으로 다시 확인하십시오.", 503) from exc
+        return (after.get("app_runtime_contract_fingerprint") == fingerprint
+                and all(after.get(k) == value for k, value in updates.items())
+                and all(after.get(k) == state.get(k) for k in keys if k != "contract_review_request_event_id"))
 
     async def apply_contract_decision(self, task_id: str, project_id: str,
                                       updates: Dict[str, Any]) -> bool:
@@ -426,6 +706,8 @@ class AsyncFactoryOrchestrator:
         try:
             async for event in langgraph_engine.astream(state_dict, config=config):
                 for node_name, state_data in event.items():
+                    asyncio.current_task()._studio_at_hotl = (node_name == "__interrupt__"
+                        or node_name in getattr(langgraph_engine, "interrupt_after_nodes", ()))
                     snapshot = await langgraph_engine.aget_state(config)
                     full_state = snapshot.values
                     await self._save_latest_state(full_state, workspace_root)
@@ -434,8 +716,10 @@ class AsyncFactoryOrchestrator:
                         "NODE_COMPLETED", _node_completed_payload(pid, task_id, node_name,
                                                                  state_data, full_state))
 
+            asyncio.current_task()._studio_stream_completed = True
             await self._broadcast_stream_end(langgraph_engine, config, task_id, workspace_root)
         except asyncio.CancelledError:
+            asyncio.current_task()._studio_cancelled = True
             print(f"⏸️ [Orchestrator] Sprint Loop Cancelled (Paused): {task_id}")
         except QuotaExhaustedException as e:
             await self._suspend_for_quota(langgraph_engine, config, task_id, workspace_root)
@@ -444,16 +728,43 @@ class AsyncFactoryOrchestrator:
             print(f" [Orchestrator] Sprint Loop Error: {e}")
             await factory_broadcaster.broadcast("SPRINT_FAILED", {"task_id": task_id, "project_id": pid, "error": str(e)})
 
-    async def resume_hotl(self, task_id: str, feedback: Optional[str], project_id: str) -> bool:
+    async def read_hotl_context(self, task_id: str, project_id: str) -> dict:
+        from core.studio_hotl_context import hotl_context
+        active = self.active_tasks.get(_skey(project_id, task_id))
+        running = bool(active and not active.done())
+        try:
+            engine = await self._bound_engine(project_id)
+            snapshot = await engine.aget_state({"configurable": {"thread_id": _thread(project_id, task_id)}})
+            if await self._manual_stop_snapshot(snapshot, task_id, project_id):
+                return {"status": "NOT_PENDING", "pending": False, "available": False,
+                    "reason_code": "STUDIO_EXPLICIT_PAUSE", "request_id": "",
+                    "questions_digest": "", "decision_kind": ""}
+        except Exception:
+            snapshot = None
+        return hotl_context(snapshot, project_id=project_id, task_id=task_id, running=running)
+
+    @execution_command("project_id")
+    async def resume_hotl(self, task_id: str, feedback: Optional[str], project_id: str, *,
+                          expected_request_id: str = "", expected_questions_digest: str = "",
+                          expected_studio_context: Optional[dict] = None) -> bool:
         # 이중 재개 차단: 실행 중인 스트림 위에 aupdate_state/astream 을 겹치면 체크포인트가 오염된다
         _existing = self.active_tasks.get(_skey(project_id, task_id))
         if _existing and not _existing.done():
             print(f"⚠️ [Orchestrator] Task {task_id} (project={project_id}) 는 이미 실행 중 - 중복 재개 요청 무시.")
             return False
-        langgraph_engine = await get_runtime_app()
+        strict_round = bool(expected_studio_context or expected_request_id or expected_questions_digest)
+        from core.enterprise_context.process_schema import ProcessError
         config = {"configurable": {"thread_id": _thread(project_id, task_id)}}
-        snapshot = await langgraph_engine.aget_state(config)
+        try:
+            langgraph_engine = await self._bound_engine(project_id) if strict_round else await get_runtime_app()
+            snapshot = await langgraph_engine.aget_state(config)
+        except Exception as exc:
+            if strict_round:
+                raise ProcessError("HOTL_CHECKPOINT_UNAVAILABLE", "대기 상태를 확인하지 못했습니다. 입력을 보존하고 다시 조회하십시오.", 503) from exc
+            raise
         if not snapshot.values:
+            return False
+        if await self._manual_stop_snapshot(snapshot, task_id, project_id):
             return False
             
         current_state = snapshot.values
@@ -463,7 +774,43 @@ class AsyncFactoryOrchestrator:
                else getattr(current_state, "template_id", "default"))
         expected_fp = (current_state.get("config_fingerprint", "") if isinstance(current_state, dict)
                        else getattr(current_state, "config_fingerprint", ""))
-        langgraph_engine = await get_runtime_app(tid, expected_fp)
+        version = current_state.get("runtime_document_version", "1.0") if isinstance(current_state, dict) else getattr(current_state, "runtime_document_version", "1.0")
+        strict_round = strict_round or version == "2.0"
+        try:
+            langgraph_engine = await get_runtime_app(tid, expected_fp)
+        except Exception as exc:
+            if strict_round:
+                raise ProcessError("HOTL_CHECKPOINT_UNAVAILABLE", "결속된 실행 구성을 확인하지 못했습니다. 입력을 보존하십시오.", 503) from exc
+            raise
+
+        # 쓰기 직전 영속 차수를 재조회한다. 같은 질문 내용이어도 새 체크포인트는 새 요청이다.
+        from core.studio_hotl_context import hotl_context
+        if strict_round:
+            try:
+                snapshot = await langgraph_engine.aget_state(config)
+            except Exception as exc:
+                raise ProcessError("HOTL_CHECKPOINT_UNAVAILABLE", "현재 질문 차수를 확인하지 못했습니다. 입력을 보존하고 다시 조회하십시오.", 503) from exc
+            context = hotl_context(snapshot, project_id=project_id, task_id=task_id)
+            if (not context["available"] or not expected_request_id or not expected_questions_digest
+                    or context["request_id"] != expected_request_id
+                    or context["questions_digest"] != expected_questions_digest):
+                raise ProcessError("HOTL_ROUND_CONFLICT", "질문 또는 대기 차수가 바뀌었습니다. 입력을 보존하고 현재 요청을 다시 확인하십시오.", 409)
+            current_state = snapshot.values
+            from pathlib import Path
+            from core.paths import workspace_path
+            latest = jsonable_encoder(current_state)
+            if (not isinstance(latest, dict)
+                    or latest.get("workspace_root") != workspace_root
+                    or latest.get("template_id", "default") != tid
+                    or latest.get("config_fingerprint", "") != expected_fp
+                    or not isinstance(workspace_root, str)
+                    or Path(workspace_root).resolve() != Path(workspace_path(project_id)).resolve()):
+                raise ProcessError("HOTL_CONTEXT_CONFLICT", "재개할 프로젝트 경로 또는 실행 구성이 바뀌었습니다.", 409)
+            if expected_studio_context:
+                fixed = ("runtime_document_version", "process_context", "approved_blueprint_revision_id",
+                         "approved_blueprint_digest", "bootstrap_operation_id")
+                if not isinstance(current_state, dict) or any(current_state.get(k) != expected_studio_context[k] for k in fixed):
+                    raise ProcessError("HOTL_CONTEXT_CONFLICT", "질문의 승인 업무 문맥이 바뀌었습니다.", 409)
 
         try:
             if feedback:
@@ -492,15 +839,15 @@ class AsyncFactoryOrchestrator:
                     gate_name="HOTL", accepted=not bool(feedback), feedback=feedback or "")
             except Exception:
                 pass
-        except Exception:
+        except Exception as exc:
+            if strict_round:
+                raise ProcessError("HOTL_RESUME_OUTCOME_UNKNOWN", "답변 반영 결과를 확인하지 못했습니다. 입력을 보존하고 현재 상태를 조회하십시오. 자동으로 다시 제출하지 마십시오.", 503) from exc
             return False
 
         skey = _skey(_pid(workspace_root), task_id)
         task = asyncio.create_task(self._resume_stream(
             config, task_id, workspace_root, tid, expected_fp))
-        self.active_tasks[skey] = task
-        self.task_projects[skey] = _pid(workspace_root)
-        task.add_done_callback(lambda t, k=skey: (self.active_tasks.pop(k, None), self.task_projects.pop(k, None)))
+        self._register_task(_pid(workspace_root), task_id, task)
         return True
 
     async def _resume_stream(self, config: dict, task_id: str, workspace_root: str,
@@ -510,6 +857,8 @@ class AsyncFactoryOrchestrator:
         try:
             async for event in langgraph_engine.astream(None, config=config):
                 for node_name, state_data in event.items():
+                    asyncio.current_task()._studio_at_hotl = (node_name == "__interrupt__"
+                        or node_name in getattr(langgraph_engine, "interrupt_after_nodes", ()))
                     snapshot = await langgraph_engine.aget_state(config)
                     full_state = snapshot.values
                     await self._save_latest_state(full_state, workspace_root)
@@ -518,8 +867,10 @@ class AsyncFactoryOrchestrator:
                         "NODE_COMPLETED", _node_completed_payload(pid, task_id, node_name,
                                                                  state_data, full_state))
 
+            asyncio.current_task()._studio_stream_completed = True
             await self._broadcast_stream_end(langgraph_engine, config, task_id, workspace_root)
         except asyncio.CancelledError:
+            asyncio.current_task()._studio_cancelled = True
             print(f"⏸️ [Orchestrator] Resume Stream Cancelled (Paused): {task_id}")
         except QuotaExhaustedException as e:
             await self._suspend_for_quota(langgraph_engine, config, task_id, workspace_root)
@@ -547,6 +898,7 @@ class AsyncFactoryOrchestrator:
             print(f"⚠️ [Orchestrator] SUSPENDED_QUOTA 상태 기록 실패: {e}")
         await factory_broadcaster.broadcast("QUOTA_EXHAUSTED", {"task_id": task_id, "project_id": pid})
 
+    @execution_command("project_id")
     async def resume_from_suspend(self, task_id: str, project_id: str) -> bool:
         """[R2] 쿼터 회복 후 SUSPENDED_QUOTA 로 동결된 스프린트를 마지막 체크포인트에서 재개한다.
         factory_mode 를 SUSPEND 직전 모드(pre_suspend_mode)로 복구한 뒤 astream(None) 으로 이어서
@@ -580,15 +932,15 @@ class AsyncFactoryOrchestrator:
             await self._save_latest_state(snapshot.values, workspace_root)
         except Exception as e:
             print(f"⚠️ [Orchestrator] 쿼터 재개 모드 복구 실패: {e}")
-            return False
+            from core.enterprise_context.process_schema import ProcessError
+            raise ProcessError("STUDIO_QUOTA_RESUME_UNKNOWN",
+                "쿼터 재개 상태 변경을 시도한 뒤 결과를 확인하지 못했습니다. 원요청을 조회하십시오.", 503) from e
 
         pid = _pid(workspace_root)
         skey = _skey(pid, task_id)
         task = asyncio.create_task(self._resume_stream(
             config, task_id, workspace_root, tid, expected_fp))
-        self.active_tasks[skey] = task
-        self.task_projects[skey] = pid
-        task.add_done_callback(lambda t, k=skey: (self.active_tasks.pop(k, None), self.task_projects.pop(k, None)))
+        self._register_task(pid, task_id, task)
         print(f"▶️ [Orchestrator] 쿼터 회복 재개: {task_id} (project={pid}, mode={restored_mode})")
         return True
 

@@ -178,6 +178,14 @@ def _judge(p: Principal, proof: Dict[str, Any], action: str, *, op: str,
         #: ★ 여기서만 토큰 축이 켜진다. 관리 API 는 계속 `session` 이다.
         via="app_token", token=proof)
     decision = app_policy.decide(subject, res, action, app=facts)
+    if decision.allowed:
+        # 이미 발급한 증명도 과거 권한이 아니다. 실제 데이터 작업 전에 현재 업무 문맥을 다시 본다.
+        try:
+            from core.studio_release_context import require_release_context
+            require_release_context(rel, release_id=release_id, actor=p.user_id or "", context=ctx, for_action="RUN")
+        except Exception as exc:
+            raise _fail(sdk.ERR_NOT_FOUND, audit_reason=getattr(exc, "reason_code", "STUDIO_CONTEXT_UNAVAILABLE"),
+                        actor=p.user_id or "", target=release_id, path=path)
 
     #: ── 관측: 기존 판정이라면 어떻게 답했을까 ────────────────────────────
     try:
@@ -347,7 +355,7 @@ def _assert_contract_action(proof: Dict[str, Any], ds: Dict[str, Any], need: str
 #   지우고, 사용자는 데이터가 삭제됐다고 읽는다.
 
 
-def _dispatch(proof: Dict[str, Any], ds: Dict[str, Any], *, allow_stale: bool = False
+def _dispatch(proof: Dict[str, Any], ds: Dict[str, Any], *, allow_stale: bool = False, p: Any = None
               ) -> "prov.Resolution":
     """이 요청이 어디로 가는지 **매 요청 정한다.**
 
@@ -356,6 +364,34 @@ def _dispatch(proof: Dict[str, Any], ds: Dict[str, Any], *, allow_stale: bool = 
 
     rel = str(proof.get("release_id", "") or "")
     binding = _plane(proof).binding_for(rel, str(ds.get("dataset_id", "") or "")) or {}
+    # 실제 경로는 모두 Principal을 전달한다. 2.0은 최신 인증판 조회를 사용하지 않는다.
+    if p is not None:
+        try:
+            from core.studio_release_context import require_release_context
+            from core.studio_runtime_data import resolve_dataset
+            release = app_proof.read_release(rel)
+            context = viewing_context(p)
+            current = require_release_context(release, release_id=rel, actor=p.user_id,
+                                              context=context, for_action="RUN")
+            if current is not None:
+                # _judge 뒤 같은 release ID에 새 개정이 게시될 수 있다. 실제로
+                # 제공할 원문·물질화·고정 판도 발급한 proof와 다시 결속한다.
+                seals = app_contract_gate.sealed_triple(release, rel, plane=_plane(proof))
+                expected = tuple(proof.get(k) for k in (
+                    "contract_fingerprint", "materialization_fingerprint", "data_fingerprint"))
+                if seals != expected or app_contract_gate.UNREADABLE in seals:
+                    raise ValueError("STUDIO_PROOF_REVISION_CONFLICT")
+                dp_binding, snapshots, scope, max_age = resolve_dataset(
+                    release, binding, actor=p.user_id, context=context)
+                return prov.resolve(source_intent=binding["source_intent"],
+                    dataset_contract_key=binding.get("enterprise_contract_key", ""),
+                    binding=dp_binding, snapshots=snapshots,
+                    now=datetime.now(timezone.utc).isoformat(), scope=scope,
+                    max_age_days=max_age, allow_stale=allow_stale)
+        except Exception as exc:
+            raise _fail(sdk.ERR_UNAVAILABLE,
+                audit_reason=f"고정 업무 데이터 판독 실패:{getattr(exc, 'reason_code', type(exc).__name__)}",
+                target=str(ds.get("dataset_id", "")))
     intent = str(binding.get("source_intent") or "")
     if not intent:
         #: 계약 이전(레거시) 결속 — 종전대로 우리 DB 다.
@@ -448,6 +484,10 @@ def _serve_snapshot(res: "prov.Resolution", *, limit: int = 0, offset: int = 0,
             parsed = ss.parse_csv(f.read())
     except (OSError, ss.IngestError) as e:
         raise _fail(sdk.ERR_UNAVAILABLE, audit_reason=f"판 판독 실패: {str(e)[:100]}",
+                    target=str(snap.get("snapshot_id") or ""))
+    # 사전 파일 검사 후 파일이 교체돼도 실제 파싱한 bytes의 checksum이 같아야 한다.
+    if parsed.checksum != str(snap.get("checksum") or ""):
+        raise _fail(sdk.ERR_UNAVAILABLE, audit_reason="RAW_CHECKSUM_MISMATCH",
                     target=str(snap.get("snapshot_id") or ""))
 
     meta = prov.public_meta(res)
@@ -588,7 +628,7 @@ async def issue_proof(req: ProofRequest, p: Principal = Depends(current_principa
     #: ★★★ [F-3] 발급 시점에도 **그 청중의 평면**을 본다 — 후보 판은 Preview
     #:   평면에 물질화되므로, 운영 평면을 보면 「물질화되지 않았습니다」로 막힌다.
     gate = app_contract_gate.evaluate(
-        rel, release_id, plane=app_preview.app_data_for(audience))
+        rel, release_id, plane=app_preview.app_data_for(audience), actor=uid, context=ctx)
     if not gate.ok:
         #: ⚠️ 사유를 앱에게 그대로 주지 않는다 — 감사에만 남긴다(다른 거부와 같은 규칙).
         raise _fail(sdk.ERR_NOT_FOUND,
@@ -644,7 +684,7 @@ async def get_schema(name: str, request: Request, p: Principal = Depends(current
     _personal_ok(ds, p)
     #: ⚠️ 스키마 조회도 Dispatch 를 지난다 — 지나지 않으면 준비되지 않은 원천의
     #:   데이터셋이 «스키마는 보이는데 행은 없는» 상태로 보이고, 앱은 0건으로 그린다.
-    res = _dispatch(proof, ds)
+    res = _dispatch(proof, ds, p=p)
     if res.provider != prov.NATIVE:
         served = _serve_snapshot(res, limit=1, offset=0)
         ds["record_count"] = int(served["total"])
@@ -665,7 +705,7 @@ async def list_records(name: str, request: Request, limit: int = Query(50), offs
     _assert_contract_action(proof, ds, "read", p=p, path="GET /records")
     _personal_ok(ds, p)
     #: ★★★ [BDR-6] 여기서 «어디서 읽을지» 가 정해진다. 앱은 이 분기를 보지 못한다.
-    res = _dispatch(proof, ds)
+    res = _dispatch(proof, ds, p=p)
     if res.provider != prov.NATIVE:
         served = _serve_snapshot(
             res, limit=max(1, min(int(limit or 50), wire.MAX_PAGE_LIMIT)),
@@ -696,7 +736,7 @@ async def get_record(name: str, record_id: str, request: Request,
     ds = _dataset(proof, name)
     _assert_active(ds)
     _assert_contract_action(proof, ds, "read", p=p, path="GET /records/{id}")
-    res = _dispatch(proof, ds)
+    res = _dispatch(proof, ds, p=p)
     if res.provider != prov.NATIVE:
         served = _serve_snapshot(res, record_id=record_id)
         return {"status": "success", "data": {
@@ -718,7 +758,7 @@ async def create_record(name: str, req: RecordWrite, request: Request,
     _assert_contract_action(proof, ds, "create", p=p, path="POST /records")
     #: ★★★ [BDR-6] **Native 밖에는 쓰지 않는다.** 여기서 막지 않으면 앱이 판 위에
     #:   사본을 만들고, 그 사본은 원천과 갈라진 채 아무도 모르게 남는다.
-    _assert_native_write(_dispatch(proof, ds), ds, path="POST /records")
+    _assert_native_write(_dispatch(proof, ds, p=p), ds, path="POST /records")
     _personal_ok(ds, p)
     try:
         #: ⚠️ 앱이 보낸 권한 관련 필드를 **지운다**(검증이 아니라 삭제). 브리지도 지우지만
@@ -748,7 +788,7 @@ async def update_record(name: str, record_id: str, req: RecordWrite, request: Re
     _assert_contract_action(proof, ds, "update", p=p, path="PUT /records/{id}")
     #: ★★★ [BDR-6] **Native 밖에는 쓰지 않는다.** 여기서 막지 않으면 앱이 판 위에
     #:   사본을 만들고, 그 사본은 원천과 갈라진 채 아무도 모르게 남는다.
-    _assert_native_write(_dispatch(proof, ds), ds, path="PUT /records/{id}")
+    _assert_native_write(_dispatch(proof, ds, p=p), ds, path="PUT /records/{id}")
     rec = _record_in(_plane(proof), ds["dataset_id"], record_id)
     _personal_ok(ds, p, row_creator=rec.get("created_by", ""))
     try:
@@ -776,7 +816,7 @@ async def delete_record(name: str, record_id: str, request: Request,
     _assert_contract_action(proof, ds, "delete", p=p, path="DELETE /records/{id}")
     #: ★★★ [BDR-6] **Native 밖에는 쓰지 않는다.** 여기서 막지 않으면 앱이 판 위에
     #:   사본을 만들고, 그 사본은 원천과 갈라진 채 아무도 모르게 남는다.
-    _assert_native_write(_dispatch(proof, ds), ds, path="DELETE /records/{id}")
+    _assert_native_write(_dispatch(proof, ds, p=p), ds, path="DELETE /records/{id}")
     rec = _record_in(_plane(proof), ds["dataset_id"], record_id)
     _personal_ok(ds, p, row_creator=rec.get("created_by", ""))
     try:

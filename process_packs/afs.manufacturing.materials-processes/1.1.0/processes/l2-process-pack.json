@@ -1,0 +1,1937 @@
+{
+  "schema_version": 1,
+  "pack_id": "afs.manufacturing.materials-processes",
+  "version": "1.0.0",
+  "requires_process_profile_schema": 2,
+  "review_status": "DOMAIN_REVIEW_REQUIRED",
+  "templates": [
+    {
+      "template_key": "sourcing",
+      "template_revision": 1,
+      "level": "L1",
+      "parent_template_key": "",
+      "business_kit_id": "BK-01",
+      "label": "원료구매",
+      "description": "수요에서 계약·발주까지 조달 근거와 상태를 연결한다. 후보 역할은 계정·권한 배정이 아니다.",
+      "purpose": "수요에서 계약·발주까지 조달 근거와 상태를 연결한다.",
+      "trigger": "구매 계획 주기 또는 소싱·납기 예외 발생",
+      "input_roles": [
+        "생산 소요·가용재고",
+        "공급사·계약 조건"
+      ],
+      "output_roles": [
+        "조달계획 후보",
+        "계약·발주 상태"
+      ],
+      "suggested_responsible_roles": [
+        "구매 담당",
+        "구매 책임자"
+      ],
+      "default_selected": true,
+      "applicability_tags": [
+        "제조",
+        "회사별 적용 검토"
+      ],
+      "data_requirements": [],
+      "suggested_blueprint_refs": [],
+      "relations": [],
+      "shortcut_refs": [
+        {
+          "target_template_key": "logistics.shipment",
+          "target_business_kit_id": "BK-02"
+        },
+        {
+          "target_template_key": "inventory.receipt",
+          "target_business_kit_id": "BK-03"
+        },
+        {
+          "target_template_key": "finance.settlement",
+          "target_business_kit_id": "BK-07"
+        }
+      ],
+      "source_refs": [
+        "docs/design_business_kit_l2_process_setup_2026-09-12.md#4"
+      ],
+      "review_status": "DOMAIN_REVIEW_REQUIRED"
+    },
+    {
+      "template_key": "logistics",
+      "template_revision": 1,
+      "level": "L1",
+      "parent_template_key": "",
+      "business_kit_id": "BK-02",
+      "label": "국제물류",
+      "description": "제출·선적·통관·인도 사건을 구분하여 확인한다. 후보 역할은 계정·권한 배정이 아니다.",
+      "purpose": "제출·선적·통관·인도 사건을 구분하여 확인한다.",
+      "trigger": "수입 조달 또는 국제 운송 진행",
+      "input_roles": [
+        "발주·선적 참조"
+      ],
+      "output_roles": [
+        "제출·운송·통관·인도 상태"
+      ],
+      "suggested_responsible_roles": [
+        "물류 담당",
+        "물류 책임자"
+      ],
+      "default_selected": true,
+      "applicability_tags": [
+        "제조",
+        "회사별 적용 검토"
+      ],
+      "data_requirements": [],
+      "suggested_blueprint_refs": [],
+      "relations": [],
+      "shortcut_refs": [],
+      "source_refs": [
+        "docs/design_business_kit_l2_process_setup_2026-09-12.md#4"
+      ],
+      "review_status": "DOMAIN_REVIEW_REQUIRED"
+    },
+    {
+      "template_key": "inventory",
+      "template_revision": 1,
+      "level": "L1",
+      "parent_template_key": "",
+      "business_kit_id": "BK-03",
+      "label": "재고·수급",
+      "description": "입고·이동·품질 보류를 구분하여 가용 수급을 확인한다. 후보 역할은 계정·권한 배정이 아니다.",
+      "purpose": "입고·이동·품질 보류를 구분하여 가용 수급을 확인한다.",
+      "trigger": "입고·이동 사건 또는 수급 검토 주기",
+      "input_roles": [
+        "발주·검사·이동 기록"
+      ],
+      "output_roles": [
+        "입고·가용재고·수급 대응 근거"
+      ],
+      "suggested_responsible_roles": [
+        "창고 담당",
+        "재고 책임자"
+      ],
+      "default_selected": true,
+      "applicability_tags": [
+        "제조",
+        "회사별 적용 검토"
+      ],
+      "data_requirements": [],
+      "suggested_blueprint_refs": [],
+      "relations": [],
+      "shortcut_refs": [],
+      "source_refs": [
+        "docs/design_business_kit_l2_process_setup_2026-09-12.md#4"
+      ],
+      "review_status": "DOMAIN_REVIEW_REQUIRED"
+    },
+    {
+      "template_key": "production",
+      "template_revision": 1,
+      "level": "L1",
+      "parent_template_key": "",
+      "business_kit_id": "BK-04",
+      "label": "생산계획",
+      "description": "계획·소요량·실적·능력 영향을 구분하여 검토한다. 후보 역할은 계정·권한 배정이 아니다.",
+      "purpose": "계획·소요량·실적·능력 영향을 구분하여 검토한다.",
+      "trigger": "생산 계획 주기 또는 실적·능력 변동",
+      "input_roles": [
+        "수요·자재·설비 참조"
+      ],
+      "output_roles": [
+        "생산계획·실적·능력 검토"
+      ],
+      "suggested_responsible_roles": [
+        "생산계획 담당",
+        "생산 책임자"
+      ],
+      "default_selected": true,
+      "applicability_tags": [
+        "제조",
+        "회사별 적용 검토"
+      ],
+      "data_requirements": [],
+      "suggested_blueprint_refs": [],
+      "relations": [],
+      "shortcut_refs": [],
+      "source_refs": [
+        "docs/design_business_kit_l2_process_setup_2026-09-12.md#4"
+      ],
+      "review_status": "DOMAIN_REVIEW_REQUIRED"
+    },
+    {
+      "template_key": "quality",
+      "template_revision": 1,
+      "level": "L1",
+      "parent_template_key": "",
+      "business_kit_id": "BK-05",
+      "label": "품질·Lot",
+      "description": "검사와 Lot 추적·후속조치 근거를 구분하여 관리한다. 후보 역할은 계정·권한 배정이 아니다.",
+      "purpose": "검사와 Lot 추적·후속조치 근거를 구분하여 관리한다.",
+      "trigger": "검사 대상 발생 또는 부적합 확인",
+      "input_roles": [
+        "검사·Lot·표준서 참조"
+      ],
+      "output_roles": [
+        "품질 상태·추적·조치 검토"
+      ],
+      "suggested_responsible_roles": [
+        "품질 담당",
+        "품질 책임자"
+      ],
+      "default_selected": true,
+      "applicability_tags": [
+        "제조",
+        "회사별 적용 검토"
+      ],
+      "data_requirements": [],
+      "suggested_blueprint_refs": [],
+      "relations": [],
+      "shortcut_refs": [],
+      "source_refs": [
+        "docs/design_business_kit_l2_process_setup_2026-09-12.md#4"
+      ],
+      "review_status": "DOMAIN_REVIEW_REQUIRED"
+    },
+    {
+      "template_key": "sales",
+      "template_revision": 1,
+      "level": "L1",
+      "parent_template_key": "",
+      "business_kit_id": "BK-06",
+      "label": "판매·수요",
+      "description": "수요·수주·출하와 매출 인식 근거를 구분한다. 후보 역할은 계정·권한 배정이 아니다.",
+      "purpose": "수요·수주·출하와 매출 인식 근거를 구분한다.",
+      "trigger": "수요 계획 주기 또는 수주·출하 변경",
+      "input_roles": [
+        "수요·수주·재고·회계 참조"
+      ],
+      "output_roles": [
+        "판매·납기·출하 검토"
+      ],
+      "suggested_responsible_roles": [
+        "판매 담당",
+        "영업 책임자"
+      ],
+      "default_selected": true,
+      "applicability_tags": [
+        "제조",
+        "회사별 적용 검토"
+      ],
+      "data_requirements": [],
+      "suggested_blueprint_refs": [],
+      "relations": [],
+      "shortcut_refs": [],
+      "source_refs": [
+        "docs/design_business_kit_l2_process_setup_2026-09-12.md#4"
+      ],
+      "review_status": "DOMAIN_REVIEW_REQUIRED"
+    },
+    {
+      "template_key": "finance",
+      "template_revision": 1,
+      "level": "L1",
+      "parent_template_key": "",
+      "business_kit_id": "BK-07",
+      "label": "원가·현금",
+      "description": "원가·채무·현금·경영전망을 판본과 기간에 맞게 검토한다. 후보 역할은 계정·권한 배정이 아니다.",
+      "purpose": "원가·채무·현금·경영전망을 판본과 기간에 맞게 검토한다.",
+      "trigger": "회계·자금 계획 주기 또는 구매 조건 변경",
+      "input_roles": [
+        "구매·원가·회계·계획 참조"
+      ],
+      "output_roles": [
+        "원가 차이·정산·현금·전망 검토"
+      ],
+      "suggested_responsible_roles": [
+        "재무 담당",
+        "재무 책임자"
+      ],
+      "default_selected": true,
+      "applicability_tags": [
+        "제조",
+        "회사별 적용 검토"
+      ],
+      "data_requirements": [],
+      "suggested_blueprint_refs": [],
+      "relations": [],
+      "shortcut_refs": [],
+      "source_refs": [
+        "docs/design_business_kit_l2_process_setup_2026-09-12.md#4"
+      ],
+      "review_status": "DOMAIN_REVIEW_REQUIRED"
+    },
+    {
+      "template_key": "risk",
+      "template_revision": 1,
+      "level": "L1",
+      "parent_template_key": "",
+      "business_kit_id": "BK-08",
+      "label": "위험·의사결정",
+      "description": "위험 근거와 시나리오·결정·효과 측정을 연결한다. 후보 역할은 계정·권한 배정이 아니다.",
+      "purpose": "위험 근거와 시나리오·결정·효과 측정을 연결한다.",
+      "trigger": "외부 변수·공급 위험 또는 의사결정 검토",
+      "input_roles": [
+        "외부 지표·공급사·시나리오 참조"
+      ],
+      "output_roles": [
+        "위험·대안·결정·효과 근거"
+      ],
+      "suggested_responsible_roles": [
+        "업무 분석 담당",
+        "업무 의사결정 책임자"
+      ],
+      "default_selected": true,
+      "applicability_tags": [
+        "제조",
+        "회사별 적용 검토"
+      ],
+      "data_requirements": [],
+      "suggested_blueprint_refs": [],
+      "relations": [],
+      "shortcut_refs": [],
+      "source_refs": [
+        "docs/design_business_kit_l2_process_setup_2026-09-12.md#4"
+      ],
+      "review_status": "DOMAIN_REVIEW_REQUIRED"
+    },
+    {
+      "template_key": "sourcing.plan",
+      "template_revision": 1,
+      "level": "L2",
+      "parent_template_key": "sourcing",
+      "business_kit_id": "BK-01",
+      "label": "구매계획",
+      "description": "구매계획 전용 저장·승인 계약 보완",
+      "purpose": "기간·품목별 조달계획 후보와 검토 근거를 마련한다.",
+      "trigger": "계획 주기 또는 부족 위험 발생",
+      "input_roles": [
+        "생산 소요",
+        "가용재고",
+        "기발주·리드타임"
+      ],
+      "output_roles": [
+        "조달계획 후보",
+        "검토 근거"
+      ],
+      "suggested_responsible_roles": [
+        "구매계획 담당",
+        "구매 책임자"
+      ],
+      "default_selected": true,
+      "applicability_tags": [
+        "제조",
+        "회사별 적용 검토"
+      ],
+      "data_requirements": [
+        {
+          "logical_requirement_key": "sourcing.plan.inputs",
+          "logical_requirement": "생산 소요 · 가용재고 · 기발주·리드타임",
+          "candidate_dataset_keys": [
+            "MFG-01",
+            "INV-01",
+            "PRC-02"
+          ],
+          "mandatory": true,
+          "unresolved_requirement": false
+        },
+        {
+          "logical_requirement_key": "sourcing.plan.procurement_plan_record",
+          "logical_requirement": "구매계획 전용 저장·승인 계약 보완",
+          "candidate_dataset_keys": [],
+          "mandatory": true,
+          "unresolved_requirement": true
+        }
+      ],
+      "suggested_blueprint_refs": [
+        {
+          "kit_id": "KIT-MFG-NONFERROUS-PROCUREMENT",
+          "version": "1.1.0",
+          "app_id": "APP-01"
+        },
+        {
+          "kit_id": "KIT-MFG-NONFERROUS-PROCUREMENT",
+          "version": "1.1.0",
+          "app_id": "APP-03"
+        }
+      ],
+      "relations": [
+        {
+          "kind": "informs",
+          "target_template_key": "sourcing.contract"
+        }
+      ],
+      "shortcut_refs": [],
+      "source_refs": [
+        "docs/design_business_kit_l2_process_setup_2026-09-12.md#4"
+      ],
+      "review_status": "DOMAIN_REVIEW_REQUIRED"
+    },
+    {
+      "template_key": "sourcing.supplier_selection",
+      "template_revision": 1,
+      "level": "L2",
+      "parent_template_key": "sourcing",
+      "business_kit_id": "BK-01",
+      "label": "공급사 선정·평가",
+      "description": "견적·비교평가 결과 계약 보완; APP-05는 관련 근거만 제공",
+      "purpose": "공급사 선정·유지·제외 후보와 근거를 비교한다.",
+      "trigger": "신규 소싱 또는 공급사 재평가",
+      "input_roles": [
+        "공급사 기준",
+        "견적",
+        "평가기준"
+      ],
+      "output_roles": [
+        "선정·유지·제외 후보",
+        "평가 근거"
+      ],
+      "suggested_responsible_roles": [
+        "구매 담당",
+        "선정 책임자"
+      ],
+      "default_selected": false,
+      "applicability_tags": [
+        "제조",
+        "회사별 적용 검토"
+      ],
+      "data_requirements": [
+        {
+          "logical_requirement_key": "sourcing.supplier_selection.inputs",
+          "logical_requirement": "공급사 기준 · 견적 · 평가기준",
+          "candidate_dataset_keys": [
+            "MDM-02",
+            "KNW-01"
+          ],
+          "mandatory": true,
+          "unresolved_requirement": false
+        },
+        {
+          "logical_requirement_key": "sourcing.supplier_selection.supplier_quotes_and_evaluation",
+          "logical_requirement": "견적·비교평가 결과 계약 보완; APP-05는 관련 근거만 제공",
+          "candidate_dataset_keys": [],
+          "mandatory": true,
+          "unresolved_requirement": true
+        }
+      ],
+      "suggested_blueprint_refs": [
+        {
+          "kit_id": "KIT-MFG-NONFERROUS-PROCUREMENT",
+          "version": "1.1.0",
+          "app_id": "APP-05"
+        }
+      ],
+      "relations": [
+        {
+          "kind": "informs",
+          "target_template_key": "sourcing.contract"
+        }
+      ],
+      "shortcut_refs": [],
+      "source_refs": [
+        "docs/design_business_kit_l2_process_setup_2026-09-12.md#4"
+      ],
+      "review_status": "DOMAIN_REVIEW_REQUIRED"
+    },
+    {
+      "template_key": "sourcing.contract",
+      "template_revision": 1,
+      "level": "L2",
+      "parent_template_key": "sourcing",
+      "business_kit_id": "BK-01",
+      "label": "원료계약",
+      "description": "인증·권한·현업 검증 별도",
+      "purpose": "수량·가격 기준·기간·거래조건을 계약 근거로 연결한다.",
+      "trigger": "공급사·수요 범위 확정",
+      "input_roles": [
+        "품목·수량",
+        "가격 기준·거래조건"
+      ],
+      "output_roles": [
+        "계약·가격조건",
+        "유효기간"
+      ],
+      "suggested_responsible_roles": [
+        "구매 담당",
+        "계약 승인권자"
+      ],
+      "default_selected": true,
+      "applicability_tags": [
+        "제조",
+        "회사별 적용 검토"
+      ],
+      "data_requirements": [
+        {
+          "logical_requirement_key": "sourcing.contract.inputs",
+          "logical_requirement": "품목·수량 · 가격 기준·거래조건",
+          "candidate_dataset_keys": [
+            "PRC-01",
+            "MDM-08"
+          ],
+          "mandatory": true,
+          "unresolved_requirement": false
+        }
+      ],
+      "suggested_blueprint_refs": [
+        {
+          "kit_id": "KIT-MFG-NONFERROUS-PROCUREMENT",
+          "version": "1.1.0",
+          "app_id": "APP-01"
+        },
+        {
+          "kit_id": "KIT-MFG-NONFERROUS-PROCUREMENT",
+          "version": "1.1.0",
+          "app_id": "APP-04"
+        }
+      ],
+      "relations": [
+        {
+          "kind": "informs",
+          "target_template_key": "sourcing.purchase_order"
+        }
+      ],
+      "shortcut_refs": [],
+      "source_refs": [
+        "docs/design_business_kit_l2_process_setup_2026-09-12.md#4"
+      ],
+      "review_status": "DOMAIN_REVIEW_REQUIRED"
+    },
+    {
+      "template_key": "sourcing.purchase_order",
+      "template_revision": 1,
+      "level": "L2",
+      "parent_template_key": "sourcing",
+      "business_kit_id": "BK-01",
+      "label": "주문발주·납기관리",
+      "description": "운영계 발주 쓰기 미제공",
+      "purpose": "발주·변경 이력과 납기 예외를 구분하여 확인한다.",
+      "trigger": "계약 또는 허용된 구매 근거 확인",
+      "input_roles": [
+        "계약·수량",
+        "납기·도착지"
+      ],
+      "output_roles": [
+        "발주·변경 이력",
+        "납기 예외"
+      ],
+      "suggested_responsible_roles": [
+        "구매 담당",
+        "발주 승인권자"
+      ],
+      "default_selected": true,
+      "applicability_tags": [
+        "제조",
+        "회사별 적용 검토"
+      ],
+      "data_requirements": [
+        {
+          "logical_requirement_key": "sourcing.purchase_order.inputs",
+          "logical_requirement": "계약·수량 · 납기·도착지",
+          "candidate_dataset_keys": [
+            "PRC-02",
+            "PRC-01"
+          ],
+          "mandatory": true,
+          "unresolved_requirement": false
+        }
+      ],
+      "suggested_blueprint_refs": [
+        {
+          "kit_id": "KIT-MFG-NONFERROUS-PROCUREMENT",
+          "version": "1.1.0",
+          "app_id": "APP-01"
+        },
+        {
+          "kit_id": "KIT-MFG-NONFERROUS-PROCUREMENT",
+          "version": "1.1.0",
+          "app_id": "APP-05"
+        }
+      ],
+      "relations": [
+        {
+          "kind": "handoff_to",
+          "target_template_key": "logistics.shipment"
+        }
+      ],
+      "shortcut_refs": [],
+      "source_refs": [
+        "docs/design_business_kit_l2_process_setup_2026-09-12.md#4"
+      ],
+      "review_status": "DOMAIN_REVIEW_REQUIRED"
+    },
+    {
+      "template_key": "logistics.submission",
+      "template_revision": 1,
+      "level": "L2",
+      "parent_template_key": "logistics",
+      "business_kit_id": "BK-02",
+      "label": "공급사 제출 확인",
+      "description": "기존 외부 시스템 읽기 연결",
+      "purpose": "필수 제출 상태와 미제출 항목을 확인한다.",
+      "trigger": "제출 요청 또는 제출 기한 도래",
+      "input_roles": [
+        "파트너 제출 기록"
+      ],
+      "output_roles": [
+        "제출·미제출 확인"
+      ],
+      "suggested_responsible_roles": [
+        "물류 담당",
+        "제출 검토 담당"
+      ],
+      "default_selected": true,
+      "applicability_tags": [
+        "제조",
+        "회사별 적용 검토"
+      ],
+      "data_requirements": [
+        {
+          "logical_requirement_key": "logistics.submission.inputs",
+          "logical_requirement": "파트너 제출 기록",
+          "candidate_dataset_keys": [
+            "LOG-01"
+          ],
+          "mandatory": true,
+          "unresolved_requirement": false
+        }
+      ],
+      "suggested_blueprint_refs": [
+        {
+          "kit_id": "KIT-MFG-NONFERROUS-PROCUREMENT",
+          "version": "1.1.0",
+          "app_id": "APP-01"
+        },
+        {
+          "kit_id": "KIT-MFG-NONFERROUS-PROCUREMENT",
+          "version": "1.1.0",
+          "app_id": "APP-02"
+        }
+      ],
+      "relations": [],
+      "shortcut_refs": [],
+      "source_refs": [
+        "docs/design_business_kit_l2_process_setup_2026-09-12.md#4"
+      ],
+      "review_status": "DOMAIN_REVIEW_REQUIRED"
+    },
+    {
+      "template_key": "logistics.shipment",
+      "template_revision": 1,
+      "level": "L2",
+      "parent_template_key": "logistics",
+      "business_kit_id": "BK-02",
+      "label": "선적·도착 추적",
+      "description": "사건·시간 의미 검증 필요",
+      "purpose": "선적과 도착 사건·시간을 구분하여 추적한다.",
+      "trigger": "선적 일정 등록 또는 운송 사건 발생",
+      "input_roles": [
+        "선적 헤더·운송편",
+        "운송 Milestone"
+      ],
+      "output_roles": [
+        "선적·도착 상태",
+        "지연 근거"
+      ],
+      "suggested_responsible_roles": [
+        "물류 담당",
+        "물류 책임자"
+      ],
+      "default_selected": true,
+      "applicability_tags": [
+        "제조",
+        "회사별 적용 검토"
+      ],
+      "data_requirements": [
+        {
+          "logical_requirement_key": "logistics.shipment.inputs",
+          "logical_requirement": "선적 헤더·운송편 · 운송 Milestone",
+          "candidate_dataset_keys": [
+            "LOG-02",
+            "LOG-03"
+          ],
+          "mandatory": true,
+          "unresolved_requirement": false
+        }
+      ],
+      "suggested_blueprint_refs": [
+        {
+          "kit_id": "KIT-MFG-NONFERROUS-PROCUREMENT",
+          "version": "1.1.0",
+          "app_id": "APP-01"
+        },
+        {
+          "kit_id": "KIT-MFG-NONFERROUS-PROCUREMENT",
+          "version": "1.1.0",
+          "app_id": "APP-02"
+        }
+      ],
+      "relations": [],
+      "shortcut_refs": [],
+      "source_refs": [
+        "docs/design_business_kit_l2_process_setup_2026-09-12.md#4"
+      ],
+      "review_status": "DOMAIN_REVIEW_REQUIRED"
+    },
+    {
+      "template_key": "logistics.customs",
+      "template_revision": 1,
+      "level": "L2",
+      "parent_template_key": "logistics",
+      "business_kit_id": "BK-02",
+      "label": "통관·관세 확인",
+      "description": "자동 신고·납부 제외",
+      "purpose": "통관·검사·관세 처리 상태를 확인한다.",
+      "trigger": "통관 관련 사건 또는 검사 확인",
+      "input_roles": [
+        "통관·검사·관세 기록"
+      ],
+      "output_roles": [
+        "처리 상태·확인 근거"
+      ],
+      "suggested_responsible_roles": [
+        "통관 담당",
+        "물류 책임자"
+      ],
+      "default_selected": true,
+      "applicability_tags": [
+        "제조",
+        "회사별 적용 검토"
+      ],
+      "data_requirements": [
+        {
+          "logical_requirement_key": "logistics.customs.inputs",
+          "logical_requirement": "통관·검사·관세 기록",
+          "candidate_dataset_keys": [
+            "LOG-04"
+          ],
+          "mandatory": true,
+          "unresolved_requirement": false
+        }
+      ],
+      "suggested_blueprint_refs": [
+        {
+          "kit_id": "KIT-MFG-NONFERROUS-PROCUREMENT",
+          "version": "1.1.0",
+          "app_id": "APP-01"
+        },
+        {
+          "kit_id": "KIT-MFG-NONFERROUS-PROCUREMENT",
+          "version": "1.1.0",
+          "app_id": "APP-02"
+        }
+      ],
+      "relations": [],
+      "shortcut_refs": [],
+      "source_refs": [
+        "docs/design_business_kit_l2_process_setup_2026-09-12.md#4"
+      ],
+      "review_status": "DOMAIN_REVIEW_REQUIRED"
+    },
+    {
+      "template_key": "logistics.inland_transport",
+      "template_revision": 1,
+      "level": "L2",
+      "parent_template_key": "logistics",
+      "business_kit_id": "BK-02",
+      "label": "내륙운송·인도 확인",
+      "description": "인도와 입고 확정 구분",
+      "purpose": "내륙 운송과 인도 사건을 입고 확정과 구분한다.",
+      "trigger": "내륙 운송 또는 인도 사건 발생",
+      "input_roles": [
+        "운송·인도 Milestone"
+      ],
+      "output_roles": [
+        "운송·인도 확인"
+      ],
+      "suggested_responsible_roles": [
+        "물류 담당",
+        "인수 담당"
+      ],
+      "default_selected": true,
+      "applicability_tags": [
+        "제조",
+        "회사별 적용 검토"
+      ],
+      "data_requirements": [
+        {
+          "logical_requirement_key": "logistics.inland_transport.inputs",
+          "logical_requirement": "운송·인도 Milestone",
+          "candidate_dataset_keys": [
+            "LOG-05"
+          ],
+          "mandatory": true,
+          "unresolved_requirement": false
+        }
+      ],
+      "suggested_blueprint_refs": [
+        {
+          "kit_id": "KIT-MFG-NONFERROUS-PROCUREMENT",
+          "version": "1.1.0",
+          "app_id": "APP-01"
+        },
+        {
+          "kit_id": "KIT-MFG-NONFERROUS-PROCUREMENT",
+          "version": "1.1.0",
+          "app_id": "APP-02"
+        }
+      ],
+      "relations": [
+        {
+          "kind": "handoff_to",
+          "target_template_key": "inventory.receipt"
+        }
+      ],
+      "shortcut_refs": [],
+      "source_refs": [
+        "docs/design_business_kit_l2_process_setup_2026-09-12.md#4"
+      ],
+      "review_status": "DOMAIN_REVIEW_REQUIRED"
+    },
+    {
+      "template_key": "inventory.receipt",
+      "template_revision": 1,
+      "level": "L2",
+      "parent_template_key": "inventory",
+      "business_kit_id": "BK-03",
+      "label": "원료입고",
+      "description": "입고확정 쓰기·검수 계약 보완",
+      "purpose": "인수·입고·검사·가용 상태를 구분하여 확인한다.",
+      "trigger": "도착·검사 자료와 발주 참조 확보",
+      "input_roles": [
+        "발주 참조",
+        "도착·검사·재고 이동"
+      ],
+      "output_roles": [
+        "입고·검사·가용 상태"
+      ],
+      "suggested_responsible_roles": [
+        "창고 담당",
+        "입고 책임자"
+      ],
+      "default_selected": true,
+      "applicability_tags": [
+        "제조",
+        "회사별 적용 검토"
+      ],
+      "data_requirements": [
+        {
+          "logical_requirement_key": "inventory.receipt.inputs",
+          "logical_requirement": "발주 참조 · 도착·검사·재고 이동",
+          "candidate_dataset_keys": [
+            "INV-02",
+            "LOG-05",
+            "QLT-01"
+          ],
+          "mandatory": true,
+          "unresolved_requirement": false
+        },
+        {
+          "logical_requirement_key": "inventory.receipt.receipt_confirmation",
+          "logical_requirement": "입고확정 쓰기·검수 계약 보완",
+          "candidate_dataset_keys": [],
+          "mandatory": true,
+          "unresolved_requirement": true
+        }
+      ],
+      "suggested_blueprint_refs": [
+        {
+          "kit_id": "KIT-MFG-NONFERROUS-PROCUREMENT",
+          "version": "1.1.0",
+          "app_id": "APP-02"
+        },
+        {
+          "kit_id": "KIT-MFG-NONFERROUS-PROCUREMENT",
+          "version": "1.1.0",
+          "app_id": "APP-03"
+        }
+      ],
+      "relations": [
+        {
+          "kind": "informs",
+          "target_template_key": "finance.settlement"
+        }
+      ],
+      "shortcut_refs": [],
+      "source_refs": [
+        "docs/design_business_kit_l2_process_setup_2026-09-12.md#4"
+      ],
+      "review_status": "DOMAIN_REVIEW_REQUIRED"
+    },
+    {
+      "template_key": "inventory.availability",
+      "template_revision": 1,
+      "level": "L2",
+      "parent_template_key": "inventory",
+      "business_kit_id": "BK-03",
+      "label": "재고 현황·가용량",
+      "description": "품질 보류·사용 가능 구분",
+      "purpose": "품질 보류와 사용 가능한 재고를 구분한다.",
+      "trigger": "재고 조회 주기 또는 품질 상태 변경",
+      "input_roles": [
+        "재고 판",
+        "품질 보류·검사 상태"
+      ],
+      "output_roles": [
+        "현황·가용량 검토"
+      ],
+      "suggested_responsible_roles": [
+        "재고 담당",
+        "품질 담당"
+      ],
+      "default_selected": true,
+      "applicability_tags": [
+        "제조",
+        "회사별 적용 검토"
+      ],
+      "data_requirements": [
+        {
+          "logical_requirement_key": "inventory.availability.inputs",
+          "logical_requirement": "재고 판 · 품질 보류·검사 상태",
+          "candidate_dataset_keys": [
+            "INV-01",
+            "QLT-01"
+          ],
+          "mandatory": true,
+          "unresolved_requirement": false
+        }
+      ],
+      "suggested_blueprint_refs": [
+        {
+          "kit_id": "KIT-MFG-NONFERROUS-PROCUREMENT",
+          "version": "1.1.0",
+          "app_id": "APP-03"
+        }
+      ],
+      "relations": [],
+      "shortcut_refs": [],
+      "source_refs": [
+        "docs/design_business_kit_l2_process_setup_2026-09-12.md#4"
+      ],
+      "review_status": "DOMAIN_REVIEW_REQUIRED"
+    },
+    {
+      "template_key": "inventory.movement",
+      "template_revision": 1,
+      "level": "L2",
+      "parent_template_key": "inventory",
+      "business_kit_id": "BK-03",
+      "label": "재고이동·Lot 이력",
+      "description": "원천 이동 유형 매핑 필요",
+      "purpose": "이동 유형별 Lot 이력을 추적한다.",
+      "trigger": "재고 이동 사건 발생",
+      "input_roles": [
+        "재고 이동·Lot 참조"
+      ],
+      "output_roles": [
+        "이동·Lot 이력"
+      ],
+      "suggested_responsible_roles": [
+        "창고 담당",
+        "재고 책임자"
+      ],
+      "default_selected": true,
+      "applicability_tags": [
+        "제조",
+        "회사별 적용 검토"
+      ],
+      "data_requirements": [
+        {
+          "logical_requirement_key": "inventory.movement.inputs",
+          "logical_requirement": "재고 이동·Lot 참조",
+          "candidate_dataset_keys": [
+            "INV-02"
+          ],
+          "mandatory": true,
+          "unresolved_requirement": false
+        }
+      ],
+      "suggested_blueprint_refs": [
+        {
+          "kit_id": "KIT-MFG-NONFERROUS-PROCUREMENT",
+          "version": "1.1.0",
+          "app_id": "APP-03"
+        }
+      ],
+      "relations": [],
+      "shortcut_refs": [],
+      "source_refs": [
+        "docs/design_business_kit_l2_process_setup_2026-09-12.md#4"
+      ],
+      "review_status": "DOMAIN_REVIEW_REQUIRED"
+    },
+    {
+      "template_key": "inventory.replenishment",
+      "template_revision": 1,
+      "level": "L2",
+      "parent_template_key": "inventory",
+      "business_kit_id": "BK-03",
+      "label": "수급·부족 대응",
+      "description": "대응안·임계치 계약 보완",
+      "purpose": "재고·소요·기발주를 비교하여 부족 대응 근거를 마련한다.",
+      "trigger": "부족 위험 또는 수급 검토 주기",
+      "input_roles": [
+        "가용재고",
+        "생산 소요",
+        "기발주"
+      ],
+      "output_roles": [
+        "부족 근거",
+        "수급 대응 후보"
+      ],
+      "suggested_responsible_roles": [
+        "수급 담당",
+        "구매 책임자"
+      ],
+      "default_selected": true,
+      "applicability_tags": [
+        "제조",
+        "회사별 적용 검토"
+      ],
+      "data_requirements": [
+        {
+          "logical_requirement_key": "inventory.replenishment.inputs",
+          "logical_requirement": "가용재고 · 생산 소요 · 기발주",
+          "candidate_dataset_keys": [
+            "INV-01",
+            "MFG-01",
+            "PRC-02"
+          ],
+          "mandatory": true,
+          "unresolved_requirement": false
+        },
+        {
+          "logical_requirement_key": "inventory.replenishment.replenishment_response",
+          "logical_requirement": "대응안·임계치 계약 보완",
+          "candidate_dataset_keys": [],
+          "mandatory": true,
+          "unresolved_requirement": true
+        }
+      ],
+      "suggested_blueprint_refs": [
+        {
+          "kit_id": "KIT-MFG-NONFERROUS-PROCUREMENT",
+          "version": "1.1.0",
+          "app_id": "APP-01"
+        },
+        {
+          "kit_id": "KIT-MFG-NONFERROUS-PROCUREMENT",
+          "version": "1.1.0",
+          "app_id": "APP-03"
+        }
+      ],
+      "relations": [],
+      "shortcut_refs": [],
+      "source_refs": [
+        "docs/design_business_kit_l2_process_setup_2026-09-12.md#4"
+      ],
+      "review_status": "DOMAIN_REVIEW_REQUIRED"
+    },
+    {
+      "template_key": "production.planning",
+      "template_revision": 1,
+      "level": "L2",
+      "parent_template_key": "production",
+      "business_kit_id": "BK-04",
+      "label": "생산계획·자재소요",
+      "description": "소요량 산식 승인 별도",
+      "purpose": "계획 판본과 승인 산식으로 자재소요를 검토한다.",
+      "trigger": "생산 계획 수립·변경",
+      "input_roles": [
+        "생산계획",
+        "BOM·수율·부산물"
+      ],
+      "output_roles": [
+        "계획·자재소요 검토"
+      ],
+      "suggested_responsible_roles": [
+        "생산계획 담당",
+        "생산 책임자"
+      ],
+      "default_selected": true,
+      "applicability_tags": [
+        "제조",
+        "회사별 적용 검토"
+      ],
+      "data_requirements": [
+        {
+          "logical_requirement_key": "production.planning.inputs",
+          "logical_requirement": "생산계획 · BOM·수율·부산물",
+          "candidate_dataset_keys": [
+            "MFG-01",
+            "MDM-05"
+          ],
+          "mandatory": true,
+          "unresolved_requirement": false
+        }
+      ],
+      "suggested_blueprint_refs": [
+        {
+          "kit_id": "KIT-MFG-NONFERROUS-PROCUREMENT",
+          "version": "1.1.0",
+          "app_id": "APP-03"
+        }
+      ],
+      "relations": [],
+      "shortcut_refs": [],
+      "source_refs": [
+        "docs/design_business_kit_l2_process_setup_2026-09-12.md#4"
+      ],
+      "review_status": "DOMAIN_REVIEW_REQUIRED"
+    },
+    {
+      "template_key": "production.execution",
+      "template_revision": 1,
+      "level": "L2",
+      "parent_template_key": "production",
+      "business_kit_id": "BK-04",
+      "label": "생산실적·수율 확인",
+      "description": "운영 입력·실적 인증 별도",
+      "purpose": "생산실적과 수율을 인증 근거에 따라 확인한다.",
+      "trigger": "생산실적 보고 또는 검토 주기",
+      "input_roles": [
+        "생산실적·수율 기록"
+      ],
+      "output_roles": [
+        "실적·수율 검토"
+      ],
+      "suggested_responsible_roles": [
+        "생산 담당",
+        "생산 책임자"
+      ],
+      "default_selected": true,
+      "applicability_tags": [
+        "제조",
+        "회사별 적용 검토"
+      ],
+      "data_requirements": [
+        {
+          "logical_requirement_key": "production.execution.inputs",
+          "logical_requirement": "생산실적·수율 기록",
+          "candidate_dataset_keys": [
+            "MFG-02"
+          ],
+          "mandatory": true,
+          "unresolved_requirement": false
+        }
+      ],
+      "suggested_blueprint_refs": [
+        {
+          "kit_id": "KIT-MFG-NONFERROUS-PROCUREMENT",
+          "version": "1.1.0",
+          "app_id": "APP-03"
+        }
+      ],
+      "relations": [],
+      "shortcut_refs": [],
+      "source_refs": [
+        "docs/design_business_kit_l2_process_setup_2026-09-12.md#4"
+      ],
+      "review_status": "DOMAIN_REVIEW_REQUIRED"
+    },
+    {
+      "template_key": "production.capacity",
+      "template_revision": 1,
+      "level": "L2",
+      "parent_template_key": "production",
+      "business_kit_id": "BK-04",
+      "label": "설비·능력 영향 확인",
+      "description": "영향 계산 계약 별도",
+      "purpose": "가동·고장·정비와 기준 능력의 영향을 검토한다.",
+      "trigger": "설비 상태 변경 또는 능력 검토",
+      "input_roles": [
+        "가동·고장·정비",
+        "Routing·설비 능력"
+      ],
+      "output_roles": [
+        "능력 영향 검토"
+      ],
+      "suggested_responsible_roles": [
+        "설비 담당",
+        "생산계획 담당"
+      ],
+      "default_selected": true,
+      "applicability_tags": [
+        "제조",
+        "회사별 적용 검토"
+      ],
+      "data_requirements": [
+        {
+          "logical_requirement_key": "production.capacity.inputs",
+          "logical_requirement": "가동·고장·정비 · Routing·설비 능력",
+          "candidate_dataset_keys": [
+            "MFG-03",
+            "MDM-06"
+          ],
+          "mandatory": true,
+          "unresolved_requirement": false
+        }
+      ],
+      "suggested_blueprint_refs": [
+        {
+          "kit_id": "KIT-MFG-NONFERROUS-PROCUREMENT",
+          "version": "1.1.0",
+          "app_id": "APP-03"
+        }
+      ],
+      "relations": [],
+      "shortcut_refs": [],
+      "source_refs": [
+        "docs/design_business_kit_l2_process_setup_2026-09-12.md#4"
+      ],
+      "review_status": "DOMAIN_REVIEW_REQUIRED"
+    },
+    {
+      "template_key": "quality.inspection",
+      "template_revision": 1,
+      "level": "L2",
+      "parent_template_key": "quality",
+      "business_kit_id": "BK-05",
+      "label": "입고·공정·제품 검사",
+      "description": "검사 결과와 판정 권한 별도",
+      "purpose": "검사 기록과 품질 판정을 구분하여 확인한다.",
+      "trigger": "입고·공정·제품 검사 대상 발생",
+      "input_roles": [
+        "검사 결과"
+      ],
+      "output_roles": [
+        "검사 상태·판정 참조"
+      ],
+      "suggested_responsible_roles": [
+        "검사 담당",
+        "품질 책임자"
+      ],
+      "default_selected": true,
+      "applicability_tags": [
+        "제조",
+        "회사별 적용 검토"
+      ],
+      "data_requirements": [
+        {
+          "logical_requirement_key": "quality.inspection.inputs",
+          "logical_requirement": "검사 결과",
+          "candidate_dataset_keys": [
+            "QLT-01"
+          ],
+          "mandatory": true,
+          "unresolved_requirement": false
+        }
+      ],
+      "suggested_blueprint_refs": [
+        {
+          "kit_id": "KIT-MFG-NONFERROUS-PROCUREMENT",
+          "version": "1.1.0",
+          "app_id": "APP-03"
+        }
+      ],
+      "relations": [],
+      "shortcut_refs": [],
+      "source_refs": [
+        "docs/design_business_kit_l2_process_setup_2026-09-12.md#4"
+      ],
+      "review_status": "DOMAIN_REVIEW_REQUIRED"
+    },
+    {
+      "template_key": "quality.traceability",
+      "template_revision": 1,
+      "level": "L2",
+      "parent_template_key": "quality",
+      "business_kit_id": "BK-05",
+      "label": "품질·Lot 추적",
+      "description": "객체 참조 연결 검증 필요",
+      "purpose": "검사·이동·문서 객체 참조로 Lot 근거를 연결한다.",
+      "trigger": "Lot 추적 또는 품질 근거 확인 요청",
+      "input_roles": [
+        "검사·Lot·재고 이동",
+        "근거 문서"
+      ],
+      "output_roles": [
+        "Lot 추적·근거 연결"
+      ],
+      "suggested_responsible_roles": [
+        "품질 담당",
+        "창고 담당"
+      ],
+      "default_selected": true,
+      "applicability_tags": [
+        "제조",
+        "회사별 적용 검토"
+      ],
+      "data_requirements": [
+        {
+          "logical_requirement_key": "quality.traceability.inputs",
+          "logical_requirement": "검사·Lot·재고 이동 · 근거 문서",
+          "candidate_dataset_keys": [
+            "QLT-01",
+            "INV-02",
+            "KNW-01"
+          ],
+          "mandatory": true,
+          "unresolved_requirement": false
+        }
+      ],
+      "suggested_blueprint_refs": [
+        {
+          "kit_id": "KIT-MFG-NONFERROUS-PROCUREMENT",
+          "version": "1.1.0",
+          "app_id": "APP-03"
+        }
+      ],
+      "relations": [],
+      "shortcut_refs": [],
+      "source_refs": [
+        "docs/design_business_kit_l2_process_setup_2026-09-12.md#4"
+      ],
+      "review_status": "DOMAIN_REVIEW_REQUIRED"
+    },
+    {
+      "template_key": "quality.nonconformance",
+      "template_revision": 1,
+      "level": "L2",
+      "parent_template_key": "quality",
+      "business_kit_id": "BK-05",
+      "label": "부적합·후속조치",
+      "description": "후속조치 이력·종결 계약 보완",
+      "purpose": "부적합 근거와 후속조치·종결 기록을 구분한다.",
+      "trigger": "부적합 확인 또는 후속조치 검토",
+      "input_roles": [
+        "부적합 검사",
+        "표준서·근거"
+      ],
+      "output_roles": [
+        "후속조치·종결 검토"
+      ],
+      "suggested_responsible_roles": [
+        "품질 담당",
+        "조치 책임자"
+      ],
+      "default_selected": true,
+      "applicability_tags": [
+        "제조",
+        "회사별 적용 검토"
+      ],
+      "data_requirements": [
+        {
+          "logical_requirement_key": "quality.nonconformance.inputs",
+          "logical_requirement": "부적합 검사 · 표준서·근거",
+          "candidate_dataset_keys": [
+            "QLT-01",
+            "KNW-01"
+          ],
+          "mandatory": true,
+          "unresolved_requirement": false
+        },
+        {
+          "logical_requirement_key": "quality.nonconformance.nonconformance_action_record",
+          "logical_requirement": "후속조치 이력·종결 계약 보완",
+          "candidate_dataset_keys": [],
+          "mandatory": true,
+          "unresolved_requirement": true
+        }
+      ],
+      "suggested_blueprint_refs": [
+        {
+          "kit_id": "KIT-MFG-NONFERROUS-PROCUREMENT",
+          "version": "1.1.0",
+          "app_id": "APP-03"
+        }
+      ],
+      "relations": [],
+      "shortcut_refs": [],
+      "source_refs": [
+        "docs/design_business_kit_l2_process_setup_2026-09-12.md#4"
+      ],
+      "review_status": "DOMAIN_REVIEW_REQUIRED"
+    },
+    {
+      "template_key": "sales.demand",
+      "template_revision": 1,
+      "level": "L2",
+      "parent_template_key": "sales",
+      "business_kit_id": "BK-06",
+      "label": "수요·판매계획",
+      "description": "계획 판본·승인 계약 확인",
+      "purpose": "수요와 판매계획을 판본·승인 상태에 맞게 검토한다.",
+      "trigger": "판매 계획 주기 또는 수요 변경",
+      "input_roles": [
+        "수요·판매계획"
+      ],
+      "output_roles": [
+        "판매계획 검토"
+      ],
+      "suggested_responsible_roles": [
+        "판매계획 담당",
+        "영업 책임자"
+      ],
+      "default_selected": true,
+      "applicability_tags": [
+        "제조",
+        "회사별 적용 검토"
+      ],
+      "data_requirements": [
+        {
+          "logical_requirement_key": "sales.demand.inputs",
+          "logical_requirement": "수요·판매계획",
+          "candidate_dataset_keys": [
+            "SLS-01"
+          ],
+          "mandatory": true,
+          "unresolved_requirement": false
+        }
+      ],
+      "suggested_blueprint_refs": [
+        {
+          "kit_id": "KIT-MFG-NONFERROUS-PROCUREMENT",
+          "version": "1.1.0",
+          "app_id": "APP-06"
+        }
+      ],
+      "relations": [],
+      "shortcut_refs": [],
+      "source_refs": [
+        "docs/design_business_kit_l2_process_setup_2026-09-12.md#4"
+      ],
+      "review_status": "DOMAIN_REVIEW_REQUIRED"
+    },
+    {
+      "template_key": "sales.order",
+      "template_revision": 1,
+      "level": "L2",
+      "parent_template_key": "sales",
+      "business_kit_id": "BK-06",
+      "label": "수주·납기관리",
+      "description": "수주 운영 쓰기 제외",
+      "purpose": "수주와 생산계획을 비교하여 납기 영향을 확인한다.",
+      "trigger": "수주·납기 변경",
+      "input_roles": [
+        "수주·판매계획",
+        "생산계획"
+      ],
+      "output_roles": [
+        "수주·납기 영향"
+      ],
+      "suggested_responsible_roles": [
+        "영업 담당",
+        "생산계획 담당"
+      ],
+      "default_selected": true,
+      "applicability_tags": [
+        "제조",
+        "회사별 적용 검토"
+      ],
+      "data_requirements": [
+        {
+          "logical_requirement_key": "sales.order.inputs",
+          "logical_requirement": "수주·판매계획 · 생산계획",
+          "candidate_dataset_keys": [
+            "SLS-01",
+            "MFG-01"
+          ],
+          "mandatory": true,
+          "unresolved_requirement": false
+        }
+      ],
+      "suggested_blueprint_refs": [
+        {
+          "kit_id": "KIT-MFG-NONFERROUS-PROCUREMENT",
+          "version": "1.1.0",
+          "app_id": "APP-06"
+        }
+      ],
+      "relations": [],
+      "shortcut_refs": [],
+      "source_refs": [
+        "docs/design_business_kit_l2_process_setup_2026-09-12.md#4"
+      ],
+      "review_status": "DOMAIN_REVIEW_REQUIRED"
+    },
+    {
+      "template_key": "sales.shipment",
+      "template_revision": 1,
+      "level": "L2",
+      "parent_template_key": "sales",
+      "business_kit_id": "BK-06",
+      "label": "출하·매출시점 확인",
+      "description": "출하와 회계 인식 구분",
+      "purpose": "출하 사건과 회계 인식 시점을 구분하여 확인한다.",
+      "trigger": "출하 또는 매출 인식 검토",
+      "input_roles": [
+        "출하 기록",
+        "매출채권 참조"
+      ],
+      "output_roles": [
+        "출하·매출시점 검토"
+      ],
+      "suggested_responsible_roles": [
+        "출하 담당",
+        "회계 담당"
+      ],
+      "default_selected": true,
+      "applicability_tags": [
+        "제조",
+        "회사별 적용 검토"
+      ],
+      "data_requirements": [
+        {
+          "logical_requirement_key": "sales.shipment.inputs",
+          "logical_requirement": "출하 기록 · 매출채권 참조",
+          "candidate_dataset_keys": [
+            "SLS-01",
+            "FIN-02"
+          ],
+          "mandatory": true,
+          "unresolved_requirement": false
+        }
+      ],
+      "suggested_blueprint_refs": [
+        {
+          "kit_id": "KIT-MFG-NONFERROUS-PROCUREMENT",
+          "version": "1.1.0",
+          "app_id": "APP-06"
+        }
+      ],
+      "relations": [],
+      "shortcut_refs": [],
+      "source_refs": [
+        "docs/design_business_kit_l2_process_setup_2026-09-12.md#4"
+      ],
+      "review_status": "DOMAIN_REVIEW_REQUIRED"
+    },
+    {
+      "template_key": "finance.cost",
+      "template_revision": 1,
+      "level": "L2",
+      "parent_template_key": "finance",
+      "business_kit_id": "BK-07",
+      "label": "원가·차이 분석",
+      "description": "승인 계산만 결과 사용",
+      "purpose": "구매 조건과 승인 원가 산식에 근거하여 차이를 분석한다.",
+      "trigger": "원가 검토 주기 또는 구매 조건 변경",
+      "input_roles": [
+        "표준·실제원가",
+        "구매계약"
+      ],
+      "output_roles": [
+        "원가·차이 검토"
+      ],
+      "suggested_responsible_roles": [
+        "원가 담당",
+        "재무 책임자"
+      ],
+      "default_selected": true,
+      "applicability_tags": [
+        "제조",
+        "회사별 적용 검토"
+      ],
+      "data_requirements": [
+        {
+          "logical_requirement_key": "finance.cost.inputs",
+          "logical_requirement": "표준·실제원가 · 구매계약",
+          "candidate_dataset_keys": [
+            "FIN-01",
+            "PRC-01"
+          ],
+          "mandatory": true,
+          "unresolved_requirement": false
+        }
+      ],
+      "suggested_blueprint_refs": [
+        {
+          "kit_id": "KIT-MFG-NONFERROUS-PROCUREMENT",
+          "version": "1.1.0",
+          "app_id": "APP-04"
+        }
+      ],
+      "relations": [],
+      "shortcut_refs": [],
+      "source_refs": [
+        "docs/design_business_kit_l2_process_setup_2026-09-12.md#4"
+      ],
+      "review_status": "DOMAIN_REVIEW_REQUIRED"
+    },
+    {
+      "template_key": "finance.settlement",
+      "template_revision": 1,
+      "level": "L2",
+      "parent_template_key": "finance",
+      "business_kit_id": "BK-07",
+      "label": "매입·정산",
+      "description": "채무 조회와 지급 실행 구분",
+      "purpose": "계약·발주·입고·청구 참조로 매입·채무·정산 상태를 확인한다.",
+      "trigger": "매입·채무·정산 검토",
+      "input_roles": [
+        "계약·발주",
+        "입고·청구 참조"
+      ],
+      "output_roles": [
+        "매입·채무·정산 상태"
+      ],
+      "suggested_responsible_roles": [
+        "재무 담당",
+        "재무 승인권자"
+      ],
+      "default_selected": true,
+      "applicability_tags": [
+        "제조",
+        "회사별 적용 검토"
+      ],
+      "data_requirements": [
+        {
+          "logical_requirement_key": "finance.settlement.inputs",
+          "logical_requirement": "계약·발주 · 입고·청구 참조",
+          "candidate_dataset_keys": [
+            "FIN-02",
+            "PRC-01",
+            "PRC-02"
+          ],
+          "mandatory": true,
+          "unresolved_requirement": false
+        }
+      ],
+      "suggested_blueprint_refs": [
+        {
+          "kit_id": "KIT-MFG-NONFERROUS-PROCUREMENT",
+          "version": "1.1.0",
+          "app_id": "APP-04"
+        }
+      ],
+      "relations": [],
+      "shortcut_refs": [],
+      "source_refs": [
+        "docs/design_business_kit_l2_process_setup_2026-09-12.md#4"
+      ],
+      "review_status": "DOMAIN_REVIEW_REQUIRED"
+    },
+    {
+      "template_key": "finance.cashflow",
+      "template_revision": 1,
+      "level": "L2",
+      "parent_template_key": "finance",
+      "business_kit_id": "BK-07",
+      "label": "자금·현금흐름",
+      "description": "실제·계획·전망 구분",
+      "purpose": "실제·계획·전망을 분리하여 현금흐름을 검토한다.",
+      "trigger": "자금 계획 주기 또는 채권채무 변동",
+      "input_roles": [
+        "채권채무",
+        "예산·실적·현금"
+      ],
+      "output_roles": [
+        "자금·현금흐름 검토"
+      ],
+      "suggested_responsible_roles": [
+        "자금 담당",
+        "재무 책임자"
+      ],
+      "default_selected": true,
+      "applicability_tags": [
+        "제조",
+        "회사별 적용 검토"
+      ],
+      "data_requirements": [
+        {
+          "logical_requirement_key": "finance.cashflow.inputs",
+          "logical_requirement": "채권채무 · 예산·실적·현금",
+          "candidate_dataset_keys": [
+            "FIN-02",
+            "FIN-03"
+          ],
+          "mandatory": true,
+          "unresolved_requirement": false
+        }
+      ],
+      "suggested_blueprint_refs": [
+        {
+          "kit_id": "KIT-MFG-NONFERROUS-PROCUREMENT",
+          "version": "1.1.0",
+          "app_id": "APP-04"
+        }
+      ],
+      "relations": [],
+      "shortcut_refs": [],
+      "source_refs": [
+        "docs/design_business_kit_l2_process_setup_2026-09-12.md#4"
+      ],
+      "review_status": "DOMAIN_REVIEW_REQUIRED"
+    },
+    {
+      "template_key": "finance.outlook",
+      "template_revision": 1,
+      "level": "L2",
+      "parent_template_key": "finance",
+      "business_kit_id": "BK-07",
+      "label": "경영전망·계획실적 비교",
+      "description": "데이터·산식·기준선 승인 별도",
+      "purpose": "동일 기간·기준선의 계획·실적·전망을 비교한다.",
+      "trigger": "경영전망 검토 주기",
+      "input_roles": [
+        "원가·채권채무·회계",
+        "계산식·시나리오"
+      ],
+      "output_roles": [
+        "전망·계획실적 차이"
+      ],
+      "suggested_responsible_roles": [
+        "경영계획 담당",
+        "재무 책임자"
+      ],
+      "default_selected": true,
+      "applicability_tags": [
+        "제조",
+        "회사별 적용 검토"
+      ],
+      "data_requirements": [
+        {
+          "logical_requirement_key": "finance.outlook.inputs",
+          "logical_requirement": "원가·채권채무·회계 · 계산식·시나리오",
+          "candidate_dataset_keys": [
+            "FIN-01",
+            "FIN-02",
+            "FIN-03",
+            "SIM-01",
+            "SIM-02"
+          ],
+          "mandatory": true,
+          "unresolved_requirement": false
+        }
+      ],
+      "suggested_blueprint_refs": [
+        {
+          "kit_id": "KIT-MFG-NONFERROUS-PROCUREMENT",
+          "version": "1.1.0",
+          "app_id": "APP-07"
+        }
+      ],
+      "relations": [],
+      "shortcut_refs": [],
+      "source_refs": [
+        "docs/design_business_kit_l2_process_setup_2026-09-12.md#4"
+      ],
+      "review_status": "DOMAIN_REVIEW_REQUIRED"
+    },
+    {
+      "template_key": "risk.monitor",
+      "template_revision": 1,
+      "level": "L2",
+      "parent_template_key": "risk",
+      "business_kit_id": "BK-08",
+      "label": "공급위험·외부변수 확인",
+      "description": "등록 위험과 계산 위험 구분",
+      "purpose": "등록 위험과 외부 변수 기반 위험 근거를 구분한다.",
+      "trigger": "공급사 또는 외부 변수 변동",
+      "input_roles": [
+        "공급사 기준",
+        "외부 지표"
+      ],
+      "output_roles": [
+        "공급위험·변수 확인"
+      ],
+      "suggested_responsible_roles": [
+        "구매 담당",
+        "위험 검토 담당"
+      ],
+      "default_selected": true,
+      "applicability_tags": [
+        "제조",
+        "회사별 적용 검토"
+      ],
+      "data_requirements": [
+        {
+          "logical_requirement_key": "risk.monitor.inputs",
+          "logical_requirement": "공급사 기준 · 외부 지표",
+          "candidate_dataset_keys": [
+            "MDM-02",
+            "EXT-01",
+            "EXT-02",
+            "EXT-03"
+          ],
+          "mandatory": true,
+          "unresolved_requirement": false
+        }
+      ],
+      "suggested_blueprint_refs": [
+        {
+          "kit_id": "KIT-MFG-NONFERROUS-PROCUREMENT",
+          "version": "1.1.0",
+          "app_id": "APP-05"
+        }
+      ],
+      "relations": [],
+      "shortcut_refs": [],
+      "source_refs": [
+        "docs/design_business_kit_l2_process_setup_2026-09-12.md#4"
+      ],
+      "review_status": "DOMAIN_REVIEW_REQUIRED"
+    },
+    {
+      "template_key": "risk.scenario",
+      "template_revision": 1,
+      "level": "L2",
+      "parent_template_key": "risk",
+      "business_kit_id": "BK-08",
+      "label": "대안·시나리오 비교",
+      "description": "인증 입력·모델 필요",
+      "purpose": "인증 입력과 승인 모델의 시나리오를 비교한다.",
+      "trigger": "대안 검토 또는 위험 대응 요청",
+      "input_roles": [
+        "계산식·제약",
+        "기준·위험·대안 가정"
+      ],
+      "output_roles": [
+        "시나리오 차이·근거"
+      ],
+      "suggested_responsible_roles": [
+        "업무 분석 담당",
+        "의사결정 책임자"
+      ],
+      "default_selected": true,
+      "applicability_tags": [
+        "제조",
+        "회사별 적용 검토"
+      ],
+      "data_requirements": [
+        {
+          "logical_requirement_key": "risk.scenario.inputs",
+          "logical_requirement": "계산식·제약 · 기준·위험·대안 가정",
+          "candidate_dataset_keys": [
+            "SIM-01",
+            "SIM-02"
+          ],
+          "mandatory": true,
+          "unresolved_requirement": false
+        }
+      ],
+      "suggested_blueprint_refs": [
+        {
+          "kit_id": "KIT-MFG-NONFERROUS-PROCUREMENT",
+          "version": "1.1.0",
+          "app_id": "APP-05"
+        },
+        {
+          "kit_id": "KIT-MFG-NONFERROUS-PROCUREMENT",
+          "version": "1.1.0",
+          "app_id": "APP-07"
+        }
+      ],
+      "relations": [],
+      "shortcut_refs": [],
+      "source_refs": [
+        "docs/design_business_kit_l2_process_setup_2026-09-12.md#4"
+      ],
+      "review_status": "DOMAIN_REVIEW_REQUIRED"
+    },
+    {
+      "template_key": "risk.decision",
+      "template_revision": 1,
+      "level": "L2",
+      "parent_template_key": "risk",
+      "business_kit_id": "BK-08",
+      "label": "의사결정·실행 배포",
+      "description": "기존 결정·실행 원장 연결; 자동 배포 명령 아님",
+      "purpose": "기존 결정·실행 원장의 승인과 작업 상태를 연결한다.",
+      "trigger": "검토 가능한 대안·결정 준비",
+      "input_roles": [
+        "결정 근거·기존 원장"
+      ],
+      "output_roles": [
+        "결정·실행과제 참조"
+      ],
+      "suggested_responsible_roles": [
+        "업무 의사결정 책임자",
+        "실행 담당"
+      ],
+      "default_selected": true,
+      "applicability_tags": [
+        "제조",
+        "회사별 적용 검토"
+      ],
+      "data_requirements": [
+        {
+          "logical_requirement_key": "risk.decision.inputs",
+          "logical_requirement": "결정 근거·기존 원장",
+          "candidate_dataset_keys": [
+            "DEC-01"
+          ],
+          "mandatory": true,
+          "unresolved_requirement": false
+        }
+      ],
+      "suggested_blueprint_refs": [
+        {
+          "kit_id": "KIT-MFG-NONFERROUS-PROCUREMENT",
+          "version": "1.1.0",
+          "app_id": "APP-07"
+        }
+      ],
+      "relations": [
+        {
+          "kind": "informs",
+          "target_template_key": "risk.effect"
+        }
+      ],
+      "shortcut_refs": [],
+      "source_refs": [
+        "docs/design_business_kit_l2_process_setup_2026-09-12.md#4"
+      ],
+      "review_status": "DOMAIN_REVIEW_REQUIRED"
+    },
+    {
+      "template_key": "risk.effect",
+      "template_revision": 1,
+      "level": "L2",
+      "parent_template_key": "risk",
+      "business_kit_id": "BK-08",
+      "label": "실행 결과·효과 측정",
+      "description": "목표·기간·효과 대사 필요",
+      "purpose": "목표·기간·실제 결과를 대사하여 실행 효과를 검토한다.",
+      "trigger": "실행 결과 관찰 또는 효과 검토 주기",
+      "input_roles": [
+        "결정·목표",
+        "관련 실제 결과"
+      ],
+      "output_roles": [
+        "효과 측정·대사 근거"
+      ],
+      "suggested_responsible_roles": [
+        "성과 분석 담당",
+        "업무 책임자"
+      ],
+      "default_selected": true,
+      "applicability_tags": [
+        "제조",
+        "회사별 적용 검토"
+      ],
+      "data_requirements": [
+        {
+          "logical_requirement_key": "risk.effect.inputs",
+          "logical_requirement": "결정·목표 · 관련 실제 결과",
+          "candidate_dataset_keys": [
+            "DEC-01"
+          ],
+          "mandatory": true,
+          "unresolved_requirement": false
+        },
+        {
+          "logical_requirement_key": "risk.effect.actual_outcome_and_reconciliation",
+          "logical_requirement": "목표·기간·효과 대사 필요",
+          "candidate_dataset_keys": [],
+          "mandatory": true,
+          "unresolved_requirement": true
+        }
+      ],
+      "suggested_blueprint_refs": [
+        {
+          "kit_id": "KIT-MFG-NONFERROUS-PROCUREMENT",
+          "version": "1.1.0",
+          "app_id": "APP-07"
+        }
+      ],
+      "relations": [],
+      "shortcut_refs": [],
+      "source_refs": [
+        "docs/design_business_kit_l2_process_setup_2026-09-12.md#4"
+      ],
+      "review_status": "DOMAIN_REVIEW_REQUIRED"
+    }
+  ],
+  "source_refs": [
+    "docs/design_business_kit_l2_process_setup_2026-09-12.md#4",
+    "docs/design_business_kit_l2_process_setup_2026-09-12.md#5"
+  ]
+}

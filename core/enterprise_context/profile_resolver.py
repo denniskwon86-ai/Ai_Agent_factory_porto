@@ -145,6 +145,9 @@ class ProfileResolver:
             from core.enterprise_context.models import EcmError
             raise EcmError(f"profile_kind 는 {PROFILE_KINDS} 중 하나여야 합니다.")
 
+        if profile_kind == "process_profile":
+            self.repo.assert_legacy_process_reader(node_id)
+
         merged: Dict[str, Any] = copy.deepcopy(industry_base or {})
         sources: List[Dict[str, Any]] = []
         skipped: List[Dict[str, Any]] = []

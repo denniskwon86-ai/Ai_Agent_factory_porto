@@ -47,6 +47,8 @@ _DB_PATH = data_path("decision_ledger.db")
 #   명세서가 열거한 10종 + ECM §6.2 가 요구하는 문맥·복제·권한 이벤트.
 #   ⚠️ 미등록 유형은 거부한다 — 오타로 만든 유형이 조용히 쌓이면 집계가 조각난다.
 EVENT_TYPES = (
+    "CERTIFICATION_POLICY_APPROVED",
+    "CERTIFICATION_POLICY_REVOKED",
     # 명세서 §5.2
     "REQUIREMENT_CONFIRMED",
     "BLUEPRINT_APPROVED",
@@ -215,6 +217,7 @@ EVENT_TYPES = (
 
 ACTOR_TYPES = ("user", "agent", "system")
 SUBJECT_TYPES = ("blueprint", "consultation", "project", "release", "scenario",
+                 "certification_policy",
                  "master_record", "data_contract", "enterprise_entity", "permission",
                  "external_connection", "wbs_task",
                  # [CL-1~CL-3] 폐쇄루프 주체 — 전달·결정·발간은 릴리스나 프로젝트가 아니다.
@@ -258,6 +261,7 @@ SUBJECT_TYPES = ("blueprint", "consultation", "project", "release", "scenario",
 #:   때 그 검증을 지나지 않았다. 새 유형이 언제나 느슨한 쪽으로 태어나는 구조였다 —
 #:   유형을 늘리는 사람이 검증을 함께 늘리도록, 표를 여기 하나만 둔다.
 _REVOCATION_PARENTS = {
+    "CERTIFICATION_POLICY_REVOKED": ("CERTIFICATION_POLICY_APPROVED",),
     "ONTOLOGY_APPROVAL_REVOKED": ("ONTOLOGY_MODEL_APPROVED", "ONTOLOGY_RELATION_APPROVED",
                                   "ONTOLOGY_RELATION_RETIRED"),
     "DATASET_OWNERSHIP_REVOKED": ("DATASET_OWNERSHIP_APPROVED",),
@@ -445,6 +449,8 @@ class DecisionLedger:
         #: ⚠️ 유형만 맞고 주체가 아무거나면, 「관계 승인」 이벤트에 프로젝트 id 를 넣어
         #:   두고 나중에 그 이벤트로 관계를 통과시킬 수 있다.
         _ONTOLOGY_SUBJECT = {
+            "CERTIFICATION_POLICY_APPROVED": "certification_policy",
+            "CERTIFICATION_POLICY_REVOKED": "certification_policy",
             "ONTOLOGY_MODEL_APPROVED": "ontology_model_contract",
             "ONTOLOGY_RELATION_APPROVED": "ontology_relation",
             "ONTOLOGY_RELATION_RETIRED": "ontology_relation",
