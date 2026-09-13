@@ -1,7 +1,8 @@
 {
   "recorded_at": "2026-09-13T23:30:00+09:00",
   "kind": "human_verified_summary_not_full_raw_evidence",
-  "data_delivery_status": "LOCAL_VERIFIED_PUBLIC_CIPHERTEXT_UPLOAD_AWAITING_EXPLICIT_APPROVAL",
+  "data_delivery_status": "CIPHERTEXT_INCLUDED_AFTER_EXPLICIT_PUBLIC_UPLOAD_APPROVAL_KEY_EXCLUDED",
+  "data_delivery_approval_recorded_at": "2026-09-13T23:45:00+09:00",
   "product_progress": {"complete": 21, "total": 40, "percent": 52.5},
   "b5_server_last_feature_run": {
     "report": "output/usage-holds-4w0j3fcs/isolation.json",
