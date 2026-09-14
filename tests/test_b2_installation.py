@@ -512,6 +512,25 @@ def test_next_business_kit_reuses_explicit_instance_and_resolves_existing_shortc
     assert optional["enabled"] is False
 
 
+def test_old_writer_on_installed_pack_keeps_l2_and_every_binding(installation):
+    """구 편집기의 평면 저장은 409 다. 설치가 만든 L2 와 바인딩이 하나도 사라지지 않는다."""
+    from core.enterprise_context.models import EnterpriseProfile
+    from core.enterprise_context.repository import EcmRepository
+    w = installation
+    _apply(w, _prepared(w))
+    before = _read(w)["payload"]
+    # 합성 ADD_NODE 문서가 아니라 실제 팩 설치판이어야 이 회귀가 의미를 갖는다.
+    assert {node["level"] for node in before["nodes"]} == {"L1", "L2"}
+    assert before["bindings"] and {binding["kind"] for binding in before["bindings"]}
+    state = _state(w)
+    other = EcmRepository(db_path=str(w["paths"]["ecm"]))
+    _error(lambda: other.upsert_profile(EnterpriseProfile(
+        tenant_id=w["boundary"].tenant_id, scope_node_id=w["boundary"].scope_node_id,
+        profile_kind="process_profile", payload={"nodes": []})), 409, "PROCESS_SCHEMA_UPGRADE_REQUIRED")
+    assert _state(w) == state
+    assert _read(w)["payload"] == before
+
+
 def test_same_standard_task_reuses_one_canonical_node_and_never_duplicates(installation):
     """같은 표준 업무는 한 정본으로 재사용한다. 재설치가 업무를 늘리지 않는다."""
     w = installation
