@@ -19,8 +19,15 @@ from core.enterprise_context.process_schema import ProcessError
 MAX_REQUEST_BYTES = 64 * 1024
 MAX_RECORD_BYTES = 256 * 1024
 HEAL_LIMIT = 3
-OPERATIONS = frozenset({"START", "RESUME", "RESUME_QUOTA", "PAUSE", "STOP", "HEAL"})
+#: ★ [B5] RELEASE·REPLAN 은 종전에 원키 없는 직접 POST 였다. 응답이 유실되면 저장·재분할이
+#:   됐는지 확인할 방법이 없었고, 특히 REPLAN 은 되돌릴 수 없어 다시 눌러 WBS 를 또 지웠다.
+#:   같은 문제를 같은 상태 기계로 닫는다. 둘 다 EXECUTIONS 다 — 확인이 필요한 명령이 남아
+#:   있는 프로젝트에서 새로 시작하지 않는다.
+OPERATIONS = frozenset({"START", "RESUME", "RESUME_QUOTA", "PAUSE", "STOP", "HEAL", "RELEASE", "REPLAN"})
 EXECUTIONS = OPERATIONS - {"PAUSE", "STOP"}
+#: task 를 쓰지 않는 명령. 서버가 프로젝트 전체를 대상으로 처리한다.
+PROJECT_SCOPED = frozenset({"RELEASE", "REPLAN"})
+PROJECT_TASK = "PROJECT"
 OUTCOMES = frozenset({"ACCEPTED", "REJECTED", "UNKNOWN"})
 INPUT_FIELDS = frozenset({"initial_idea", "master_data", "feedback", "error_log"})
 TABLE = "studio_execution_commands"
@@ -83,6 +90,10 @@ def _request(value):
             or set(content) - INPUT_FIELDS
             or any(type(text) is not str or len(text) > MAX_REQUEST_BYTES for text in content.values())):
         fail("INVALID", "명령·task와 허용된 문자열 입력을 확인하십시오.", 422)
+    #: 프로젝트 단위 명령에 task 별 입력·임의 task 를 허용하면 「어느 작업에 적용됐나」가 흐려진다.
+    #: 기록에 남는 대상이 실제 적용 범위와 달라지지 않게 고정 식별자만 받는다.
+    if operation in PROJECT_SCOPED and (content or task != PROJECT_TASK):
+        fail("INVALID", f"이 명령은 프로젝트 전체를 대상으로 하며 task_id 는 '{PROJECT_TASK}' 고정입니다.", 422)
     command = {**value, "client_request_id": request_key(value["client_request_id"])}
     return json.loads(canonical(command, limit=MAX_REQUEST_BYTES))
 

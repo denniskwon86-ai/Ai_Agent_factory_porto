@@ -218,8 +218,16 @@ async def _receipt(row, submission_id, *, expected_revision=None, expected_diges
         receipt = await asyncio.to_thread(requests.read_receipt, workspace_path(row["project_id"]),
             project_id=row["project_id"], actor_id=row["actor"], boundary=row["context_key"], submission_id=submission_id)
         return requests.verify_consumption(row, receipt, expected_revision=expected_revision, expected_digest=expected_digest)
+    if row["target"]["decision_kind"] == "GENERAL_HOTL":
+        from core.advisor_store import advisor_store
+        from core.studio_hotl_submissions import HOTLSubmissionStore, verify_consumption
+        receipt = await asyncio.to_thread(HOTLSubmissionStore(advisor_store).get, project_id=row["project_id"],
+            actor_id=row["actor"], boundary=row["context_key"], request_id=submission_id)
+        return verify_consumption(row, receipt, expected_revision=expected_revision, expected_digest=expected_digest)
     from core.decision_ledger import decision_ledger
-    if row["target"]["kind"] != "DECISION_COMMENT" or row["target"]["decision_kind"] == "GENERAL_HOTL":
+    if row["target"]["kind"] != "DECISION_COMMENT":
+        #: 명확화는 화면이 질문·선택지를 엮어 제출하므로 저장한 선택과 제출 본문을 서버가
+        #: 대조할 수 없다. 조합 규칙을 서버에 복제하지 않고 결속을 별도 설계로 남긴다.
         fail("CONSUME_UNSUPPORTED", "현재 제출 API에 입력·차수 결속 증거가 없습니다. 초안을 보존합니다.")
     event = await asyncio.to_thread(decision_ledger.get_event_strict, submission_id)
     parent = (await asyncio.to_thread(decision_ledger.get_event_strict, row["target"]["request_id"])
@@ -240,7 +248,7 @@ async def _run(project_id, p, operation, req=None, draft_id="", selector=None):
                 row = await asyncio.to_thread(store.active, **args, target=target)
                 result = dict(target=target, draft=store.public(row) if row else None,
                               consume_supported=(target["kind"] == "REVISION_REQUEST" or
-                                  target["decision_kind"] in {"HOST_CONTRACT", "CAPABILITY", "DATASET"}))
+                                  target["decision_kind"] in {"GENERAL_HOTL", "HOST_CONTRACT", "CAPABILITY", "DATASET"}))
             elif operation == "SAVE":
                 fields = req.model_dump()
                 await _current(project_id, fields["target"], studio)

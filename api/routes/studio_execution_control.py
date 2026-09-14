@@ -24,7 +24,7 @@ _dispatch = ContextVar("studio_command_dispatch", default=None)
 
 class CommandIn(StrictModel):
     client_request_id: str = Field(min_length=36, max_length=36)
-    operation: Literal["START", "RESUME", "RESUME_QUOTA", "PAUSE", "STOP", "HEAL"]
+    operation: Literal["START", "RESUME", "RESUME_QUOTA", "PAUSE", "STOP", "HEAL", "RELEASE", "REPLAN"]
     task_id: str = Field(pattern=r"^[A-Za-z0-9_-]{1,160}$")
     input: dict[str, str]
 
@@ -113,6 +113,13 @@ async def _run(project_id, command, p):
             fail("NOT_RESUMABLE", "같은 작업의 수동 중지 체크포인트를 확인하지 못했습니다. 새 기획으로 대체하지 않습니다.")
         mark_effect_started()
         return dict(status="resumed", task_id=task_id)
+    #: ★ [B5] 프로젝트 단위 명령. 기존 handler 를 그대로 부르므로 서버 동작은 바뀌지 않는다.
+    #: ⚠️ REPLAN 은 기존 WBS 를 지운다 — 되돌릴 수 없으므로 부작용 시작을 반드시 표시해
+    #:   응답 유실이 REJECTED 로 오판되지 않게 한다.
+    if operation in {"RELEASE", "REPLAN"}:
+        mark_effect_started()
+        return await (factory.create_release(project_id, p) if operation == "RELEASE"
+                      else factory.replan_wbs(project_id, p))
     return await factory.trigger_self_healing(project_id, factory.HealRequest(error_log=content["error_log"]), p)
 
 

@@ -20,6 +20,7 @@
 //   (Studio 는 화면 안 배너, 종전 통제실은 기존 `alert`).
 import { API_BASE_URL } from '../lib/api';
 import { executeStudioCommand, hasExecutionPending } from '../lib/studioExecutionApi';
+import { PROJECT_TASK } from '../lib/studioExecutionApi';
 import type { ExecutionOperation, ExecutionRequest } from '../lib/studioExecutionApi';
 
 /** 명령 결과. **성공/실패를 예외가 아니라 값으로** 돌려준다 —
@@ -288,10 +289,12 @@ export async function requestSelfHealing(projectId: string, errorLog: string, so
 export async function saveProjectRelease(projectId: string): Promise<ReleaseResult> {
   const invalid = targetError(projectId);
   if (invalid) return { ...invalid, releaseId: null };
-  const result = await post(`/api/v1/factory/${encodeURIComponent(projectId)}/release`, undefined,
+  //: ★ [B5] 원키 없는 직접 POST 였다. 응답이 유실되면 저장됐는지 확인할 방법이 없어
+  //:   다시 눌러 중복 스냅샷을 만들었다. 실행 명령의 접수 기록으로 닫는다.
+  const result = await postExecution(projectId, 'RELEASE', PROJECT_TASK, {},
     reply => reply.status === 'success' && nonempty(reply.release_id)
       ? { releaseId: reply.release_id,
-          message: nonempty(reply.note) ? reply.note : '릴리스 저장 응답을 받았습니다. 목록에서 결과를 확인하십시오.' }
+          message: nonempty(reply.note) ? reply.note : '릴리스 저장 접수를 확인했습니다. 목록에서 결과를 확인하십시오.' }
       : null);
   return { ...result, releaseId: result.releaseId || null };
 }
@@ -303,7 +306,9 @@ export async function saveProjectRelease(projectId: string): Promise<ReleaseResu
 export async function replanWbs(projectId: string): Promise<SprintResult> {
   const invalid = targetError(projectId);
   if (invalid) return invalid;
-  return post(`/api/v1/factory/${encodeURIComponent(projectId)}/wbs/replan`, undefined, taskReply('started'));
+  //: ★★ [B5] 되돌릴 수 없는 명령이다 — 기존 WBS 가 사라진다. 원키가 없던 종전에는 응답이
+  //:   유실되면 다시 눌러 **또 지웠다.** 접수 기록이 남아야 그 반복을 막을 수 있다.
+  return postExecution(projectId, 'REPLAN', PROJECT_TASK, {}, taskReply('started'));
 }
 
 export const REPLAN_CONFIRM =

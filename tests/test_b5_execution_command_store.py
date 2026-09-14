@@ -443,3 +443,44 @@ def test_command_writes_leave_all_existing_advisor_tables_unchanged(commands):
     finish(env, result={"execution_started": False})
     assert env.store.list(**env.args) == [get(env)]
     assert existing() == before
+
+
+# ── [B5] 프로젝트 단위 명령(RELEASE·REPLAN) ────────────────────────────────────
+def project_request(number=1, operation="RELEASE", **changes):
+    from core.studio_execution_commands import PROJECT_TASK
+    return {**dict(client_request_id=key(number), operation=operation, task_id=PROJECT_TASK, input={}), **changes}
+
+
+@pytest.mark.parametrize("operation", ["RELEASE", "REPLAN"])
+def test_project_scoped_commands_are_recorded_and_block_new_executions(commands, operation):
+    """원키 없는 직접 POST 였던 두 경로를 같은 상태 기계로 닫는다."""
+    from core.studio_execution_commands import EXECUTIONS, PROJECT_SCOPED, PROJECT_TASK
+    assert operation in PROJECT_SCOPED and operation in EXECUTIONS
+    value, created = commands.store.begin(**commands.args, request=project_request(1, operation))
+    assert created is True and value["status"] == "PROCESSING" and value["operation"] == operation
+    # 확인이 필요한 명령이 남아 있으면 새 실행을 막는다. 되돌릴 수 없는 재분할이 겹치지 않게 한다.
+    failure(lambda: begin(commands, 2, "START"), 409, "PROJECT_BUSY")
+    failure(lambda: commands.store.begin(**commands.args, request=project_request(3, operation)),
+            409, "PROJECT_BUSY")
+    done = finish(commands, 1, result={"execution_started": True})
+    assert done["status"] == "ACCEPTED"
+    assert get(commands, 1) == done
+
+
+@pytest.mark.parametrize("operation", ["RELEASE", "REPLAN"])
+def test_project_scoped_commands_refuse_task_level_input_or_arbitrary_task(commands, operation):
+    failure(lambda: commands.store.begin(**commands.args,
+            request=project_request(1, operation, input={"feedback": "임의 입력"})), 422, "INVALID")
+    # 임의 task 를 기록에 남기면 「어느 작업에 적용됐나」가 실제 범위와 달라진다.
+    failure(lambda: commands.store.begin(**commands.args,
+            request=project_request(1, operation, task_id="TASK-01")), 422, "INVALID")
+
+
+@pytest.mark.parametrize("operation", ["RELEASE", "REPLAN"])
+def test_project_scoped_unknown_is_not_cleared_by_another_key(commands, operation):
+    """응답 유실 뒤 새 키로 다시 눌러도 WBS 를 또 지우지 않는다."""
+    commands.store.begin(**commands.args, request=project_request(1, operation))
+    finish(commands, 1, outcome="UNKNOWN", result={"http_status": 503})
+    failure(lambda: commands.store.begin(**commands.args, request=project_request(2, operation)),
+            409, "PROJECT_BUSY")
+    assert get(commands, 1)["status"] == "UNKNOWN"

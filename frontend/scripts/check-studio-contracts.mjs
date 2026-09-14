@@ -132,12 +132,18 @@ function sealExecutionReceipt(receipt) {
   return { ...unsigned, receipt_digest: executionHash(unsigned) };
 }
 function executionReceipt(projectId, command, patch = {}) {
-  const statuses = { START: 'started', RESUME: 'resumed', RESUME_QUOTA: 'resumed', PAUSE: 'paused', STOP: 'stopped', HEAL: 'healing_started' };
+  const statuses = { START: 'started', RESUME: 'resumed', RESUME_QUOTA: 'resumed', PAUSE: 'paused', STOP: 'stopped',
+    HEAL: 'healing_started', RELEASE: 'success', REPLAN: 'started' };
   const resultTaskId = command.operation === 'HEAL'
     ? 'TASK_REV_HEAL_' + command.client_request_id.replaceAll('-', '') : command.task_id;
+  // [B5] 프로젝트 단위 명령은 요청 task_id('PROJECT')와 다른 결과를 준다.
+  const response = command.operation === 'RELEASE'
+    ? { status: 'success', release_id: 'rel-synthetic-1', note: '릴리스 저장 응답' }
+    : command.operation === 'REPLAN' ? { status: 'started', task_id: 'TASK_REPLANNED_1' }
+    : { status: statuses[command.operation], task_id: resultTaskId };
   return sealExecutionReceipt({ request_id: command.client_request_id, project_id: projectId, actor_id: identity.user,
     operation: command.operation, task_id: command.task_id, input: structuredClone(command.input), command_digest: executionHash(command),
-    status: 'ACCEPTED', result: { http_status: 200, response: { status: statuses[command.operation], task_id: resultTaskId } },
+    status: 'ACCEPTED', result: { http_status: 200, response },
     created_at: '2026-09-13T13:00:00.000Z', updated_at: '2026-09-13T13:00:00.000Z', ...patch });
 }
 function executionWorld(projectId = 'SYNTHETIC_EXECUTION') {
@@ -346,6 +352,86 @@ await test('HOTL 실제 Flow 원 차수·지문 제출 및 접수 후 재결정 
     expected_request_id: roundId, expected_questions_digest: emptyQuestionsDigest });
   assert.equal(recordOf(flow, 'HOTL').outcome, 'CONFIRMED');
 });
+// ── [B5] 일반 HOTL 저장 초안 결속 ────────────────────────────────────────────
+const hotlDraftRef = { draft_id: 'sid_b5hotl', revision: 2, digest: 'd'.repeat(64) };
+const hotlReceipt = (patch = {}) => ({ request_id: '', task_id: 'TASK_1', status: 'ACCEPTED',
+  input_draft: { ...hotlDraftRef }, created_at: '2026-09-14T00:00:00+00:00',
+  updated_at: '2026-09-14T00:00:00+00:00', receipt_digest: 'e'.repeat(64), ...patch });
+function boundResume(world, patch = {}) {
+  world.handlers['POST /hotl/resume'] = async body => response({ status: 'resumed', task_id: body.task_id,
+    submission: hotlReceipt({ request_id: body.client_request_id, ...patch }) });
+}
+await test('B5 결속 제출은 원키·저장 초안 판을 함께 싣고 접수 확인만 소비 근거로 남긴다', async () => {
+  const { flow, world } = await decisionWorld();
+  boundResume(world);
+  await flow.resume('결속 의견', undefined, { ...hotlDraftRef });
+  assert.equal(writes().length, 1);
+  const sent = bodyOf(writes()[0]);
+  assert.deepEqual(sent.input_draft, hotlDraftRef);
+  assert.match(sent.client_request_id, /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+  const record = recordOf(flow, 'HOTL');
+  assert.equal(record.outcome, 'CONFIRMED');
+  // 접수 확인된 제출만 초안을 닫을 근거가 된다. 접수는 가동·완료가 아니다.
+  assert.equal(record.eventId, sent.client_request_id);
+});
+await test('B5 초안 참조 없는 제출은 결속하지 않고 소비 근거도 남기지 않는다', async () => {
+  const { flow, world } = await decisionWorld();
+  boundResume(world);
+  await flow.resume('결속 없는 의견');
+  const sent = bodyOf(writes()[0]);
+  assert.equal('client_request_id' in sent, false); assert.equal('input_draft' in sent, false);
+  assert.equal(recordOf(flow, 'HOTL').eventId, undefined);
+});
+await test('B5 명확화는 초안 참조를 받아도 결속하지 않는다', async () => {
+  const { flow, world } = await decisionWorld({ hotl: { status: 'success', hotl_task_id: 'TASK_1', hotl_context: {
+    status: 'PENDING', pending: true, available: true, decision_kind: 'CLARIFICATION',
+    request_id: roundId, questions_digest: emptyQuestionsDigest, reason_code: 'HOTL_PENDING' } } });
+  boundResume(world);
+  await flow.resume('답변', { rawQuestions: [], displayedQuestions: [] }, { ...hotlDraftRef });
+  assert.equal(writes().length, 1);
+  const sent = bodyOf(writes()[0]);
+  assert.equal('input_draft' in sent, false); assert.equal(recordOf(flow, 'HOTL').eventId, undefined);
+});
+await test('B5 접수 기록이 없거나 요청과 다르면 소비 근거로 쓰지 않는다', async () => {
+  for (const [label, patch] of [['없음', null], ['다른 초안', { input_draft: { ...hotlDraftRef, revision: 9 } }]]) {
+    const { flow, world } = await decisionWorld();
+    world.handlers['POST /hotl/resume'] = async body => response(patch === null
+      ? { status: 'resumed', task_id: body.task_id }
+      : { status: 'resumed', task_id: body.task_id, submission: hotlReceipt({ request_id: body.client_request_id, ...patch }) });
+    await flow.resume('결속 의견', undefined, { ...hotlDraftRef });
+    assert.equal(flow.getSnapshot().error.reasonCode, 'DECISION_RESPONSE_INVALID', label);
+    // 결과를 확정하지 못했으므로 원 본문을 보존하고 닫지 않는다.
+    assert.equal(recordOf(flow, 'HOTL').outcome, 'UNKNOWN', label);
+  }
+});
+await test('B5 응답 유실 뒤 원키 조회는 재전송 없이 서버 상태만 읽는다', async () => {
+  const { flow, world } = await decisionWorld();
+  world.handlers['POST /hotl/resume'] = async () => { throw new Error('합성 응답 유실'); };
+  await flow.resume('보존할 결속 의견', undefined, { ...hotlDraftRef });
+  const sent = bodyOf(writes()[0]);
+  assert.equal(recordOf(flow, 'HOTL').outcome, 'UNKNOWN');
+  const subject = decisionFlow.hotlSubject(flow.getSnapshot().hotl);
+  world.handlers[`GET /hotl/submissions/${sent.client_request_id}`] = async () =>
+    response({ submission: hotlReceipt({ request_id: sent.client_request_id }) });
+  const receipt = await flow.recheckSubmission(subject, sent.client_request_id);
+  assert.equal(receipt.status, 'ACCEPTED');
+  assert.equal(writes().length, 1);  // 재전송 0
+  assert.equal(recordOf(flow, 'HOTL').eventId, sent.client_request_id);
+});
+await test('B5 원키 조회가 미접수 상태면 그 사실을 그대로 표시한다', async () => {
+  const { flow, world } = await decisionWorld();
+  world.handlers['POST /hotl/resume'] = async () => { throw new Error('합성 응답 유실'); };
+  await flow.resume('보존할 결속 의견', undefined, { ...hotlDraftRef });
+  const sent = bodyOf(writes()[0]);
+  const subject = decisionFlow.hotlSubject(flow.getSnapshot().hotl);
+  world.handlers[`GET /hotl/submissions/${sent.client_request_id}`] = async () =>
+    response({ submission: hotlReceipt({ request_id: sent.client_request_id, status: 'UNKNOWN' }) });
+  const receipt = await flow.recheckSubmission(subject, sent.client_request_id);
+  assert.equal(receipt.status, 'UNKNOWN');
+  assert.match(recordOf(flow, 'HOTL').message, /UNKNOWN/);
+  assert.equal(writes().length, 1);
+});
+
 await test('새 HOTL 차수는 구판 입력으로 제출하지 않고 원 입력 보존', async () => {
   const { flow, world } = await decisionWorld();
   const subject = decisionFlow.hotlSubject(flow.getSnapshot().hotl);
@@ -1872,6 +1958,53 @@ await test('실행 접수 API 독립 canonical SHA256·한글 입력·원키 POS
   assert.match(attempt.message, /접수.*실제 실행 상태는 별도로/);
   assert.equal(executionApi.hasExecutionPending(world.projectId), false);
 });
+// ── [B5] 프로젝트 단위 명령(릴리스 저장·작업 재분할) ──────────────────────────
+await test('B5 릴리스 저장은 원키 접수 기록을 남기고 고정 task_id 로 보낸다', async () => {
+  const world = executionWorld();
+  const result = await actions.saveProjectRelease(world.projectId);
+  assert.equal(result.ok, true); assert.equal(result.outcome, 'CONFIRMED');
+  assert.equal(result.releaseId, 'rel-synthetic-1');
+  const sent = bodyOf(writes()[0]);
+  assert.equal(sent.operation, 'RELEASE'); assert.equal(sent.task_id, 'PROJECT');
+  assert.deepEqual(sent.input, {});
+  assert.match(sent.client_request_id, /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+  // 접수 확인은 원키 GET 뒤에만 이뤄진다.
+  assert.ok(calls.some(call => call.options.method !== 'POST' && call.url.endsWith('/' + sent.client_request_id)));
+});
+await test('B5 작업 재분할은 원키 접수 기록을 남기고 서버가 정한 새 task 를 받는다', async () => {
+  const world = executionWorld();
+  const result = await actions.replanWbs(world.projectId);
+  assert.equal(result.ok, true); assert.equal(result.outcome, 'CONFIRMED');
+  assert.equal(result.taskId, 'TASK_REPLANNED_1');
+  const sent = bodyOf(writes()[0]);
+  assert.equal(sent.operation, 'REPLAN'); assert.equal(sent.task_id, 'PROJECT');
+});
+await test('B5 재분할 응답 유실은 UNKNOWN 으로 남고 다시 눌러도 WBS 를 또 지우지 않는다', async () => {
+  const world = executionWorld();
+  world.post = () => { throw new Error('합성 응답 유실'); };
+  const first = await actions.replanWbs(world.projectId);
+  assert.equal(first.outcome, 'UNKNOWN');
+  assert.equal(writes().length, 1);
+  // 되돌릴 수 없는 명령이므로 결과 확인 전 재실행을 막는다.
+  assert.equal((await actions.replanWbs(world.projectId)).outcome, 'REJECTED');
+  assert.equal((await actions.saveProjectRelease(world.projectId)).outcome, 'REJECTED');
+  assert.equal((await actions.startExistingTask(world.projectId, 'TASK_2')).outcome, 'REJECTED');
+  assert.equal(writes().length, 1);
+  assert.equal(executionApi.hasExecutionPending(world.projectId), true);
+});
+await test('B5 프로젝트 단위 명령의 잘못된 응답 모양은 CONFIRMED 로 세지 않는다', async () => {
+  const world = executionWorld();
+  // release_id 없는 성공 응답은 저장 증거가 아니다.
+  world.commit = (command, patch = {}) => {
+    const receipt = executionReceipt(world.projectId, command,
+      { result: { http_status: 200, response: { status: 'success' } }, ...patch });
+    world.receipts.set(command.client_request_id, receipt); return receipt;
+  };
+  const result = await actions.saveProjectRelease(world.projectId);
+  assert.notEqual(result.outcome, 'CONFIRMED');
+  assert.equal(result.releaseId, null);
+});
+
 await test('실행 접수 UNIT POST 접수만으로 잠금 해제 없음·같은 키 GET 후에만 CONFIRMED', async () => {
   const world = executionWorld();
   const entered = deferred(), finish = deferred();

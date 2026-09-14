@@ -11,6 +11,7 @@ const EVENTS = ['factory:session-changed', 'factory:acting-user-changed', 'facto
 const OPERATIONS: Record<ExecutionOperation, string> = {
   START: '작업 시작', RESUME: '같은 작업 재개', RESUME_QUOTA: '한도 회복 후 재개',
   PAUSE: '일시정지', STOP: '제작 중단', HEAL: '오류 복구',
+  RELEASE: '릴리스 저장', REPLAN: '작업 목록 다시 나누기',
 };
 function subscribeIdentity(listener: () => void) {
   EVENTS.forEach(name => window.addEventListener(name, listener));

@@ -92,6 +92,12 @@ class HOTLResumeRequest(BaseModel):
     feedback: Optional[str] = ""
     expected_request_id: str = ""
     expected_questions_digest: str = ""
+    #: ★ [B5] 저장 초안을 사용완료로 닫으려면 제출 기록이 있어야 한다. 둘 다 있을 때만
+    #:   기록하며, 없으면 기존 재개와 완전히 같게 동작한다 — 구 호출을 깨뜨리지 않는다.
+    #: ⚠️ 접수 확인은 재개 성공이지 작업 완료가 아니다. 명확화는 제출 본문이 화면 조합이라
+    #:   서버가 초안과 대조할 수 없으므로 이 결속에서 제외한다(저장소 머리말 참조).
+    client_request_id: str = ""
+    input_draft: Optional[dict] = None
 
 class RevisionRequest(BaseModel):
     feedback: str
@@ -2045,6 +2051,85 @@ async def contract_review_decision(project_id: str, req: ContractDecisionRequest
                      "note": _decision_note(applied, stamp_note)}}
 
 
+def _hotl_submission_store():
+    from core.advisor_store import advisor_store
+    from core.studio_hotl_submissions import HOTLSubmissionStore
+    return HOTLSubmissionStore(advisor_store)
+
+
+def _hotl_resumed(req, receipt=None):
+    """접수 확인을 재개 성공과 같은 칸에 담지 않는다. 작업 완료를 뜻하지도 않는다."""
+    body = {"status": "resumed", "task_id": req.task_id}
+    if receipt is not None:
+        body["submission"] = {key: receipt[key] for key in
+                              ("request_id", "task_id", "status", "input_draft", "created_at", "updated_at", "receipt_digest")}
+    return body
+
+
+async def _hotl_submission_tracker(project_id, req, p, studio):
+    """요청 ID·초안 참조가 **함께** 있을 때만 PROCESSING 을 선기록한다.
+
+    ⚠️ 한쪽만 오면 결속 의도가 불분명하다 — 조용히 무시하면 화면은 닫힌 줄 알고
+      서버는 열어 둔 채로 갈린다. 명시적으로 거절한다."""
+    from types import SimpleNamespace
+    from core.enterprise_context.process_schema import ProcessError
+    if not req.client_request_id and req.input_draft is None:
+        return None
+    if not req.client_request_id or req.input_draft is None:
+        raise HTTPException(status_code=422,
+            detail="저장 초안을 닫으려면 요청 ID와 초안 참조가 함께 필요합니다.")
+    from api.routes import studio_input_draft_control as drafts
+    from api.routes.process_configuration_control import error as _process_error
+    try:
+        boundary, draft_studio = await asyncio.to_thread(drafts._authorized, project_id, p, True)
+        target = await drafts._target(project_id, kind="DECISION_COMMENT", task_id=req.task_id,
+                                      decision_kind="GENERAL_HOTL", studio=draft_studio)
+        #: ★ 화면이 보낸 차수와 서버가 방금 읽은 차수가 같아야 한다. 다르면 답변이 옛 질문의 것이다.
+        if (target["request_id"] != req.expected_request_id
+                or target["target_digest"] != req.expected_questions_digest):
+            raise ProcessError("STUDIO_HOTL_ROUND_CONFLICT",
+                "대기 차수가 바뀌었습니다. 입력을 보존하고 현재 요청을 다시 확인하십시오.", 409)
+        storage = _hotl_submission_store()
+        identity = dict(project_id=project_id, actor_id=p.user_id, boundary=boundary)
+        submission = dict(client_request_id=req.client_request_id, task_id=req.task_id, target=target,
+                          feedback=(req.feedback or ""), input_draft=req.input_draft)
+        receipt, created = await asyncio.to_thread(storage.begin, **identity, submission=submission)
+    except ProcessError as exc:
+        _process_error(exc, p.user_id, project_id)
+    #: 이미 있는 기록은 다시 실행하지 않는다. 종결 여부와 무관하게 원키 결과를 그대로 돌려준다.
+    return SimpleNamespace(storage=storage, identity=identity, request_id=req.client_request_id,
+                           replay=None if created else receipt)
+
+
+async def _hotl_submission_close(tracker, outcome, result):
+    """종결 CAS. 기록 실패가 실제 재개 결과를 덮어쓰지 않게 한다."""
+    if tracker is None:
+        return None
+    from core.enterprise_context.process_schema import ProcessError
+    try:
+        return await asyncio.to_thread(tracker.storage.finish, **tracker.identity,
+                                       request_id=tracker.request_id, outcome=outcome, result=result)
+    except ProcessError:
+        #: ⚠️ 여기서 예외를 올리면 «재개는 됐는데 4xx» 가 되어 사람이 다시 제출한다.
+        #:   기록은 PROCESSING 으로 남고 원키 조회가 그 사실을 보여 준다.
+        return None
+
+
+@router.get("/{project_id}/hotl/submissions/{client_request_id}")
+async def get_hotl_submission(project_id: str, client_request_id: str, p: Principal = Depends(current_principal)):
+    """현재 사용자·문맥의 고정 제출 기록. 응답 유실 뒤에는 재전송이 아니라 이 조회를 쓴다."""
+    _safe_id(project_id, "project_id")
+    from api.routes import studio_input_draft_control as drafts
+    from api.routes.process_configuration_control import error as _process_error
+    from core.enterprise_context.process_schema import ProcessError
+    try:
+        boundary, _ = await asyncio.to_thread(drafts._authorized, project_id, p, False)
+        return {"submission": await asyncio.to_thread(_hotl_submission_store().get, project_id=project_id,
+                actor_id=p.user_id, boundary=boundary, request_id=client_request_id)}
+    except ProcessError as exc:
+        _process_error(exc, p.user_id, project_id)
+
+
 @router.post("/{project_id}/hotl/resume")
 async def resume_from_hotl(project_id: str, req: HOTLResumeRequest, p: Principal = Depends(current_principal)):
     assert_project_writable(p, project_id)
@@ -2074,15 +2159,31 @@ async def resume_from_hotl(project_id: str, req: HOTLResumeRequest, p: Principal
                     "주십시오. 그냥 «계속»으로는 지나갈 수 없습니다."))
     from core.enterprise_context.process_schema import ProcessError
     from api.routes.process_configuration_control import error as _process_error
+    #: ★ [B5] 저장 초안 결속. 요청 ID·초안 참조가 함께 올 때만 제출 기록을 남긴다.
+    #:   기록 없는 기존 호출은 아래 실행 경로가 지금까지와 완전히 같다.
+    tracker = await _hotl_submission_tracker(project_id, req, p, _studio)
+    if tracker and tracker.replay is not None:
+        return _hotl_resumed(req, tracker.replay)
     try:
         success = await orchestrator.resume_hotl(req.task_id, req.feedback, project_id,
             expected_request_id=req.expected_request_id,
             expected_questions_digest=req.expected_questions_digest, expected_studio_context=_studio)
     except ProcessError as exc:
+        #: ⚠️ 4xx 는 쓰기 전 거절이고 5xx 는 결과 불명이다. 둘을 섞으면 사람이 다시 제출한다.
+        await _hotl_submission_close(tracker, "REJECTED" if 400 <= exc.status_code < 500 else "UNKNOWN",
+            dict(http_status=exc.status_code, reason_code=exc.reason_code, message=str(exc)))
         _process_error(exc, p.user_id, project_id)
+    except Exception:
+        await _hotl_submission_close(tracker, "UNKNOWN", dict(http_status=503,
+            reason_code="STUDIO_HOTL_RESULT_UNKNOWN",
+            message="재개 결과를 확정하지 못했습니다. 원요청 ID로 조회하십시오."))
+        raise
     if not success:
+        await _hotl_submission_close(tracker, "REJECTED", dict(http_status=409,
+            reason_code="STUDIO_HOTL_NOT_RESUMABLE", message="재개할 수 없는 상태이거나 이미 처리 중입니다."))
         raise HTTPException(status_code=409, detail="재개할 수 없는 상태이거나 이미 처리 중입니다. 현재 요청을 확인하십시오.")
-    return {"status": "resumed", "task_id": req.task_id}
+    receipt = await _hotl_submission_close(tracker, "ACCEPTED", dict(http_status=200, resumed=True))
+    return _hotl_resumed(req, receipt)
 
 @router.post("/{project_id}/sprint/resume-quota")
 @_execution_route(quiescent=True)

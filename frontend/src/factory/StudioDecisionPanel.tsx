@@ -39,10 +39,15 @@ const choiceLabels: Record<string, string> = {
 };
 
 function DecisionDraftReceipt({ projectId, record }: { projectId: string; record: DecisionRecord }) {
-  if (!record.eventId || record.kind === 'HOTL') return null;
+  if (!record.eventId) return null;
   const drafts = studioInputMemory.projectValues<{ draft: InputDraft | null }>(projectId, 'server-input-draft')
     .map(row => row.draft).filter((draft): draft is InputDraft => !!draft && draft.target.kind === 'DECISION_COMMENT'
-      && (record.kind === 'HOST'
+      && (record.kind === 'HOTL'
+        //: ★ [B5] 일반 HOTL 만 서버 제출 기록으로 초안을 닫는다. 명확화는 대상 자체가 다르다.
+        ? draft.target.decision_kind === 'GENERAL_HOTL' && draft.target.request_id === record.body?.expected_request_id
+          && draft.target.target_digest === record.body?.expected_questions_digest
+          && draft.target.task_id === record.body?.task_id
+        : record.kind === 'HOST'
         ? draft.target.decision_kind === 'HOST_CONTRACT' && draft.target.request_id === record.hostReceipt?.request_event_id
           && draft.target.target_digest === record.hostReceipt?.contract_fingerprint
         : draft.target.request_id === record.body?.decision_request_id && draft.target.target_digest === record.body?.expected_digest
@@ -109,6 +114,8 @@ export function StudioDecisionPanel({ vm, selections, onDecisionKeyChange, onRes
     apiFactory(vm.project.id, identity), taskHint), [vm.project.id, identity, taskHint, apiFactory]);
   const state = useSyncExternalStore(flow.subscribe, flow.getSnapshot, flow.getSnapshot);
   const [confirmedKey, setConfirmedKey] = useState('');
+  //: 일반 HOTL 저장 초안. 조회·변경·미확정에서는 null 이며 그때는 결속 없이 제출한다.
+  const [hotlServerDraft, setHotlServerDraft] = useState<InputDraft | null>(null);
   const [hostConfirmedKey, setHostConfirmedKey] = useState('');
   const currentProjectId = useFactoryStore(store => store.currentProjectId);
   const rawState = useFactoryStore(store => store.state);
@@ -240,6 +247,7 @@ export function StudioDecisionPanel({ vm, selections, onDecisionKeyChange, onRes
             target_digest: hotl.questions_digest, subject_id: '' }}
           content={{ text: hotlDraft?.note || '', decision: '', ...(isClarify ? { selections } : {}) }}
           disabled={hotlLocked || !clarifyReady || (isClarify && !onRestoreSelections)}
+          onDraftChange={draft => setHotlServerDraft(draft && !isClarify ? draft : null)}
           onRestore={content => {
             if (hotlLocked || !clarifyReady || (isClarify && !onRestoreSelections)) return;
             flow.edit('HOTL', hotlSubject(hotl), 'note', content.text);
@@ -251,7 +259,10 @@ export function StudioDecisionPanel({ vm, selections, onDecisionKeyChange, onRes
         <button type="button" disabled={hotlLocked || !clarifyReady || confirmedKey !== hotlConfirmation}
           onClick={() => { void flow.resume(isClarify
             ? serializeClarifyAnswers(vm.clarify.questions, selections, hotlDraft?.note || '') : (hotlDraft?.note || '').trim(),
-            isClarify ? { rawQuestions: structuredClone(rawQuestions), displayedQuestions: structuredClone(vm.clarify.questions) } : undefined); }}>
+            isClarify ? { rawQuestions: structuredClone(rawQuestions), displayedQuestions: structuredClone(vm.clarify.questions) } : undefined,
+            //: 저장한 초안과 지금 입력이 같을 때만 결속한다. 다르면 닫지 않고 그대로 둔다.
+            !isClarify && hotlServerDraft && hotlServerDraft.content?.text.trim() === (hotlDraft?.note || '').trim()
+              ? { draft_id: hotlServerDraft.draft_id, revision: hotlServerDraft.revision, digest: hotlServerDraft.digest } : null); }}>
           {isClarify ? '현재 답변 제출하고 재개' : '검토 의견 제출하고 재개'}</button>
       </section>}
       {!hotl?.available && hotl?.status !== 'UNKNOWN' && !host?.pending && !state.capabilities?.pending

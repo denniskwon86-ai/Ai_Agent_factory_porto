@@ -2,7 +2,9 @@
 import { apiFetch } from './api';
 import { studioIdentityKey, studioInputKey, studioInputMemory } from '../factory/studioInputMemory';
 
-export type ExecutionOperation = 'START' | 'RESUME' | 'RESUME_QUOTA' | 'PAUSE' | 'STOP' | 'HEAL';
+export type ExecutionOperation = 'START' | 'RESUME' | 'RESUME_QUOTA' | 'PAUSE' | 'STOP' | 'HEAL' | 'RELEASE' | 'REPLAN';
+/** 프로젝트 전체를 대상으로 하는 명령의 고정 task_id. 서버가 이 값만 받는다. */
+export const PROJECT_TASK = 'PROJECT';
 export type ExecutionRequest = { client_request_id: string; operation: ExecutionOperation; task_id: string;
   input: { initial_idea?: string; master_data?: string; feedback?: string; error_log?: string } };
 export type ExecutionReceipt = { request_id: string; project_id: string; actor_id: string;
@@ -20,7 +22,7 @@ const cache = new Map<string, ExecutionAttempt[]>();
 const visible = new Map<string, Set<string>>();
 let lastIdentity = '';
 const object = (v: unknown): Record<string, unknown> => v && typeof v === 'object' && !Array.isArray(v) ? v as Record<string, unknown> : {};
-const operations: ExecutionOperation[] = ['START', 'RESUME', 'RESUME_QUOTA', 'PAUSE', 'STOP', 'HEAL'];
+const operations: ExecutionOperation[] = ['START', 'RESUME', 'RESUME_QUOTA', 'PAUSE', 'STOP', 'HEAL', 'RELEASE', 'REPLAN'];
 const shaPattern = /^[a-f0-9]{64}$/;
 const uuidPattern = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/;
 function canonical(value: unknown): string {
@@ -93,11 +95,20 @@ async function validate(value: unknown, projectId: string, request?: ExecutionRe
   if (row.status === 'ACCEPTED') {
     const result = row.result!;
     const reply = result.response;
-    const wanted = { START: 'started', RESUME: 'resumed', RESUME_QUOTA: 'resumed', PAUSE: 'paused', STOP: 'stopped' };
+    const wanted: Partial<Record<ExecutionOperation, string>> =
+      { START: 'started', RESUME: 'resumed', RESUME_QUOTA: 'resumed', PAUSE: 'paused', STOP: 'stopped' };
+    //: ★ [B5] 프로젝트 단위 명령은 응답 모양이 다르다. RELEASE 는 서버가 만든 release_id 를,
+    //:   REPLAN 은 서버가 새로 정한 task_id 를 준다 — 둘 다 요청의 task_id('PROJECT')와 다르다.
     const valid = row.operation === 'HEAL'
       ? (reply.status === 'healing_started' && reply.task_id === 'TASK_REV_HEAL_' + row.request_id.replaceAll('-', '') && !reply.hotl_task_id)
         || (reply.status === 'success' && typeof reply.hotl_task_id === 'string'
           && /^[A-Za-z0-9_-]{1,160}$/.test(reply.hotl_task_id) && !reply.task_id)
+      : row.operation === 'RELEASE'
+      ? reply.status === 'success' && typeof reply.release_id === 'string' && !!reply.release_id
+        && !reply.task_id && !reply.hotl_task_id
+      : row.operation === 'REPLAN'
+      ? reply.status === 'started' && typeof reply.task_id === 'string'
+        && /^[A-Za-z0-9_-]{1,160}$/.test(reply.task_id) && !reply.hotl_task_id
       : reply.status === wanted[row.operation] && reply.task_id === row.task_id && !reply.hotl_task_id;
     if (result.http_status !== 200 || !valid) throw invalid();
   }
