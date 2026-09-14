@@ -58,7 +58,7 @@
 
 ## 3. 「부분」 15 건 — 공백의 성격이 셋으로 갈린다
 
-### (가) 기능은 있는데 부정 경로가 **시험 0건** — 즉시 메울 수 있다
+### (가) 기능은 있는데 부정 경로가 **시험 0건** — 메울 수 있다
 
 **T11** 의 두 오류 경로가 대표였다. **2026-09-14 에 셋을 메웠다** — §9 참조.
 
@@ -72,7 +72,7 @@
 `PROCESS_INSTANCE_MIGRATION_REQUIRED`·`PROCESS_PACK_UPGRADE_REQUIRED`)은 위 §2 의 미착수
 기능군에 걸쳐 있어 성격이 다르다.
 
-### (나) 시험은 있는데 **fixture 가 비어 공허하게 통과**한다 — 가짜 통과
+### (나) 시험은 있는데 **fixture 가 비어 공허하게 통과**한다 — 가짜 통과 ✅ 메움
 
 - **T07**(기존 앱 보존) — fixture 의 `kit_app_contracts` 가 항상 `[]` 다. 설치 전부터 있던
   앱·릴리스 연결이 설치 후 유지되는지 **검증 대상 데이터가 없다.**
@@ -103,13 +103,13 @@
 - **T40** — 조각은 있으나 홈·생성기 **두 진입점을 한 시험에서 대조**하지 않는다.
 - **T44** — 개별 요소는 덮이나 「새 표준 도입」 문맥으로 묶이지 않는다(§2 와 같은 뿌리).
 
-## 4. 오늘 채울 수 있는 것 / 없는 것
+## 4. 채울 수 있는 것 / 없는 것 — 2026-09-14 기준
 
 | 구분 | 항목 | 비고 |
 |---|---|---|
-| **즉시 가능** | T11 두 오류 경로 시험 | 코드 존재·시험 0건. 가장 확실 |
-| **즉시 가능** | T07·T23 fixture 보강 | 가짜 통과 제거 |
-| **가능** | T25(편집 명령 순환)·T29·T39·T40 | 서버 시험 추가 |
+| ✅ **완료** | T07·T11·T23 (+U23·U26) | §9 |
+| **가능** | T25(편집 명령 순환)·T29·T39·T40 | 서버 시험 추가. 오늘 하지 않았다 |
+| **선행 조사** | 시험에 없는 오류 코드 24개 | **도달 가능한지부터** 물어야 한다(§9) |
 | **기능 선행** | T01(전수 설치)·T09(분모)·T10(노드 권한)·T21(책임자 변경) | 구현이 먼저 |
 | **미착수 범위** | T12~T16·T44·T46 | upgrade/restore 서비스가 없다 |
 | **자동 불가** | T35·T36·T34 일부 | 브라우저·현업 |
@@ -135,8 +135,10 @@
 | 자동 불가 | 13 | U04·U05·U07·U08·U10·U12·U16·U17·U18·U27·U28·U29·U30 |
 
 ★ U03·U20·U21 은 B0B 인계가 완료를 선언한 셋이다. 그 인계는 실행 명령만 적고 시험 파일을
-나열하지 않았으므로 근거 파일을 이번에 찾아 두었다 — `test_b0_certification_atomicity.py`·
-`_races.py`·`_integrity.py`·`_subject.py`·`_review_regressions.py`·`_api_contract.py`.
+나열하지 않았으므로 근거 파일을 이번에 찾아 두었다 — `tests/test_b0_certification_atomicity.py`,
+`tests/test_b0_certification_races.py`, `tests/test_b0_certification_integrity.py`,
+`tests/test_b0_certification_subject.py`, `tests/test_b0_certification_review_regressions.py`,
+`tests/test_b0_certification_api_contract.py`.
 
 ### 「부분」 4 건
 
@@ -157,25 +159,9 @@
 | 없음 | 7 | 0 | **7** |
 | 자동 불가 | 2 | 13 | **15** |
 
-★ 2026-09-14 작업으로 T11·U23·U26 의 공백을 메웠다(§9). 판정 자체는 그대로 둔다 —
-셋 다 「부분」 안의 한 칸이 채워진 것이고, T11 에는 아직 도달 불가 경로가 남아 있다.
-
-### 오늘 즉시 채울 수 있는 것 (구현 있음 · 시험 0건)
-
-1. **`STUDIO_SETUP_INCOMPLETE` 차단**(U23) — 준비 미완료 프로젝트의 실행·릴리스 거부.
-2. **`PROCESS_PACK_UPGRADE_REQUIRED`·`PROCESS_MAPPING_CONFLICT`**(T11) — 두 키트가 같은
-   표준 업무를 제공할 때의 충돌 경로.
-3. **클라이언트 차단 사유 4종**(U26) — 연결 끊김·재시도 한도·프로젝트 미선택·복구 진행 중.
-4. **가짜 통과 2건**(T07·T23) — fixture 에 앱 계약과 바인딩을 넣어 공허한 통과를 없앤다.
-
-### 기능이 먼저인 것
-
-T01(전수 설치)·T09(n/N 분모)·T10(노드별 편집 권한)·T21(책임자 변경)·U15(산출물 경로)·
-U14(전환 flag), 그리고 **T12~T16·T44·T46 의 upgrade/restore 서비스**.
-
-### 자동 시험으로 덮을 수 없는 것
-
-T35·T36 과 U 의 13 건. 실제 브라우저와 현업 참가자가 필요하다.
+★ 2026-09-14 작업으로 **T07·T11·T23·U23·U26 다섯 곳**의 공백을 메웠다(§9). **판정 자체는
+그대로 둔다** — 다섯 다 「부분」 안의 한 칸이 채워진 것이고, T11 에는 아직 도달 불가 경로가
+남아 있다. 남은 일은 §10 에 모았다.
 
 ## 8. 참고 — 시험에서 한 번도 검사되지 않는 오류 코드
 
@@ -188,6 +174,24 @@ T35·T36 과 U 의 13 건. 실제 브라우저와 현업 참가자가 필요하�
 다만 **어느 쪽인지 아무도 답할 수 없는 상태**이므로 목록으로 남긴다.
 
 ## 9. 2026-09-14 에 메운 것
+
+### 추가한 시험 — 명세 번호로 찾을 수 있게
+
+| 명세 | 파일 | 함수 / 이름 |
+|---|---|---|
+| U23 실행 | `tests/test_b3_execution_context.py` | `test_incomplete_setup_blocks_every_action_even_with_intact_files` |
+| U23 릴리스 | `tests/test_b3_runtime_data.py` | `test_incomplete_project_setup_blocks_release_even_with_approved_contract` |
+| T11 재사용 | `tests/test_b2_installation.py` | `test_same_standard_task_reuses_one_canonical_node_and_never_duplicates` |
+| T11 충돌 3갈래 | `tests/test_b2_installation.py` | `test_standard_task_mapping_conflict_is_explicit_and_never_merges_by_name` |
+| T23 | `tests/test_b2_installation.py` | `test_old_writer_on_installed_pack_keeps_l2_and_every_binding` |
+| T07 | `tests/test_b3_kit_contract_v2.py` | `test_next_kit_installation_preserves_approved_app_contract_and_existing_nodes` |
+| U26 세 사유 | `frontend/scripts/check-studio-contracts.mjs` | 「실행 접수 UNIT 복구 로컬 차단 세 사유는 …」 |
+| U26 대기 중 재요청 | 〃 | 「실행 접수 UNIT 복구 응답 대기 중 재요청은 …」 |
+
+★ **이 표를 유지하는 것이 이 문서의 핵심**이다. 시험이 늘 때 여기에 한 줄을 더하면
+다음 사람이 「그 명세를 무엇이 덮는가」에 답할 수 있다. 그러지 않으면 오늘 조사한 것이
+다시 없어진다.
+
 
 ### U23 — 준비 미완료 프로젝트의 실행·릴리스 차단
 
