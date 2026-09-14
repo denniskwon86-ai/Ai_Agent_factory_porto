@@ -268,7 +268,14 @@ export function StudioDecisionPanel({ vm, selections, onDecisionKeyChange, onRes
           }} />}
         <label><input type="checkbox" checked={confirmedKey === hotlConfirmation} disabled={hotlLocked || !clarifyReady}
           onChange={event => setConfirmedKey(event.target.checked ? hotlConfirmation : '')} />현재 차수의 {isClarify ? '질문과 답변' : '산출물'} 및 의견을 확인했습니다.</label>
+        {/* ★ [B5 접근성] 비활성 이유를 **버튼 옆에서** 읽을 수 있게 한다. 「왜 눌리지 않는가」를
+            화면 어딘가에서 추론하게 두면 키보드·보조기술 사용자가 막힌 지점을 알 수 없다. */}
+        {(hotlLocked || !clarifyReady || confirmedKey !== hotlConfirmation) && <p id="hotl-submit-why" role="status">
+          {!clarifyReady ? '현재 질문과 서버 지문을 확인하는 중입니다. 확인되면 제출할 수 있습니다.'
+            : hotlLocked ? '이미 제출했거나 현재 차수를 다시 조회해야 합니다. 같은 결정을 다시 보내지 않습니다.'
+            : '위 확인란을 선택하면 제출할 수 있습니다.'}</p>}
         <button type="button" disabled={hotlLocked || !clarifyReady || confirmedKey !== hotlConfirmation}
+          aria-describedby={(hotlLocked || !clarifyReady || confirmedKey !== hotlConfirmation) ? 'hotl-submit-why' : undefined}
           onClick={() => { void flow.resume(isClarify
             ? serializeClarifyAnswers(vm.clarify.questions, selections, hotlDraft?.note || '') : (hotlDraft?.note || '').trim(),
             isClarify ? { rawQuestions: structuredClone(rawQuestions), displayedQuestions: structuredClone(vm.clarify.questions) } : undefined,
@@ -296,6 +303,16 @@ export function StudioDecisionPanel({ vm, selections, onDecisionKeyChange, onRes
           <small>원래 사건·요청·지문으로만 멱등 복구합니다. 자동 재전송·새 승인·실행 시작은 하지 않습니다.</small>
         </>}
         {record.outcome === 'UNKNOWN' && <strong>결과 미확정 · 재전송 금지 · 조회로 상태 확인</strong>}
+        {/* ★★ [B5] 결속 제출의 원키 확인. 재전송이 아니라 서버 기록만 다시 읽는다.
+            ⚠️ `eventId` 가 아니라 **보존된 요청 본문의 원키**를 쓴다 — `eventId` 는 접수를
+            확인했을 때만 채워지는데, 이 버튼이 정작 필요한 때는 응답이 유실된 UNKNOWN 이다. */}
+        {record.kind === 'HOTL' && typeof record.body?.client_request_id === 'string' && <>
+          <button type="button" disabled={state.busy} aria-describedby={`${record.key}-recheck-why`}
+            onClick={() => { void flow.recheckSubmission(record.subject, String(record.body!.client_request_id)); }}>
+            이 제출의 접수 상태 확인 · GET 조회만</button>
+          <small id={`${record.key}-recheck-why`}>같은 요청 ID 로 서버 기록만 다시 읽습니다.
+            새로 제출하지 않으며 초안을 닫지도 않습니다.</small>
+        </>}
         {serverDrafts && (record.kind === 'HOST'
           ? !host?.pending || record.subject !== hostRound
           : !items.some(row => capabilitySubject(row) === record.subject && capabilityActionable(row)))

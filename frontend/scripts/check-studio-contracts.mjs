@@ -353,6 +353,18 @@ await test('HOTL 실제 Flow 원 차수·지문 제출 및 접수 후 재결정 
     expected_request_id: roundId, expected_questions_digest: emptyQuestionsDigest });
   assert.equal(recordOf(flow, 'HOTL').outcome, 'CONFIRMED');
 });
+await test('B5 STATIC 원키 재조회가 화면에 실제로 배선돼 있다', () => {
+  // ⚠️ flow 에 메서드만 만들고 화면에 붙이지 않으면 UNIT 은 초록인데 사용자는 쓸 수 없다.
+  //    이 저장소가 반복해 겪은 「생산자→소비자 배선 누락」이라 소스로 잠근다(실제 클릭 아님).
+  const panel = fs.readFileSync(new URL('../src/factory/StudioDecisionPanel.tsx', import.meta.url), 'utf8');
+  assert.match(panel, /flow\.recheckSubmission\(/);
+  // 접수를 확인한 뒤에만 채워지는 eventId 로는 응답 유실 상황을 못 연다. 보존된 원키를 쓴다.
+  assert.match(panel, /record\.body\?\.client_request_id/);
+  assert.doesNotMatch(panel, /recheckSubmission\([^)]*record\.eventId/);
+  // 누를 수 없는 이유를 읽어 줄 설명이 붙어 있어야 한다.
+  assert.match(panel, /aria-describedby=\{`\$\{record\.key\}-recheck-why`\}/);
+});
+
 // ── [B5] 명확화 답변 본문 형식 잠금 ──────────────────────────────────────────
 // ⚠️ 조합 규칙이 화면과 서버(`core/clarify_answers.py`) 두 곳에 있다. 아래 예제는 서버
 //    시험(`tests/test_b5_clarify_answers.py`)의 GOLDEN 과 **같은 값**이어야 한다.
