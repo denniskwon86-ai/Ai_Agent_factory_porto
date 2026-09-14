@@ -1,5 +1,48 @@
 # AI Factory Studio 팀 현황판
 
+## Codex → Claude Code 재개 인계 — 2026-09-15 KST
+
+- 작성/이유: Codex. 사용자 상세 인수인계·커밋·푸시 요청. 권고10/G3, 전체52.5%·로컬64.3%유지. 이후 단독 구현 담당은 Claude Code로 인계하되 동시수정 금지·전역 연결 Gate는 유지한다.
+- 근거/상태: 코드215253f22, 최종집중312PASS/70.97초·프런트204PASS·buildPASS. 소스/보호자산불변. START_HERE에 현재상태/과거기록구분/명령/기대건수/중단조건/데이터09-13시점한계기록. 출력원문은ignored,검증요약은Git전달.
+- 참조: docs/handoff/CLAUDE_CODE_START_HERE_2026-09-15.md. 병렬통합계획Git미추적누락을동일본문참조사본으로보완했다. 권위승격·HOLD해제아님.
+- 교차검토: Codex 요청 → Hilbert 독립 읽기 전용 검토(2026-09-15 KST). START_HERE 전문·JUnit312건·빠른46건·격리기록·참조사본 해시를 대조했고, 문서 커밋을 막는 P1/P2나 명백한 상태 충돌은 발견하지 못했다. Gate 유지·App 미연결·브라우저 NOT_RUN·데이터 시점 한계 확인 후 문서 커밋 진행. 새 기능 수용 판정은 아니다.
+- 다음/담당/조건: Claude Code는 빠른기준선46건/프런트26·25건 후 project진입연결의Gate증거와단독담당확인,20~30분범위계획→구현→판정. App/브라우저전체완료가산금지. 근거없으면필요조건만정확히보고.
+- 영향/보존: 기존로그·운영DB·키·암호문무변경,사용자로그커밋제외. 코드/문서별도커밋,force없는지정브랜치push와원격SHA검증으로전달여부확인.
+
+## Codex B6 판본 READ 초기화 제거 마감 — 2026-09-15 00:33 KST
+
+- 작성/이유: Codex. 사용자 다음20~30분 묶음 승인,00:18:42 시작. 권고10/G3 프로젝트 진입의 잔여 초기화 부수효과 정리. 전체52.5%·로컬64.3% 유지.
+- 결정/변경: 기본 프로젝트 READ는 RevisionStore read_only=True로 연결. mode=ro·무초기화·DB유실/부분schema503·쓰기transaction차단. 기존쓰기기본모드 및 현재PDP/무결성은 유지한다.
+- 근거: 최종251PASS/43.30초, output/usage-holds-iucppa6_/isolation.json. 최초193/8실패와 WAL/SHM 경계정정은 인계에 보존. 프런트26PASS. 보호자산/소스불변·금지경로0, 실제브라우저미실행.
+- 교차검토: main제품수정→Hilbert(필수열누락P2지적, 수정 후정적종결); Hooke신규18시험→main대조·실행. 보조파일정확경로분리·두커밋WAL조회반영. 추가확정P1/P2없음.
+- 잔여/다음/담당: Codex가 전역연결Gate 확인 후 project 첫화면연결을20~30분범위로계획한다. managed DP/인증/원장 초기화 및 ECM RW연결은 이번수정밖, 전체무쓰기나B6완료주장금지. 상세인계 docs/handoff/L2_STUDIO_B6_PROJECT_ENTRY_2026-09-15.md.
+- 영향/보존: App/main·운영DB·키·암호문·원격무변경, 기존사용자로그SHA7720cc45…f510보존, 기존B5/C0변경보존. commit/push안함.
+
+## Codex B6 프로젝트 진입 확인 — 20~30분 분할, 2026-09-15 KST
+
+- 작성/이유: Codex. 사용자가 큰 B6 묶음을20~30분으로 제한했다. 23:54:32 KST 시작. 권고10/G3, 전체21/40=52.5%·로컬18/28 유지.
+- 작업/담당: Codex는 project entry API reader·flow·React Gate·검사·인계, Hilbert는 factory GET·서버 집중검사, Hooke는 프런트 읽기 전용 독립 검토. App/main과 나머지 target은 범위 밖.
+- 근거/상태: 프런트26+25+153PASS·tsc/lint/build PASS. 서버 최초12PASS/2FAIL 뒤 선택문맥 캐시 경계를 새 GET 전·후 fresh 검사로 수정, 최초 회귀 보존. 최종 독립22PASS/10.09초(output/usage-holds-ckd38t6i). 알려진 schema 초기화 DDL은 잔여. 00:16:36 KST 검증 마감, 이후 문서·보존 확인만 수행. 실제 브라우저 미실행, 전역 미연결.
+- 다음/조건: 이번 잔여를 먼저 확인하고 project 전역 연결을20~30분 단위로 다시 산정한다. 단독 App 담당 Codex가 원본 통합 Gate 및 사용자 전환 이벤트 계약을 확인한다. 화면·SSE·히스토리 수용 전 B6 완료 가산 금지.
+- 영향/보존: 업무 생성·실행 POST 없음. shared reader schema 초기화와 업무 데이터 쓰기는 구분한다. 기존 사용자 로그SHA7720cc45…f510 및 B5 dirty 보존. 원격/운영DB/키/암호문 미변경, 미커밋·미푸시.
+
+## Codex B5 결함 수정 검증·B6-C0 첫 구현 — 2026-09-14 22:48 KST
+
+- 작성자/왜 지금: Codex. 사용자 승인 결함 수정과 다음 작업 진행. 권고10/G3, 전체21/40=52.5%·로컬18/28 유지.
+- 완료/근거: 서버 권한·접수·초안·취소·구경로 잠금 및 프런트 결정 배선 수정. 실제 HTTP/PDP/원장/합성 파일 중심432PASS/0FAIL, `output/usage-holds-bza0vdwu/isolation.json`. 프런트153·C0문법25·설치105·키트15render+11sourcePASS, 최종buildPASS. 첫59PASS/2FAIL 기록과 수정 사유는 새 인계에 보존.
+- 결정/상태: 이번 B5 결함 묶음 검증 완료, B5 전체 화면 수용 미완료. B6-C0 순수 URL parser/serializer 구현·교차검토 완료, App에 미연결. 원본 통합계획은 확인했으나 전역 Gate 승격은 아님.
+- 다음/담당/조건: Codex 단독 App 소유. target별 서버 귀속 확인·단일 진입 연결1차90~150분 예상. 전역 연결 전 통합 Gate 증거 확인, 실제 브라우저 도구 복구 후 effect·히스토리·회사/SSE 수용 필수. 현재 computer-use Windows helper/kernel 오류로 NOT_RUN.
+- 영향/보존: 소스·보호자산 지문 불변, 금지쓰기0. 사용자 로그SHA7720cc45…f510 보존, App/main/운영DB/키/암호문 무변경, commit/push 안 함. 최종 정본은 `docs/handoff/L2_STUDIO_B5_DEFECT_REPAIR_2026-09-14.md`와 PROGRESS.
+
+## Codex B5 결함 정리 착수 — 2026-09-14 KST (착수 시각 미기록)
+
+- 작성자/왜 지금: Codex. 사용자 pull 점검 후 발견 결함의 수정 및 다음 단계 진행 명시 승인. 권고10/G3이며 첫 수직 폐루프의 실제 입력·제출·결과 확인에 직접 필요하다.
+- 근거: 원격 `dd0573383`까지 fast-forward, 서버 집중135PASS/1FAIL·프런트141PASS·설치105PASS·빌드PASS. Hilbert 서버7건, Hooke 프런트5건 교차검토 및 메인 재확인. 단위/SSR 통과가 실제 연결 완료를 증명하지 못했고 명확화 bool 인수 오류는 읽기 전용 최소 재현했다.
+- 결정/상태: Claude의 09-14 「B5 저장 출구 모두 닫힘」은 정정 대상이다. 전체21/40=52.5%, 로컬18/28≈64.3% 유지. B5 결함 수정·집중 검증 후 B6 조건 판정. 운영 데이터/키/기존 로그/원격 변경 금지.
+- 담당/파일: Codex는 `factory_control.py` HOTL·구 release/replan 경계와 `test_b5_hotl_submission_api.py`, 기존 B3 실패 시험. Hilbert는 `studio_execution_control.py` 명령별 fresh 권한과 실행 시험. Hooke는 결정패널/초안/RunControls/decision API·flow·프런트 검사. 각자 다른 파일만 수정하며 메인이 통합 검토한다.
+- 검증/다음: 저장→HTTP 제출→GET→소비, 실제 권한·응답 유실·취소 회수·원본문 충돌을 집중 검사. 공통 strict-writes 실행 중 소스 편집을 멈춘다. 최초 결함 묶음90~150분, 실제 화면30~60분 추정이며 결과에 따라 재산정한다.
+- 영향/주의: 이 PC에는 통합계획 원본이 실제 존재한다. B6 전역 연결 전 원본 전문·게이트를 재확인하고 App.tsx는 Codex 단독 소유. 이번 패치 중 Windows helper 오류는 동일 apply_patch 실행기의 직접 호출로 우회했다. 기능 완료/시험 결과는 다음 증거가 나온 뒤 별도 기록한다.
+
 ## Claude Code 2026-09-14 오후 — 검증 명세 76건 대조·공백 5건 메움
 
 - 작성자/왜지금: Claude Code. 오전 마감 뒤 사용자가 「오늘 진행 가능한 미비사항」을 물어 조사로 방향을 틀었다. 하루 인계 정본 `docs/handoff/CLAUDE_TO_CODEX_2026-09-14.md` §10~§15, 대조표 `docs/test_plan/SPEC_COVERAGE_MAP_2026-09-14.md`.

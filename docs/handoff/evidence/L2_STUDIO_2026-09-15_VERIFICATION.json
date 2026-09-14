@@ -1,0 +1,60 @@
+{
+  "schema_version": 1,
+  "recorded_date_kst": "2026-09-15",
+  "code_commit": "215253f22dd7be78555e83f60952f99aefe9e12e",
+  "scope": "B5 defect fixes and B6 internal entry/read-only modules; not whole-repository or browser acceptance",
+  "backend": {
+    "passed": 312,
+    "failed": 0,
+    "collected": 312,
+    "executed": 312,
+    "pytest_seconds": 70.97,
+    "wrapper_seconds": 77.13304720004089,
+    "wrapper_exit_code": 0,
+    "sources_unchanged": true,
+    "protected_assets_unchanged": true,
+    "blocked_file_writes": 0,
+    "blocked_sqlite_paths": 0,
+    "repository_conftest_loaded": false,
+    "targets": [
+      "tests/test_b6_revision_reads.py",
+      "tests/test_b6_project_entry.py",
+      "tests/test_b3_advisor_revisions.py",
+      "tests/test_b3_execution_context.py",
+      "tests/test_b3_studio_drafts.py",
+      "tests/test_b5_hotl_submission_api.py",
+      "tests/test_b5_project_commands.py",
+      "tests/test_b5_hotl_submissions.py"
+    ],
+    "local_raw_report": "output/usage-holds-3fczpwg6/isolation.json"
+  },
+  "frontend": {
+    "project_entry": 26,
+    "studio_location": 25,
+    "studio_contracts": 153,
+    "failed": 0,
+    "build": "PASS",
+    "browser": "NOT_RUN",
+    "network": "MOCK_ONLY",
+    "local_raw_report": "output/studio-contracts-08dba497-230f-41c7-a076-3bc383964119/report.json"
+  },
+  "progress": {
+    "overall_completed": 21,
+    "overall_total": 40,
+    "local_completed": 18,
+    "local_total": 28
+  },
+  "limitations": [
+    "Portable summary of observed local runs, not independently signed evidence",
+    "Ignored output reports are not included; receiving session must rerun commands",
+    "App integration and actual browser acceptance not complete",
+    "RevisionStore READ DDL/DML removal is not all-store or physical-file no-write",
+    "Managed READ fixture has no certified data or standard pack"
+  ],
+  "integration_plan_reference": {
+    "path": "docs/handoff/references/PARALLEL_INTEGRATION_PLAN_2026-08-15_SOURCE_COPY.md",
+    "source_sha256_on_author_machine": "83199cf57721ec94c8ed3b704238eaa2a77ad7df5a9e147a5874af38bafd86c8",
+    "copy_sha256_on_author_machine": "83199cf57721ec94c8ed3b704238eaa2a77ad7df5a9e147a5874af38bafd86c8",
+    "normalized_text_equal": true
+  }
+}
