@@ -491,6 +491,26 @@ def test_cohort_pin_failure_prevents_publishing(kit, monkeypatch):
     error(lambda: build_app(kit, row), 503, "PROCESS_RELEASE_COHORT_UNAVAILABLE")
 
 
+def test_next_kit_installation_preserves_approved_app_contract_and_existing_nodes(kit):
+    """기존 회사 구성 위 설치. 이미 승인된 앱 계약과 기존 업무·바인딩을 건드리지 않는다."""
+    from tests.test_b2_installation import _start, _resume, _tables
+    w = kit
+    approve(w, draft(w))
+    # 이 셋이 비어 있으면 「기존 구성 보존」은 검사할 대상이 없는 공허한 통과가 된다.
+    apps = _tables(w, "dp")["kit_app_contracts"]
+    before = _read(w)["payload"]
+    assert apps and before["bindings"] and before["nodes"]
+    planned = _plan(w, business_kit_ids=["BK-01"], instance_id=w["instance_id"],
+                    reason="기존 구성 위 다음 업무키트 설치")
+    _apply(w, _resume(w, _start(w, planned, key="install-on-existing")))
+    after = _read(w)["payload"]
+    assert _tables(w, "dp")["kit_app_contracts"] == apps
+    # 기존 노드·바인딩은 그대로 남고 새 표준만 더해진다. 이름이 같다고 합쳐지지 않는다.
+    assert all(node in after["nodes"] for node in before["nodes"])
+    assert all(binding in after["bindings"] for binding in before["bindings"])
+    assert len(after["nodes"]) > len(before["nodes"])
+
+
 def test_legacy_draft_and_approval_cannot_bypass_b2_context(kit):
     error(lambda: kc.draft(kit["store"], blueprint={"app_id": "APP-03", "datasets": ["INV-01"]},
         instance_id=kit["instance_id"], actor_id=org.MEMBER_A, app_class="departmental", **kit["context"]),
