@@ -2316,6 +2316,57 @@ await test('실행 접수 UNIT store 지속 UNKNOWN은 self-heal DB/HTTP 진입 
     assert.deepEqual(factory.useFactoryStore.getState().lastSprintFailure, failure); assert.equal(writes().length, 1);
   } finally { factory.useFactoryStore.setState(saved); }
 });
+await test('실행 접수 UNIT 복구 로컬 차단 세 사유는 서버 전송 없이 사유별 다음 행동을 남긴다', async () => {
+  const saved = factory.useFactoryStore.getState(), messages = new Set();
+  const failure = { taskId: 'TASK_FAILED', error: '합성 원 실패' };
+  try {
+    for (const [reason, patch] of [
+      ['PROJECT_REQUIRED', { currentProjectId: null, isConnected: true, healingRetryCount: 0 }],
+      ['CONNECTION_REQUIRED', { currentProjectId: 'SYNTHETIC_EXECUTION', isConnected: false, healingRetryCount: 0 }],
+      ['LOCAL_RETRY_LIMIT', { currentProjectId: 'SYNTHETIC_EXECUTION', isConnected: true, healingRetryCount: 3 }],
+    ]) {
+      executionWorld();
+      factory.useFactoryStore.setState({ ...patch, lastSprintFailure: failure });
+      const blocked = await factory.useFactoryStore.getState().triggerSelfHealing('합성 복구');
+      assert.equal(blocked.outcome, 'LOCAL_BLOCKED'); assert.equal(blocked.reasonCode, reason);
+      // 로컬 차단은 서버로 나가지 않고 관찰 대상(원 실패)과 요청 횟수를 그대로 둔다.
+      assert.equal(writes().length, 0);
+      assert.equal(factory.useFactoryStore.getState().healingRetryCount, patch.healingRetryCount);
+      assert.deepEqual(factory.useFactoryStore.getState().lastSprintFailure, failure);
+      assert.ok(blocked.message && !messages.has(blocked.message), reason + ' 의 다음 행동 안내가 없거나 겹친다');
+      messages.add(blocked.message);
+    }
+  } finally { factory.useFactoryStore.setState(saved); }
+});
+await test('실행 접수 UNIT 복구 응답 대기 중 재요청은 중복 전송도 횟수 추가도 없이 차단', async () => {
+  const world = executionWorld(), saved = factory.useFactoryStore.getState(), gate = deferred();
+  const failure = { taskId: 'TASK_FAILED', error: '합성 원 실패' }, base = reply, refreshed = [];
+  world.post = async command => { await gate.promise; return response({ request: world.commit(command) }); };
+  // 접수 뒤 store 가 도는 상태 재조회는 이 검사의 대상이 아니다. 부른 사실만 남기고 통과시킨다.
+  reply = async (url, options) => {
+    const path = new URL(url, api.API_BASE_URL).pathname;
+    if (path.endsWith('/state/latest')) { refreshed.push('state'); return response({}); }
+    if (path.endsWith('/hotl/check')) { refreshed.push('hotl'); return response({ hotl_required: false }); }
+    return base(url, options);
+  };
+  try {
+    factory.useFactoryStore.setState({ currentProjectId: world.projectId, isConnected: true,
+      healingRetryCount: 0, lastSprintFailure: failure });
+    const inFlight = factory.useFactoryStore.getState().triggerSelfHealing('합성 복구');
+    const blocked = await factory.useFactoryStore.getState().triggerSelfHealing('합성 복구 재요청');
+    assert.equal(blocked.outcome, 'LOCAL_BLOCKED'); assert.equal(blocked.reasonCode, 'HEAL_IN_FLIGHT');
+    assert.equal(writes().length, 1);
+    // 보내지 않은 요청은 로컬 횟수도 쓰지 않는다.
+    assert.equal(factory.useFactoryStore.getState().healingRetryCount, 1);
+    gate.resolve();
+    await bounded(inFlight);
+    // 차단된 재요청은 응답이 온 뒤에도 되살아나지 않는다. 원 실패 근거도 그대로다.
+    assert.equal(writes().length, 1);
+    assert.deepEqual(factory.useFactoryStore.getState().lastSprintFailure, failure);
+    // 접수한 한 건은 새 관찰 대상을 읽는다. 차단된 쪽이 이 재조회를 두 번 만들지 않는다.
+    assert.deepEqual([...new Set(refreshed)].sort(), ['hotl', 'state']);
+  } finally { reply = base; factory.useFactoryStore.setState(saved); }
+});
 await test('실행 접수 UNIT store CONFIRMED 후 읽기만 재조회·active/HOTL/실패 자동 초기화 없음', async () => {
   const world = executionWorld();
   const saved = factory.useFactoryStore.getState(), reads = [];
