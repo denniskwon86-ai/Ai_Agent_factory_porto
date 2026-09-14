@@ -165,20 +165,31 @@ def test_new_head_display_change_does_not_rewrite_fixed_project(project):
     assert check(env)["process_context"] == env.approved["process_ref"]
 
 
-def test_factory_start_ignores_client_cohort_and_context(monkeypatch, isolated_stores):
+def test_factory_start_ignores_client_cohort_and_context(monkeypatch, isolated_stores, enforced_org):
+    from api.deps import Principal
     from api.routes import factory_control as factory
-    from core import studio_project_context
-    from core.studio_project_files import STUDIO_FIELDS
+    from core import studio_project_context, advisor_store
+    from core.org_directory import org_directory
+    from core.paths import workspace_path
+    from core.studio_project_files import STUDIO_FIELDS, write_json
+    from tests import org_seed as org
 
-    monkeypatch.setattr(factory, "assert_project_writable", lambda *_: None)
+    # 실행 경계는 실제 Principal/PDP/격리 조직을 통과한다. 단순 namespace로 권한 경계를 우회하지 않는다.
+    root = Path(workspace_path("legacy-unit"))
+    root.mkdir(parents=True)
+    write_json(root / "project_meta.json", dict(runtime_document_version="1.0", tenant_id="tenant_default",
+        enterprise_scope_id=org.NODES[org.DEPT_A], entity_mode="REAL", owner_dept_id=org.DEPT_A,
+        owner_user_id="", visibility="dept"))
+    monkeypatch.setattr(advisor_store, "advisor_store", isolated_stores.advisor)
     monkeypatch.setattr(studio_project_context, "for_principal", lambda *_: None)
+    principal = Principal(org.MEMBER_A, org_directory.resolve_scope(org.MEMBER_A, fresh=True), org.NODES[org.DEPT_A])
     def stop(_):
         raise RuntimeError("STOP_AFTER_SERVER_INJECTION")
     monkeypatch.setattr(factory, "_read_project_template", stop)
     payload = {k: "FORGED" for k in STUDIO_FIELDS}
     req = factory.SprintStartRequest(task_id="PLANNING_1", project_state_payload=payload)
     with pytest.raises(RuntimeError, match="STOP_AFTER_SERVER_INJECTION"):
-        asyncio.run(factory.start_sprint("legacy-unit", req, SimpleNamespace(user_id="member@test.invalid")))
+        asyncio.run(factory.start_sprint("legacy-unit", req, principal))
     assert req.project_state_payload["runtime_document_version"] == "1.0"
     assert req.project_state_payload["process_context"] == {}
     assert req.project_state_payload["bootstrap_operation_id"] == ""

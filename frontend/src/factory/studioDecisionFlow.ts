@@ -1,17 +1,19 @@
 // 읽기 확인과 결정 제출을 분리한다. 미확정 쓰기는 메모리에 잠그고 자동 재전송하지 않는다.
 import type { ContractDecisionResult, ContractReviewPending, ContractReconcileInput } from '../lib/contractReviewApi';
-import type { CapabilityDecision, CapabilityPending, HotlDraftRef, HotlRound, HotlSubmissionReceipt, StudioDecisionApi } from './studioDecisionApi';
-import { decisionError, isDecisionDigest, StudioDecisionError, verifyHotlQuestions } from './studioDecisionApi';
+import type { CapabilityDecision, CapabilityPending, HotlDraftRef, HotlInput, HotlRound, HotlSubmissionReceipt, StudioDecisionApi } from './studioDecisionApi';
+import { canonicalQuestionJson, decisionError, isDecisionDigest, StudioDecisionError, verifyHotlQuestions } from './studioDecisionApi';
 import type { HotlQuestionVerification } from './studioDecisionApi';
+import type { InputDraft, InputDraftContent } from '../lib/studioInputDraftApi';
 import { studioIdentityKey, studioInputKey, studioInputMemory } from './studioInputMemory';
 
 export type DecisionRecord = {
   key: string; kind: 'HOTL' | 'HOST' | 'CAPABILITY'; subject: string;
   note: string; choice: string;
-  outcome: 'EDITING' | 'UNKNOWN' | 'RECORDED' | 'CONFIRMED';
+  outcome: 'EDITING' | 'UNKNOWN' | 'RECORDED' | 'CONFIRMED' | 'REJECTED';
   body?: Record<string, unknown>; eventId?: string; message?: string;
   hostReceipt?: ContractDecisionResult; reconcileAttempted?: boolean;
   reconcileBody?: ContractReconcileInput;
+  hotlReceipt?: HotlSubmissionReceipt;
 };
 export type StudioDecisionState = {
   loaded: boolean; busy: boolean; error: StudioDecisionError | null;
@@ -20,6 +22,27 @@ export type StudioDecisionState = {
   capabilityError: StudioDecisionError | null;
 };
 export const hotlSubject = (row: HotlRound) => JSON.stringify([row.taskId, row.request_id, row.questions_digest]);
+/** 현재 화면의 원대상·본문과 같은 저장 초안만 결속한다. 이전 차수의 늦은 콜백은 근거가 아니다. */
+export function matchingHotlDraft(projectId: string, round: HotlRound, draft: InputDraft | null, content: InputDraftContent): HotlDraftRef | null {
+  if (!draft || !round.available || draft.project_id !== projectId || draft.status !== 'DRAFT' || !draft.restorable
+      || !draft.content || !draft.draft_id || !Number.isInteger(draft.revision) || draft.revision < 1 || !isDecisionDigest(draft.digest)) return null;
+  const clarify = round.decision_kind === 'CLARIFICATION';
+  const target = { kind: clarify ? 'CLARIFICATION' : 'DECISION_COMMENT', decision_kind: clarify ? '' : 'GENERAL_HOTL',
+    task_id: round.taskId, request_id: round.request_id, target_digest: round.questions_digest, subject_id: '' };
+  const normalize = (value: InputDraftContent) => ({ text: value.text, decision: value.decision, selections: value.selections || {} });
+  if (canonicalQuestionJson(draft.target) !== canonicalQuestionJson(target)
+      || canonicalQuestionJson(normalize(draft.content)) !== canonicalQuestionJson(normalize(content))) return null;
+  return { draft_id: draft.draft_id, revision: draft.revision, digest: draft.digest };
+}
+function submissionSummary(receipt?: HotlSubmissionReceipt): Partial<DecisionRecord> {
+  if (!receipt) return { outcome: 'CONFIRMED', message: '재개 요청이 접수됐습니다. 실제 실행 상태는 별도로 확인하세요.' };
+  const accepted = receipt.status === 'ACCEPTED', rejected = receipt.status === 'REJECTED';
+  return { outcome: accepted ? 'CONFIRMED' : rejected ? 'REJECTED' : 'UNKNOWN',
+    eventId: accepted ? receipt.request_id : undefined, hotlReceipt: receipt,
+    message: accepted ? '원래 요청의 저장된 접수를 확인했습니다. 실제 실행 상태는 별도로 확인하세요.'
+      : rejected ? '원래 제출은 거절되었습니다. 입력·원키를 보존하며 자동으로 다시 보내지 않습니다.'
+        : '원래 요청의 서버 상태는 ' + receipt.status + ' 입니다. 결과 미확정·원키 조회만 가능하며 초안을 닫지 않습니다.' };
+}
 export const hostSubject = (taskId: string, row: ContractReviewPending) => JSON.stringify([taskId, row.request_event_id, row.compiled_fingerprint]);
 export const capabilitySubject = (row: CapabilityDecision) => JSON.stringify([
   row.decision_kind, row.task_id || '', row.capability || '', row.dataset_key || '', row.decision_request_id, row.expected_digest,
@@ -150,23 +173,24 @@ export function createStudioDecisionFlow(projectId: string, api: StudioDecisionA
       }, body => api.resume(body as Parameters<StudioDecisionApi['resume']>[0]), result => {
         //: 접수 기록이 확인된 제출만 초안을 닫을 근거(eventId)로 남긴다. 접수는 가동·완료가 아니다.
         const receipt = (result as { submission?: HotlSubmissionReceipt } | null)?.submission;
-        return { outcome: 'CONFIRMED', ...(receipt ? { eventId: receipt.request_id } : {}),
-          message: '재개 요청이 접수됐습니다. 실제 실행 상태는 현재 결정 조회와 진행 화면에서 확인하세요.' };
+        return submissionSummary(receipt);
       });
     },
     /** 응답 유실 뒤 원키 확인. 재전송하지 않고 접수 여부만 다시 읽는다. */
     async recheckSubmission(subject: string, requestId: string) {
       if (!live() || state.busy || !requestId) return null;
       const current = record('HOTL', subject);
+      if (!current.body?.input_draft || current.body.client_request_id !== requestId) {
+        fail(new StudioDecisionError('보존된 원래 제출 본문과 요청 ID가 필요합니다.', 409, 'HOTL_SUBMISSION_ORIGINAL_REQUIRED'));
+        return null;
+      }
+      const original = structuredClone(current.body) as unknown as HotlInput;
       const version = generation;
       emit({ busy: true, error: null });
       try {
-        const receipt = await api.readSubmission(requestId);
+        const receipt = await api.readSubmission(requestId, original, current.hotlReceipt);
         if (!live(version)) return null;
-        save({ ...current, eventId: receipt.request_id, outcome: 'CONFIRMED',
-          message: receipt.status === 'ACCEPTED'
-            ? '원래 요청의 저장된 접수를 확인했습니다. 새로 제출하지 않았습니다.'
-            : `원래 요청의 서버 상태는 ${receipt.status} 입니다. 자동으로 다시 보내지 않습니다.` });
+        save({ ...current, ...submissionSummary(receipt) });
         return receipt;
       } catch (error) { if (live(version)) fail(error); return null; }
       finally { if (live(version)) emit({ busy: false }); }

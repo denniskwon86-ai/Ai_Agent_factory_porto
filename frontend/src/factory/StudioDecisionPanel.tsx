@@ -10,7 +10,7 @@ import type { CapabilityDecision, StudioDecisionApi } from './studioDecisionApi'
 import { useFactoryStore } from '../store/useFactoryStore';
 import { StudioInputDraftControls } from './StudioInputDraftControls';
 import {
-  capabilityActionable, capabilitySubject, createStudioDecisionFlow, hostSubject, hotlSubject,
+  capabilityActionable, capabilitySubject, createStudioDecisionFlow, hostSubject, hotlSubject, matchingHotlDraft,
 } from './studioDecisionFlow';
 import type { DecisionRecord, StudioDecisionFlow } from './studioDecisionFlow';
 
@@ -38,19 +38,9 @@ const choiceLabels: Record<string, string> = {
   REDUCE: '요구 범위 줄이기', WAIT: '보류하기', REQUEST_HOST_FEATURE: 'Host 기능 지원 요청',
 };
 
-/** 저장한 선택과 지금 화면의 선택이 같은가. 순서 차이는 같은 것으로 본다. */
-function sameSelections(saved: Record<string, string[]> | undefined, current: ClarifySelections) {
-  const left = saved || {}, right = current || {};
-  const keys = new Set([...Object.keys(left), ...Object.keys(right)].filter(
-    key => (left[key] || []).length || (right[key] || []).length));
-  return [...keys].every(key => {
-    const a = [...(left[key] || [])].sort(), b = [...(right[key] || [])].sort();
-    return a.length === b.length && a.every((value, index) => value === b[index]);
-  });
-}
-
 function DecisionDraftReceipt({ projectId, record }: { projectId: string; record: DecisionRecord }) {
   if (!record.eventId) return null;
+  if (record.kind === 'HOTL' && record.hotlReceipt?.status !== 'ACCEPTED') return null;
   const drafts = studioInputMemory.projectValues<{ draft: InputDraft | null }>(projectId, 'server-input-draft')
     .map(row => row.draft).filter((draft): draft is InputDraft => !!draft
       && (record.kind === 'HOTL'
@@ -68,7 +58,8 @@ function DecisionDraftReceipt({ projectId, record }: { projectId: string; record
     selector={{ kind: draft.target.kind, task_id: draft.target.task_id, decision_kind: draft.target.decision_kind,
       request_id: draft.target.request_id, subject_id: draft.target.subject_id }} expectedTarget={draft.target}
     content={{ text: record.note.trim(), decision: record.choice }} onRestore={() => undefined}
-    disabled receiptOnly submissionId={record.eventId} />)}</>;
+    disabled receiptOnly submissionId={record.eventId}
+    expectedDraft={record.kind === 'HOTL' ? record.hotlReceipt?.input_draft : undefined} />)}</>;
 }
 
 function CapabilityCard({ row, flow, disabled, projectId, serverDrafts }: {
@@ -257,9 +248,9 @@ export function StudioDecisionPanel({ vm, selections, onDecisionKeyChange, onRes
           expectedTarget={{ kind: isClarify ? 'CLARIFICATION' : 'DECISION_COMMENT', task_id: hotl.taskId,
             decision_kind: isClarify ? '' : 'GENERAL_HOTL', request_id: hotl.request_id,
             target_digest: hotl.questions_digest, subject_id: '' }}
-          content={{ text: hotlDraft?.note || '', decision: '', ...(isClarify ? { selections } : {}) }}
+          content={{ text: hotlDraft?.note || '', decision: '', selections: isClarify ? selections : {} }}
           disabled={hotlLocked || !clarifyReady || (isClarify && !onRestoreSelections)}
-          onDraftChange={draft => setHotlServerDraft(draft)}
+          onDraftChange={setHotlServerDraft}
           onRestore={content => {
             if (hotlLocked || !clarifyReady || (isClarify && !onRestoreSelections)) return;
             flow.edit('HOTL', hotlSubject(hotl), 'note', content.text);
@@ -279,11 +270,10 @@ export function StudioDecisionPanel({ vm, selections, onDecisionKeyChange, onRes
           onClick={() => { void flow.resume(isClarify
             ? serializeClarifyAnswers(vm.clarify.questions, selections, hotlDraft?.note || '') : (hotlDraft?.note || '').trim(),
             isClarify ? { rawQuestions: structuredClone(rawQuestions), displayedQuestions: structuredClone(vm.clarify.questions) } : undefined,
-            //: 저장한 초안과 지금 입력이 같을 때만 결속한다. 다르면 닫지 않고 그대로 둔다.
-            //: 명확화는 메모뿐 아니라 선택값도 같아야 한다 — 서버가 둘로 본문을 재현해 대조한다.
-            hotlServerDraft && hotlServerDraft.content?.text.trim() === (hotlDraft?.note || '').trim()
-              && (!isClarify || sameSelections(hotlServerDraft.content?.selections, selections))
-              ? { draft_id: hotlServerDraft.draft_id, revision: hotlServerDraft.revision, digest: hotlServerDraft.digest } : null); }}>
+            // 현재 원대상·본문을 다시 대조한다. 늦은 초안 콜백이나 바뀐 선택값으로 결속하지 않는다.
+            matchingHotlDraft(vm.project.id, hotl, hotlServerDraft, {
+              text: hotlDraft?.note || '', decision: '', selections: isClarify ? selections : {},
+            })); }}>
           {isClarify ? '현재 답변 제출하고 재개' : '검토 의견 제출하고 재개'}</button>
       </section>}
       {!hotl?.available && hotl?.status !== 'UNKNOWN' && !host?.pending && !state.capabilities?.pending
@@ -303,6 +293,7 @@ export function StudioDecisionPanel({ vm, selections, onDecisionKeyChange, onRes
           <small>원래 사건·요청·지문으로만 멱등 복구합니다. 자동 재전송·새 승인·실행 시작은 하지 않습니다.</small>
         </>}
         {record.outcome === 'UNKNOWN' && <strong>결과 미확정 · 재전송 금지 · 조회로 상태 확인</strong>}
+        {record.outcome === 'REJECTED' && <strong>제출 거절 확인 · 입력 보존 · 자동 재전송 없음</strong>}
         {/* ★★ [B5] 결속 제출의 원키 확인. 재전송이 아니라 서버 기록만 다시 읽는다.
             ⚠️ `eventId` 가 아니라 **보존된 요청 본문의 원키**를 쓴다 — `eventId` 는 접수를
             확인했을 때만 채워지는데, 이 버튼이 정작 필요한 때는 응답이 유실된 UNKNOWN 이다. */}

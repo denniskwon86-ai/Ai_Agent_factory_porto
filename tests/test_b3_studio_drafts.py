@@ -44,7 +44,18 @@ def isolated_stores(tmp_path, monkeypatch):
 
     def guarded_connect(database, *args, **kwargs):
         value = os.fspath(database)
-        assert isinstance(value, str) and not value.startswith("file:"), "URI DB 우회 금지"
+        assert isinstance(value, str)
+        if value.startswith("file:"):
+            from urllib.parse import urlsplit
+            from urllib.request import url2pathname
+            parts = urlsplit(value)
+            path = Path(url2pathname(parts.path)).resolve()
+            # 현재 시험의 기존 정규 파일에 대한 정확한 읽기 전용 URI만 허용한다.
+            assert kwargs.get("uri") is True and not parts.netloc
+            assert value == path.as_uri() + "?mode=ro"
+            assert path.is_relative_to(root) and path.is_file()
+            opened.append(str(path))
+            return connect(database, *args, **kwargs)
         if value != ":memory:":
             assert Path(value).is_absolute() and Path(value).resolve().is_relative_to(root), value
         opened.append(value)

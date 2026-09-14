@@ -12,10 +12,9 @@ def project_context(project_id, *, actor, context, for_action, revisions=None, p
     from core.paths import workspace_path
     if revisions is None:
         from core.advisor_store import advisor_store
-        revisions = RevisionStore(advisor_store)
-    if processes is None:
-        from core.enterprise_context.process_context import ProcessContextService
-        processes = ProcessContextService()
+        # 화면 진입 조회가 DB/판본 테이블을 새로 만들거나 복구하지 않게 한다.
+        # 저장·승격·실행 경로의 기존 초기화 계약은 그대로 유지한다.
+        revisions = RevisionStore(advisor_store, read_only=for_action == "READ")
     indexed = revisions.is_v2_project(project_id)
     workspace = Path(workspace_path(project_id))
     if not indexed and (workspace / "latest_state.json").exists():
@@ -41,6 +40,9 @@ def project_context(project_id, *, actor, context, for_action, revisions=None, p
         raise RevisionStoreError("STUDIO_PROJECT_CONTEXT_MISSING", "프로젝트의 명시적 회사·조직 문맥이 필요합니다.") from exc
     if not isinstance(context, dict) or not context.get("scope_node_id"):
         raise ProcessError("PROCESS_CONTEXT_REQUIRED", "회사·조직 문맥을 명시적으로 선택하십시오.", 422)
+    if processes is None:
+        from core.enterprise_context.process_context import ProcessContextService
+        processes = ProcessContextService()
     with processes.configuration.transaction() as conn:
         rights = processes.configuration._authorize(conn, boundary, actor, context,
             "propose" if for_action in {"DRAFT", "GENERATE"} else "read")

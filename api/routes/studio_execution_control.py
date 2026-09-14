@@ -1,6 +1,7 @@
 """B5 영속 실행 명령 접수. 접수 확인은 작업 완료/승인을 뜻하지 않는다."""
 import asyncio
 from contextvars import ContextVar
+from dataclasses import replace
 from functools import wraps
 from inspect import signature
 from typing import Literal
@@ -12,7 +13,7 @@ from api.deps import Principal, current_principal, require_caps
 from api.routes import studio_input_draft_control as drafts
 from api.routes.process_configuration_control import error
 from api.routes.studio_revision_control import _visible_before_reservation, _same_context
-from core.admin_capability import PROJECT_RUN
+from core.admin_capability import PROJECT_RELEASE, PROJECT_RUN
 from core.advisor_revision_store import RevisionStoreError
 from core.enterprise_context.process_schema import ProcessError, StrictModel
 from core.studio_execution_commands import CommandStore, _request, fail
@@ -60,6 +61,21 @@ def mark_effect_started():
     context = dispatch_context()
     if context:
         context["effect_started"] = True
+
+
+def _command_authority(project_id, p, operation):
+    """직접 handler 호출에도 명령별 현재 권한을 적용한다. 접수 원장은 읽지 않는다."""
+    from core.org_directory import org_directory
+    if not p.user_id:
+        raise HTTPException(401, "로그인한 사용자만 요청할 수 있습니다.")
+    try:
+        p = replace(p, scope=org_directory.resolve_scope(p.user_id, fresh=True))
+    except Exception as exc:
+        raise ProcessError("STUDIO_COMMAND_AUTHORITY_UNAVAILABLE",
+            "현재 실행 권한을 확인하지 못했습니다.", 503) from exc
+    needed = (PROJECT_RUN, PROJECT_RELEASE) if operation == "RELEASE" else (PROJECT_RUN,)
+    require_caps(p, *needed, resource="project", action=f"execution_commands:{operation}")
+    return p
 
 
 def execution_route(*, quiescent=False):
@@ -113,11 +129,9 @@ async def _run(project_id, command, p):
             fail("NOT_RESUMABLE", "같은 작업의 수동 중지 체크포인트를 확인하지 못했습니다. 새 기획으로 대체하지 않습니다.")
         mark_effect_started()
         return dict(status="resumed", task_id=task_id)
-    #: ★ [B5] 프로젝트 단위 명령. 기존 handler 를 그대로 부르므로 서버 동작은 바뀌지 않는다.
-    #: ⚠️ REPLAN 은 기존 WBS 를 지운다 — 되돌릴 수 없으므로 부작용 시작을 반드시 표시해
-    #:   응답 유실이 REJECTED 로 오판되지 않게 한다.
+    # 순수 사전 검증의 4xx는 REJECTED다. 효과 표시는 각 handler의 실제 첫 쓰기
+    # 직전에만 한다(REPLAN 준비 helper / RELEASE 산출물 디렉터리 생성).
     if operation in {"RELEASE", "REPLAN"}:
-        mark_effect_started()
         return await (factory.create_release(project_id, p) if operation == "RELEASE"
                       else factory.replan_wbs(project_id, p))
     return await factory.trigger_self_healing(project_id, factory.HealRequest(error_log=content["error_log"]), p)
@@ -126,8 +140,10 @@ async def _run(project_id, command, p):
 async def _submit(project_id, req, p):
     from api.routes import factory_control as factory
     await asyncio.to_thread(_visible_before_reservation, project_id, p)
+    p = await asyncio.to_thread(_command_authority, project_id, p, req.operation)
     # 소유권은 shield가 만든 실제 worker에서 획득한다.
     with reserve(factory.orchestrator, project_id, exclusive=True, allow_nested_execution=True):
+        p = await asyncio.to_thread(_command_authority, project_id, p, req.operation)
         boundary, studio = await asyncio.to_thread(drafts._authorized, project_id, p, True)
         storage, command = _storage(), req.model_dump()
         identity = dict(project_id=project_id, actor_id=p.user_id, boundary=boundary)
@@ -140,6 +156,7 @@ async def _submit(project_id, req, p):
             if any(previous[k] != command[k] for k in ("operation", "task_id", "input")):
                 fail("IDEMPOTENCY_CONFLICT", "같은 요청 ID의 명령 내용이 다릅니다.")
             await asyncio.to_thread(_same_context, project_id, p, boundary, studio, write=True)
+            await asyncio.to_thread(_command_authority, project_id, p, req.operation)
             return previous
         with reserve(factory.orchestrator, project_id, quiescent=command["operation"] not in {"PAUSE", "STOP"}):
             await asyncio.to_thread(_same_context, project_id, p, boundary, studio, write=True)
@@ -150,6 +167,7 @@ async def _submit(project_id, req, p):
             token = _dispatch.set(context)
             try:
                 await asyncio.to_thread(_same_context, project_id, p, boundary, studio, write=True)
+                p = await asyncio.to_thread(_command_authority, project_id, p, req.operation)
                 response = await _run(project_id, command, p)
                 outcome, result = "ACCEPTED", dict(http_status=200, response=response)
             except (HTTPException, ProcessError) as exc:
@@ -166,6 +184,7 @@ async def _submit(project_id, req, p):
             receipt = await asyncio.to_thread(storage.finish, **identity, request_id=command["client_request_id"], outcome=outcome, result=result)
             try:
                 await asyncio.to_thread(_same_context, project_id, p, boundary, studio, write=True)
+                await asyncio.to_thread(_command_authority, project_id, p, req.operation)
             except Exception as exc:
                 # 실행 뒤 권한 변경은 클라이언트가 '미접수 4xx'로 오해하면 안 된다.
                 raise HTTPException(503, detail={"reason_code": "STUDIO_COMMAND_CONTEXT_CHANGED",
@@ -175,7 +194,6 @@ async def _submit(project_id, req, p):
 
 @router.post("/{project_id}/execution-commands")
 async def submit(project_id: str, req: CommandIn, p: Principal = Depends(current_principal)):
-    require_caps(p, PROJECT_RUN, resource="project", action="execution_commands:submit")
     try:
         return {"request": await finish_before_cancel(_submit(project_id, req, p))}
     except HTTPException:

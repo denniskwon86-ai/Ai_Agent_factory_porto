@@ -2059,7 +2059,8 @@ def _hotl_submission_store():
 
 def _hotl_resumed(req, receipt=None):
     """접수 확인을 재개 성공과 같은 칸에 담지 않는다. 작업 완료를 뜻하지도 않는다."""
-    body = {"status": "resumed", "task_id": req.task_id}
+    body = {"status": "resumed" if receipt is None or receipt["status"] == "ACCEPTED"
+            else "submission_recorded", "task_id": req.task_id}
     if receipt is not None:
         body["submission"] = {key: receipt[key] for key in
                               ("request_id", "task_id", "status", "input_draft", "created_at", "updated_at", "receipt_digest")}
@@ -2072,8 +2073,8 @@ async def _hotl_is_clarification(project_id, task_id):
     return bool(current.get("available")) and current.get("decision_kind") == "CLARIFICATION"
 
 
-async def _assert_clarify_body_matches_draft(project_id, p, boundary, target, req):
-    """[B5] 명확화 제출 본문을 **서버가 재현해** 저장 초안과 대조한다.
+async def _assert_clarify_body_matches_draft(project_id, p, boundary, target, req, studio):
+    """[B5] 제출 본문을 저장 초안과 대조하고 명확화 답변은 서버가 재현한다.
 
     화면이 질문·선택지·설명을 한 문자열로 엮어 보내므로 저장된 `selections` 와 모양이
     다르다. 서버가 같은 질문으로 조합해 맞춘다(설계안 갈래 A). 접수 전에 끝내는 이유는
@@ -2092,7 +2093,11 @@ async def _assert_clarify_body_matches_draft(project_id, p, boundary, target, re
         raise ProcessError("STUDIO_HOTL_DRAFT_CONFLICT",
             "저장한 초안의 대상·판본이 제출과 다릅니다. 입력을 보존합니다.", 409)
     content = validate_content(row["target"], row["content"])
-    state = await drafts._state(project_id, req.task_id, True)
+    if target["kind"] != "CLARIFICATION":
+        if (req.feedback or "").strip() != content["text"].strip():
+            raise ProcessError("STUDIO_HOTL_DRAFT_CONFLICT", "제출 의견과 저장 초안이 다릅니다.", 409)
+        return
+    state = await drafts._state(project_id, req.task_id, studio)
     try:
         expected = serialize(state.get("clarification_questions") or [],
                              content.get("selections") or {}, content.get("text", ""))
@@ -2120,7 +2125,7 @@ async def _hotl_submission_tracker(project_id, req, p, studio):
     from api.routes.process_configuration_control import error as _process_error
     try:
         boundary, draft_studio = await asyncio.to_thread(drafts._authorized, project_id, p, True)
-        clarify = bool(draft_studio) and await _hotl_is_clarification(project_id, req.task_id)
+        clarify = await _hotl_is_clarification(project_id, req.task_id)
         target = await drafts._target(project_id,
             kind="CLARIFICATION" if clarify else "DECISION_COMMENT", task_id=req.task_id,
             decision_kind="" if clarify else "GENERAL_HOTL", studio=draft_studio)
@@ -2129,18 +2134,47 @@ async def _hotl_submission_tracker(project_id, req, p, studio):
                 or target["target_digest"] != req.expected_questions_digest):
             raise ProcessError("STUDIO_HOTL_ROUND_CONFLICT",
                 "대기 차수가 바뀌었습니다. 입력을 보존하고 현재 요청을 다시 확인하십시오.", 409)
-        if clarify:
-            await _assert_clarify_body_matches_draft(project_id, p, boundary, target, req)
+        await _assert_clarify_body_matches_draft(project_id, p, boundary, target, req, draft_studio)
         storage = _hotl_submission_store()
         identity = dict(project_id=project_id, actor_id=p.user_id, boundary=boundary)
         submission = dict(client_request_id=req.client_request_id, task_id=req.task_id, target=target,
                           feedback=(req.feedback or ""), input_draft=req.input_draft)
-        receipt, created = await asyncio.to_thread(storage.begin, **identity, submission=submission)
+        from api.routes.studio_revision_control import _same_context
+        def begin():
+            _same_context(project_id, p, boundary, draft_studio, write=True)
+            return storage.begin(**identity, submission=submission, require_current_draft=True)
+        receipt, created = await asyncio.to_thread(begin)
     except ProcessError as exc:
         _process_error(exc, p.user_id, project_id)
     #: 이미 있는 기록은 다시 실행하지 않는다. 종결 여부와 무관하게 원키 결과를 그대로 돌려준다.
-    return SimpleNamespace(storage=storage, identity=identity, request_id=req.client_request_id,
-                           replay=None if created else receipt)
+    return SimpleNamespace(storage=storage, identity=identity, studio=draft_studio, request_id=req.client_request_id,
+                            replay=None if created else receipt)
+
+
+async def _hotl_submission_replay(project_id, req, p):
+    """이미 접수한 원키는 현재 질문이 사라져도 재실행 없이 원본문과 대조한다."""
+    from api.routes import studio_input_draft_control as drafts
+    from api.routes.studio_revision_control import _same_context
+    from core.enterprise_context.process_schema import ProcessError
+    if not req.client_request_id and req.input_draft is None:
+        return None
+    if not req.client_request_id or req.input_draft is None:
+        raise HTTPException(422, "요청 ID와 저장 초안 참조를 함께 보내십시오.")
+    boundary, studio = await asyncio.to_thread(drafts._authorized, project_id, p, True)
+    try:
+        receipt = await asyncio.to_thread(_hotl_submission_store().get, project_id=project_id,
+            actor_id=p.user_id, boundary=boundary, request_id=req.client_request_id)
+    except ProcessError as exc:
+        if exc.reason_code == "STUDIO_HOTL_NOT_FOUND":
+            return None
+        raise
+    if (receipt["task_id"] != req.task_id or receipt["input_draft"] != req.input_draft
+            or receipt["feedback"] != (req.feedback or "").strip()
+            or receipt["target"]["request_id"] != req.expected_request_id
+            or receipt["target"]["target_digest"] != req.expected_questions_digest):
+        raise ProcessError("STUDIO_HOTL_IDEMPOTENCY_CONFLICT", "같은 요청 ID의 제출 내용이 다릅니다.", 409)
+    await asyncio.to_thread(_same_context, project_id, p, boundary, studio, write=True)
+    return receipt
 
 
 async def _hotl_submission_close(tracker, outcome, result):
@@ -2165,17 +2199,34 @@ async def get_hotl_submission(project_id: str, client_request_id: str, p: Princi
     from api.routes.process_configuration_control import error as _process_error
     from core.enterprise_context.process_schema import ProcessError
     try:
-        boundary, _ = await asyncio.to_thread(drafts._authorized, project_id, p, False)
-        return {"submission": await asyncio.to_thread(_hotl_submission_store().get, project_id=project_id,
-                actor_id=p.user_id, boundary=boundary, request_id=client_request_id)}
+        from api.routes.studio_revision_control import _same_context
+        boundary, studio = await asyncio.to_thread(drafts._authorized, project_id, p, False)
+        receipt = await asyncio.to_thread(_hotl_submission_store().get, project_id=project_id,
+                actor_id=p.user_id, boundary=boundary, request_id=client_request_id)
+        await asyncio.to_thread(_same_context, project_id, p, boundary, studio, write=False)
+        return {"submission": receipt}
     except ProcessError as exc:
         _process_error(exc, p.user_id, project_id)
 
 
 @router.post("/{project_id}/hotl/resume")
 async def resume_from_hotl(project_id: str, req: HOTLResumeRequest, p: Principal = Depends(current_principal)):
+    from core.studio_execution_guard import finish_before_cancel
+    from core.enterprise_context.process_schema import ProcessError
+    from api.routes.process_configuration_control import error as process_error
+    try:
+        # 접수 선기록부터 종결까지 같은 worker가 회수한다. 요청 취소는 재전송 근거가 아니다.
+        return await finish_before_cancel(_resume_from_hotl(project_id, req, p))
+    except ProcessError as exc:
+        process_error(exc, p.user_id, project_id)
+
+
+async def _resume_from_hotl(project_id, req, p):
     assert_project_writable(p, project_id)
     _safe_id(project_id, "project_id")
+    previous = await _hotl_submission_replay(project_id, req, p)
+    if previous is not None:
+        return _hotl_resumed(req, previous)
     _studio = await _assert_resumable(project_id, p, req.task_id)
     # ★★★ [4c-4] 계약 검토 대기 중에는 **일반 재개를 막는다.**
     #
@@ -2205,8 +2256,13 @@ async def resume_from_hotl(project_id: str, req: HOTLResumeRequest, p: Principal
     #:   기록 없는 기존 호출은 아래 실행 경로가 지금까지와 완전히 같다.
     tracker = await _hotl_submission_tracker(project_id, req, p, _studio)
     if tracker and tracker.replay is not None:
+        from api.routes.studio_revision_control import _same_context
+        await asyncio.to_thread(_same_context, project_id, p, tracker.identity["boundary"], tracker.studio, write=True)
         return _hotl_resumed(req, tracker.replay)
     try:
+        if tracker:
+            from api.routes.studio_revision_control import _same_context
+            await asyncio.to_thread(_same_context, project_id, p, tracker.identity["boundary"], tracker.studio, write=True)
         success = await orchestrator.resume_hotl(req.task_id, req.feedback, project_id,
             expected_request_id=req.expected_request_id,
             expected_questions_digest=req.expected_questions_digest, expected_studio_context=_studio)
@@ -2215,6 +2271,15 @@ async def resume_from_hotl(project_id: str, req: HOTLResumeRequest, p: Principal
         await _hotl_submission_close(tracker, "REJECTED" if 400 <= exc.status_code < 500 else "UNKNOWN",
             dict(http_status=exc.status_code, reason_code=exc.reason_code, message=str(exc)))
         _process_error(exc, p.user_id, project_id)
+    except HTTPException as exc:
+        await _hotl_submission_close(tracker, "REJECTED" if 400 <= exc.status_code < 500 else "UNKNOWN",
+            dict(http_status=exc.status_code, message=str(exc.detail)))
+        raise
+    except asyncio.CancelledError:
+        # HTTP 취소는 바깥 worker가 회수한다. 엔진 자체 취소도 PROCESSING에 방치하지 않는다.
+        await _hotl_submission_close(tracker, "UNKNOWN", dict(http_status=503,
+            reason_code="STUDIO_HOTL_RESULT_UNKNOWN", message="실행이 중단되었습니다. 원요청 ID로 조회하십시오."))
+        raise
     except Exception:
         await _hotl_submission_close(tracker, "UNKNOWN", dict(http_status=503,
             reason_code="STUDIO_HOTL_RESULT_UNKNOWN",
@@ -2225,6 +2290,12 @@ async def resume_from_hotl(project_id: str, req: HOTLResumeRequest, p: Principal
             reason_code="STUDIO_HOTL_NOT_RESUMABLE", message="재개할 수 없는 상태이거나 이미 처리 중입니다."))
         raise HTTPException(status_code=409, detail="재개할 수 없는 상태이거나 이미 처리 중입니다. 현재 요청을 확인하십시오.")
     receipt = await _hotl_submission_close(tracker, "ACCEPTED", dict(http_status=200, resumed=True))
+    if tracker:
+        try:
+            await asyncio.to_thread(_same_context, project_id, p, tracker.identity["boundary"], tracker.studio, write=False)
+        except Exception as exc:
+            raise HTTPException(503, detail={"reason_code": "STUDIO_HOTL_CONTEXT_CHANGED",
+                "message": "처리 뒤 현재 공개 권한을 확인하지 못했습니다. 원래 요청 ID로 조회하십시오."}) from exc
     return _hotl_resumed(req, receipt)
 
 @router.post("/{project_id}/sprint/resume-quota")
@@ -2402,6 +2473,7 @@ async def trigger_self_healing(project_id: str, req: HealRequest, p: Principal =
     return {"status": "healing_started", "task_id": task_id}
 
 @router.post("/{project_id}/wbs/replan")
+@_execution_route(quiescent=True)
 async def replan_wbs(project_id: str, p: Principal = Depends(current_principal)):
     """WBS 재분할 - 기획 산출물(RFP/PRD/UI/아키텍처)을 재사용해 Master_PMO 만 재실행한다.
     WBS 분할이 실패(빈 태스크)했거나 부실할 때 기획 전체 재가동 없이 복구하는 경로."""
@@ -2506,6 +2578,94 @@ async def get_supervisor_feed(project_id: str,
         return {"status": "success", "data": data if isinstance(data, list) else []}
     except Exception:
         return {"status": "success", "data": []}
+
+@router.get("/{project_id}/entry-metadata")
+async def get_project_entry_metadata(project_id: str, p: Principal = Depends(current_principal)):
+    """선택한 문맥에서의 읽기 진입 확인만 제공한다. 실행 준비/승인을 뜻하지 않는다."""
+    from pathlib import Path
+    from api.routes import studio_input_draft_control as drafts
+    from api.routes.studio_revision_control import _same_context
+    from core.project_deletion import DELETED_AT
+    from core.enterprise_context.process_schema import ProcessError
+    from core.org_directory import org_directory
+
+    _safe_id(project_id, "project_id")
+    root = Path(workspace_path(project_id))
+
+    def check_fresh_selection():
+        # 기존 resolve_viewing_context와 같은 규칙. 그 함수의 공유 scope 캐시가
+        # 다른 연결의 권한 회수를 늦게 반영해도 이 GET은 최신 선택권한으로 닫는다.
+        scope = org_directory.resolve_scope(p.user_id, fresh=True)
+        want = (p.requested_scope_node_id or "").strip()
+        if want and not (scope.unrestricted or want in scope.readable_scope_nodes):
+            raise HTTPException(404, "현재 문맥에서 프로젝트를 찾을 수 없습니다.")
+
+    def read_metadata():
+        # 존재/삭제 확인도 파일을 만들지 않는다. 연결된 파일을 원본으로 인정하지 않는다.
+        if not root.is_dir():
+            raise HTTPException(404, "현재 문맥에서 프로젝트를 찾을 수 없습니다.")
+        meta_path = root / "project_meta.json"
+        for path in (root, meta_path):
+            if path.is_symlink() or getattr(path, "is_junction", lambda: False)():
+                raise ValueError("linked project metadata")
+        with meta_path.open(encoding="utf-8") as stream:
+            meta = json.load(stream)
+        if not isinstance(meta, dict):
+            raise ValueError("project metadata must be an object")
+        if meta.get(DELETED_AT):
+            raise HTTPException(404, "현재 문맥에서 프로젝트를 찾을 수 없습니다.")
+        return meta
+
+    try:
+        # 없는 프로젝트를 helper의 손상된 소속과 혼동하지 않는다.
+        if not root.is_dir():
+            raise HTTPException(404, "현재 문맥에서 프로젝트를 찾을 수 없습니다.")
+        boundary, studio = await asyncio.to_thread(drafts._authorized, project_id, p, False)
+        await asyncio.to_thread(check_fresh_selection)
+        meta = await asyncio.to_thread(read_metadata)
+        if studio is not None:
+            version = studio.get("runtime_document_version")
+        else:
+            version = meta.get("runtime_document_version", "1.0")
+            if version != "1.0":
+                raise ValueError("managed project without verified studio context")
+        if version not in ("1.0", "2.0"):
+            raise ValueError("unknown runtime document version")
+        name = meta.get("project_name")
+        if name is None or name == "":
+            name = project_id
+        elif not isinstance(name, str) or len(name) > 2000:
+            raise ValueError("invalid project display name")
+        data = dict(project_id=project_id, project_name=name,
+            runtime_document_version=version,
+            ownership={key: boundary["ownership"][key] for key in ("tenant_id", "enterprise_scope_id", "entity_mode")},
+            viewing_context={key: boundary["viewing_context"][key] for key in ("tenant_id", "scope_node_id", "entity_mode")})
+
+        def recheck():
+            if read_metadata() != meta:
+                raise ValueError("project metadata changed during read")
+            _same_context(project_id, p, boundary, studio, write=False)
+            check_fresh_selection()
+
+        await asyncio.to_thread(recheck)
+        return {"status": "success", "data": data}
+    except HTTPException as exc:
+        if exc.status_code in (403, 404):
+            raise HTTPException(404, "현재 문맥에서 프로젝트를 찾을 수 없습니다.") from exc
+        if exc.status_code == 409 or exc.status_code >= 500:
+            raise HTTPException(503, detail={"reason_code": "PROJECT_ENTRY_UNAVAILABLE",
+                "message": "프로젝트 진입 정보를 확인하지 못했습니다. 다시 조회하십시오."}) from exc
+        raise
+    except ProcessError as exc:
+        if exc.status_code in (401, 403, 404):
+            raise HTTPException(401 if exc.status_code == 401 else 404,
+                "현재 문맥에서 프로젝트를 찾을 수 없습니다.") from exc
+        raise HTTPException(503, detail={"reason_code": "PROJECT_ENTRY_UNAVAILABLE",
+            "message": "프로젝트 진입 정보를 확인하지 못했습니다. 다시 조회하십시오."}) from exc
+    except Exception as exc:
+        raise HTTPException(503, detail={"reason_code": "PROJECT_ENTRY_UNAVAILABLE",
+            "message": "프로젝트 진입 정보를 확인하지 못했습니다. 다시 조회하십시오."}) from exc
+
 
 @router.get("/{project_id}/state/latest")
 async def get_latest_state(project_id: str,
@@ -2816,6 +2976,7 @@ def _materialize_contract_for_release(project_id: str, release_id: str, *,
 
 
 @router.post("/{project_id}/release")
+@_execution_route(quiescent=True)
 async def create_release(project_id: str,
                           p: Principal = Depends(current_principal)):
     """완료된 프로젝트의 최종 결과물을 라이브러리에 스냅샷 저장(배포)."""
@@ -3015,6 +3176,11 @@ async def create_release(project_id: str,
         raise HTTPException(status_code=409, detail="2.0 계약 게시에는 서버가 승인한 프로젝트 승격 기록이 필요합니다.")
 
     rel_dir = library_paths.release_dir(release_id)
+    # 구 직접 게시 경로도 사전 조회 중 회수된 게시 권한으로 파일을 만들 수 없다.
+    from api.routes.studio_execution_control import _command_authority
+    p = await asyncio.to_thread(_command_authority, project_id, p, "RELEASE")
+    assert_project_writable(p, project_id)
+    _execution_effect()
     os.makedirs(rel_dir, exist_ok=True)
     with open(os.path.join(rel_dir, "release.json"), "w", encoding="utf-8") as f:
         json.dump(release, f, ensure_ascii=False, indent=2)

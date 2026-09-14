@@ -1,8 +1,10 @@
 """B3 §8.5 초안 revision과 승격 operation의 저장 기반. 실행·권한 엔진이 아니다.
 
-``RevisionStore(advisor_store)``는 주입한 AdvisorStore의 ``_connect``/``_lock``만
-사용한다. import/생성자는 IO를 하지 않으며 기존 상담/blueprint 테이블은 읽지도
-쓰지도 않는다. 최초 명시적 호출에서 ``advisor_v2_*`` 테이블만 준비한다.
+기본 ``RevisionStore(advisor_store)``는 주입한 AdvisorStore의 ``_connect``/``_lock``을
+사용한다. import/생성자는 IO를 하지 않으며 기존 상담/blueprint 업무 행은 읽지도
+쓰지도 않는다. 기본 모드의 최초 호출에서 ``advisor_v2_*`` 테이블만 준비한다.
+읽기 전용 모드는 기존 DB를 mode=ro로 열며 초기화·복구하지 않는다.
+SQLite의 WAL/SHM 보조 파일은 생길 수 있다. 모든 파일에 대한 물리적 무쓰기를 뜻하지 않는다.
 
 신뢰 경계:
 * 모든 메서드는 서버 내부 전용이다. main 서비스가 현재 PDP/선택 문맥/ProcessContext를
@@ -27,6 +29,7 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 import hashlib
 import json
+from pathlib import Path
 import re
 import sqlite3
 from typing import Any
@@ -231,13 +234,16 @@ CREATE TRIGGER IF NOT EXISTS advisor_v2_transition_no_delete BEFORE DELETE ON ad
 class RevisionStore:
     """기존 AdvisorStore 연결을 주입한다. 메서드 호출 전 외부 권한 검사는 필수다."""
 
-    def __init__(self, store):
+    def __init__(self, store, *, read_only=False):
         if not callable(getattr(store, "_connect", None)) or not hasattr(store, "_lock"):
             raise TypeError("AdvisorStore의 _connect와 _lock이 필요합니다.")
         self.store = store
+        self.read_only = read_only
         self._prepared_for = None
 
     def _ensure(self):
+        if self.read_only:
+            raise RevisionStoreError("ADVISOR_READ_ONLY", "읽기 전용 저장소에서는 초기화·변경할 수 없습니다.", 503)
         with self.store._lock:
             if self._prepared_for == self.store.db_path:
                 return
@@ -254,10 +260,23 @@ class RevisionStore:
 
     @contextmanager
     def _transaction(self, *, write=False):
+        if self.read_only and write:
+            raise RevisionStoreError("ADVISOR_READ_ONLY", "읽기 전용 저장소에서는 변경할 수 없습니다.", 503)
         try:
-            self._ensure()
+            if not self.read_only:
+                self._ensure()
             with self.store._lock:
-                conn = self.store._connect()
+                if self.read_only:
+                    # _connect의 디렉터리 생성·journal_mode 변경·schema 준비를 우회한다.
+                    # immutable은 쓰지 않는다. 다른 연결이 커밋한 WAL도 정상 조회해야 한다.
+                    path = Path(self.store.db_path).resolve()
+                    if not path.is_file():
+                        raise RevisionStoreError("ADVISOR_STORAGE_UNAVAILABLE", "기존 판본 저장소를 찾을 수 없습니다.", 503)
+                    uri = path.as_uri() + "?mode=ro"
+                    conn = sqlite3.connect(uri, uri=True, timeout=5)
+                    conn.row_factory = sqlite3.Row
+                else:
+                    conn = self.store._connect()
                 try:
                     # 독립 AdvisorStore 객체/프로세스의 경합도 직렬화한다.
                     conn.execute("BEGIN IMMEDIATE" if write else "BEGIN")
@@ -678,11 +697,35 @@ class RevisionStore:
 
         외부 노출/권한 판단에 사용하지 않는다. 손상 op도 legacy로 내리지 않도록 존재만
         확인한다. 이후 현재 PDP + get_for_project 검증 필수. DB 장애는 False가 아니다.
-        최초 호출의 전용 스키마 준비는 기존 _transaction 계약을 따른다. DB 미등록이라도
+        기본 모드는 최초 호출에 스키마를 준비한다. 읽기 전용은 v2 스키마가 전혀 없는
+        정상 legacy DB만 미등록으로 판정하며 부분 스키마는 장애로 거절한다. DB 미등록이라도
         meta/state가 v2를 표방하면 main이 fail closed 해야 한다(자동 1.0 폴백 금지).
         """
         project_id = _text(project_id, "project_id")
         with self._transaction() as conn:
+            if self.read_only:
+                # 조회에 쓰이는 모든 열을 검사한다. 이름만 남은 손상 테이블은 legacy가 아니다.
+                expected = {
+                    "advisor_v2_drafts": "draft_id boundary_json owner_actor head_revision head_revision_id head_digest created_at",
+                    "advisor_v2_revisions": "revision_id draft_id revision content_json status digest decision_actor reason decided_at decision_request_fingerprint",
+                    "advisor_v2_requests": "boundary_json actor client_request_id request_fingerprint result_json result_digest",
+                    "advisor_v2_bootstraps": "operation_id project_id event_id approved_revision_id approved_digest boundary_json actor client_request_id request_fingerprint process_semantic_digest stage version resume_stage result_json result_digest created_at updated_at",
+                    "advisor_v2_transitions": "operation_id from_version request_fingerprint result_json result_digest",
+                }
+                rows = conn.execute("SELECT name,type FROM sqlite_master WHERE name GLOB 'advisor_v2_*'").fetchall()
+                if not rows:
+                    legacy = {row[0] for row in conn.execute(
+                        "SELECT name FROM sqlite_master WHERE type='table' AND name IN ('consultations','solution_blueprints')")}
+                    if legacy != {"consultations", "solution_blueprints"}:
+                        raise RevisionStoreError("ADVISOR_STORAGE_UNAVAILABLE", "기존 상담 저장소 구조를 확인할 수 없습니다.", 503)
+                    return False
+                tables = {row["name"] for row in rows if row["type"] == "table"}
+                if not set(expected).issubset(tables):
+                    raise RevisionStoreError("ADVISOR_STORAGE_UNAVAILABLE", "판본 저장소 구조를 확인할 수 없습니다.", 503)
+                for table, fields in expected.items():
+                    columns = {row["name"] for row in conn.execute(f"PRAGMA table_info({table})")}
+                    if not set(fields.split()).issubset(columns):
+                        raise RevisionStoreError("ADVISOR_STORAGE_UNAVAILABLE", "판본 저장소 열을 확인할 수 없습니다.", 503)
             return conn.execute("SELECT 1 FROM advisor_v2_bootstraps WHERE project_id=?",
                                 (project_id,)).fetchone() is not None
 

@@ -227,7 +227,7 @@ function ProjectRunControls({ vm, onReviewResult, onReviewDecision, onShowTasks 
       const result = await useFactoryStore.getState().saveRelease(pid);
       return { ...result, message: result.ok
         ? `검토용 버전 ${result.releaseId}을 저장했습니다. 배포·운영 승인은 별도입니다.` : result.message };
-    });
+    }, '', true);
   };
   const primary = () => {
     if (resumePrimary) { openResume(); return; }
@@ -312,7 +312,7 @@ function ProjectRunControls({ vm, onReviewResult, onReviewDecision, onShowTasks 
           if (panel === 'resume-task') doResumeTask();
           if (panel === 'task') doTask();
           if (panel === 'heal') doHeal();
-          if (panel === 'replan') void command('작업 계획 재분할 요청', () => replanWbs(pid));
+          if (panel === 'replan') void command('작업 계획 재분할 요청', () => replanWbs(pid), '', true);
         }}>{busy || (panel === 'planning' ? '요구사항 정리 시작' : panel === 'resume-task' ? '같은 작업 재개 요청' : panel === 'replan' ? '영향을 확인하고 다시 나누기' : '확인하고 요청')}</button>}
       </div>
     </div>}

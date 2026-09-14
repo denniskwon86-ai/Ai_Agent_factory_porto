@@ -5,6 +5,7 @@
 """
 import copy
 import json
+import sqlite3
 from types import SimpleNamespace
 
 import pytest
@@ -186,3 +187,104 @@ def test_consumed_draft_stays_bound_to_the_original_submission_id(env):
     #: 이미 닫힌 초안을 같은 제출로 다시 확인해도 판본·제출 ID가 어긋나면 열어주지 않는다.
     assert verify_consumption(closed, receipt, expected_revision=row["revision"],
                               expected_digest=row["digest"]) == verified
+
+
+def edit_draft(env, row, operation="SAVE"):
+    return env.drafts.mutate(**env.draft_args, operation=operation, draft_id=row["draft_id"],
+        expected_revision=row["revision"], expected_digest=row["digest"], client_request_id="race-edit",
+        **(dict(target=row["target"], content=dict(text="수정된 새 본문", decision="", selections={}))
+           if operation == "SAVE" else {}))
+
+
+@pytest.mark.parametrize("operation", ["SAVE", "DISCARD"])
+def test_required_current_draft_rejects_change_after_api_precheck_without_receipt(env, operation):
+    row = save_draft(env)  # API가 읽었던 판
+    edit_draft(env, row, operation)
+    current = env.drafts.get(**env.draft_args, draft_id=row["draft_id"])
+    failure(lambda: env.store.begin(**env.args, submission=submission(row), require_current_draft=True),
+            409, "DRAFT_CONFLICT")
+    failure(lambda: env.store.get(**env.args, request_id=key()), 404, "NOT_FOUND")
+    assert env.drafts.get(**env.draft_args, draft_id=row["draft_id"]) == current
+
+
+@pytest.mark.parametrize("field", ["actor", "project", "boundary", "target", "revision", "digest", "missing", "feedback"])
+def test_required_current_draft_checks_identity_target_and_exact_ref(env, field):
+    row = save_draft(env)
+    args, body = copy.deepcopy(env.args), submission(row)
+    if field == "actor":
+        args["actor_id"] = "other@hotl.test.invalid"
+    elif field == "project":
+        args["project_id"] = "OTHER_PROJECT"
+    elif field == "boundary":
+        args["boundary"]["viewing_context"]["scope_node_id"] = "other-scope"
+    elif field == "target":
+        body["target"]["request_id"] = "other-round"
+    elif field == "revision":
+        body["input_draft"]["revision"] += 1
+    elif field == "digest":
+        body["input_draft"]["digest"] = "f" * 64
+    elif field == "missing":
+        body["input_draft"]["draft_id"] = "sid_missing"
+    else:
+        body["feedback"] = "저장하지 않은 본문"
+    failure(lambda: env.store.begin(**args, submission=body, require_current_draft=True), 409, "DRAFT_CONFLICT")
+    failure(lambda: env.store.get(**args, request_id=key()), 404, "NOT_FOUND")
+
+
+def test_required_draft_integrity_failure_rolls_back_admission(env):
+    row = save_draft(env)
+    with env.drafts.transaction(write=True) as conn:
+        conn.execute("UPDATE studio_input_drafts SET result_json='{}' WHERE draft_id=?", (row["draft_id"],))
+    failure(lambda: env.store.begin(**env.args, submission=submission(row), require_current_draft=True),
+            503, "DRAFT_INTEGRITY")
+    failure(lambda: env.store.get(**env.args, request_id=key()), 404, "NOT_FOUND")
+
+
+def test_required_draft_missing_table_does_not_create_or_repair_draft_storage(env):
+    row = dict(target=target(), content={"text": NOTE}, draft_id="sid_missing", revision=1, digest="a" * 64)
+    failure(lambda: env.store.begin(**env.args, submission=submission(row), require_current_draft=True),
+            409, "DRAFT_CONFLICT")
+    with env.store.transaction() as conn:
+        assert conn.execute("SELECT name FROM sqlite_master WHERE name IN ('studio_input_drafts','studio_hotl_submissions')").fetchall() == []
+
+
+def test_required_draft_read_and_insert_share_immediate_transaction(env, monkeypatch):
+    from core.studio_input_drafts import InputDraftStore
+    row = save_draft(env)
+    original = env.store._assert_current_draft
+    connections = []
+
+    def check(conn, identity, command):
+        assert conn.in_transaction
+        original(conn, identity, command)
+        # 공유 Python 락이 없는 별도 연결도 INSERT 전 초안을 수정할 수 없어야 한다.
+        other = sqlite3.connect(env.store.store.db_path, timeout=0)
+        try:
+            with pytest.raises(sqlite3.OperationalError, match="locked"):
+                other.execute("BEGIN IMMEDIATE")
+        finally:
+            other.close()
+        connections.append(conn)
+        conn.set_trace_callback(lambda sql: statements.append(sql))
+
+    statements = []
+    monkeypatch.setattr(env.store, "_assert_current_draft", check)
+    monkeypatch.setattr(InputDraftStore, "get", lambda *a, **kw: pytest.fail("접수 중 별도 연결 GET 금지"))
+    value, created = env.store.begin(**env.args, submission=submission(row), require_current_draft=True)
+    assert created and value["status"] == "PROCESSING" and len(connections) == 1
+    assert any(sql.startswith("INSERT INTO studio_hotl_submissions") for sql in statements)
+    assert "COMMIT" in statements
+
+
+def test_required_draft_replay_preserves_original_receipt_after_edit(env):
+    row = save_draft(env)
+    first, _ = env.store.begin(**env.args, submission=submission(row), require_current_draft=True)
+    edit_draft(env, row)
+    replay, created = env.store.begin(**env.args, submission=submission(row), require_current_draft=True)
+    assert not created and replay == first
+
+
+@pytest.mark.parametrize("value", [None, 1, "true"])
+def test_current_draft_requirement_cannot_be_silently_coerced(env, value):
+    row = save_draft(env)
+    failure(lambda: env.store.begin(**env.args, submission=submission(row), require_current_draft=value), 422, "INVALID")

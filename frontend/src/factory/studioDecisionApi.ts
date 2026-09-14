@@ -8,6 +8,7 @@ import type {
 } from '../lib/contractReviewApi';
 import { studioIdentityKey } from './studioInputMemory';
 import type { ClarifyQuestionLike } from './clarifyAnswers';
+import type { InputDraftTarget } from '../lib/studioInputDraftApi';
 
 export type HotlRound = {
   taskId: string;
@@ -37,10 +38,16 @@ export type CapabilityReceipt = {
   draft_applied: boolean; note?: string;
 };
 export type HotlDraftRef = { draft_id: string; revision: number; digest: string };
-export type HotlSubmissionReceipt = {
-  request_id: string; task_id: string; status: 'PROCESSING' | 'ACCEPTED' | 'REJECTED' | 'UNKNOWN';
+export type HotlSubmissionRecord = {
+  request_id: string; project_id: string; actor_id: string; task_id: string;
+  target: InputDraftTarget; feedback: string; command_digest: string;
+  status: 'PROCESSING' | 'ACCEPTED' | 'REJECTED' | 'UNKNOWN';
+  result: Record<string, unknown> | null;
   input_draft: HotlDraftRef; created_at: string; updated_at: string; receipt_digest: string;
 };
+/** POST는 요약, GET은 전체 기록이다. 요약 자체를 SHA 재검증된 전체 기록으로 취급하지 않는다. */
+export type HotlSubmissionReceipt = Pick<HotlSubmissionRecord,
+  'request_id' | 'task_id' | 'status' | 'input_draft' | 'created_at' | 'updated_at' | 'receipt_digest'>;
 export type HotlInput = {
   task_id: string; feedback: string; expected_request_id: string; expected_questions_digest: string;
   /** 저장 초안을 닫을 때만 함께 보낸다. 둘 중 하나만 보내면 서버가 422로 거절한다. */
@@ -53,9 +60,9 @@ export interface StudioDecisionApi {
   hotl(): Promise<HotlRound>;
   host(taskId: string): Promise<ContractReviewPending>;
   capabilities(): Promise<CapabilityPending>;
-  resume(body: HotlInput): Promise<{ status: 'resumed'; task_id: string; submission?: HotlSubmissionReceipt }>;
+  resume(body: HotlInput): Promise<{ status: 'resumed' | 'submission_recorded'; task_id: string; submission?: HotlSubmissionReceipt }>;
   /** 응답 유실 뒤 원키 확인. 자동 재전송 대신 이 조회만 제공한다. */
-  readSubmission(requestId: string): Promise<HotlSubmissionReceipt>;
+  readSubmission(requestId: string, original: HotlInput, expected?: HotlSubmissionReceipt): Promise<HotlSubmissionReceipt>;
   decide(body: HostInput): Promise<ContractDecisionResult>;
   reconcile(body: ContractReconcileInput): Promise<ContractReconcileResult>;
   resolve(body: CapabilityInput): Promise<CapabilityReceipt>;
@@ -86,18 +93,58 @@ function object(value: unknown): Record<string, unknown> {
 }
 function malformed() { return new StudioDecisionError('서버 응답 형식을 확인할 수 없습니다. 다시 조회하세요.', 503, 'DECISION_RESPONSE_INVALID'); }
 /** 서버가 고정한 제출 기록만 통과시킨다. 요청 본문과 어긋나면 초안을 닫을 근거가 아니다. */
-function verifiedSubmission(value: unknown, body: { task_id: string; client_request_id?: string; input_draft?: HotlDraftRef } | null): HotlSubmissionReceipt {
+function verifiedSubmissionSummary(value: unknown, body: HotlInput): HotlSubmissionReceipt {
+  const row = object(value), draft = object(row.input_draft);
+  if (!['PROCESSING', 'ACCEPTED', 'REJECTED', 'UNKNOWN'].includes(string(row.status))
+      || !body.input_draft || row.request_id !== body.client_request_id || row.task_id !== body.task_id
+      || !/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/.test(string(row.request_id))
+      || draft.draft_id !== body.input_draft.draft_id || draft.revision !== body.input_draft.revision
+      || draft.digest !== body.input_draft.digest || !isDecisionDigest(draft.digest) || !isDecisionDigest(row.receipt_digest)
+      || !Number.isInteger(draft.revision) || Number(draft.revision) < 1 || !string(draft.draft_id)
+      || !Number.isFinite(Date.parse(string(row.created_at))) || !Number.isFinite(Date.parse(string(row.updated_at)))
+      || Date.parse(string(row.updated_at)) < Date.parse(string(row.created_at))) throw malformed();
+  return structuredClone({ request_id: row.request_id, task_id: row.task_id, status: row.status, input_draft: draft,
+    created_at: row.created_at, updated_at: row.updated_at, receipt_digest: row.receipt_digest }) as HotlSubmissionReceipt;
+}
+async function verifiedSubmission(value: unknown, body: HotlInput, projectId: string, expected?: HotlSubmissionReceipt): Promise<HotlSubmissionRecord> {
   const row = object(value);
   const draft = object(row.input_draft);
+  const target = object(row.target);
+  const same = (a: unknown, b: unknown) => canonicalQuestionJson(a) === canonicalQuestionJson(b);
+  const hash = async (input: unknown) => Array.from(new Uint8Array(
+    await crypto.subtle.digest('SHA-256', new TextEncoder().encode(canonicalQuestionJson(input)))),
+  byte => byte.toString(16).padStart(2, '0')).join('');
   if (!['PROCESSING', 'ACCEPTED', 'REJECTED', 'UNKNOWN'].includes(string(row.status))
-      || !string(row.request_id) || !string(row.task_id) || !string(row.created_at) || !string(row.updated_at)
+      || !/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/.test(string(row.request_id))
+      || row.project_id !== projectId || !string(row.actor_id).trim()
+      || !/^[A-Za-z0-9_-]{1,160}$/.test(string(row.task_id))
+      || !Number.isFinite(Date.parse(string(row.created_at))) || !Number.isFinite(Date.parse(string(row.updated_at)))
+      || Date.parse(string(row.updated_at)) < Date.parse(string(row.created_at))
       || !isDecisionDigest(row.receipt_digest) || !string(draft.draft_id)
       || typeof draft.revision !== 'number' || !Number.isInteger(draft.revision) || draft.revision < 1
-      || !isDecisionDigest(draft.digest)) throw malformed();
-  if (body && (row.request_id !== body.client_request_id || row.task_id !== body.task_id
+      || !isDecisionDigest(draft.digest) || !isDecisionDigest(row.command_digest)
+      || !same(Object.keys(row).sort(), ['request_id', 'project_id', 'actor_id', 'task_id', 'target', 'feedback',
+        'input_draft', 'command_digest', 'status', 'result', 'created_at', 'updated_at', 'receipt_digest'].sort())
+      || !same(Object.keys(draft).sort(), ['digest', 'draft_id', 'revision'])
+      || !same(Object.keys(target).sort(), ['decision_kind', 'kind', 'request_id', 'subject_id', 'target_digest', 'task_id'])) throw malformed();
+  if (row.request_id !== body.client_request_id || row.task_id !== body.task_id || !body.input_draft
       || draft.draft_id !== body.input_draft?.draft_id || draft.revision !== body.input_draft?.revision
-      || draft.digest !== body.input_draft?.digest)) throw malformed();
-  return row as unknown as HotlSubmissionReceipt;
+      || draft.digest !== body.input_draft?.digest || row.feedback !== body.feedback.trim()
+      || target.task_id !== body.task_id || target.request_id !== body.expected_request_id
+      || target.target_digest !== body.expected_questions_digest || target.subject_id !== ''
+      || !((target.kind === 'CLARIFICATION' && target.decision_kind === '')
+        || (target.kind === 'DECISION_COMMENT' && target.decision_kind === 'GENERAL_HOTL'))) throw malformed();
+  if (row.status === 'PROCESSING' ? row.result !== null : !row.result || typeof row.result !== 'object' || Array.isArray(row.result)) throw malformed();
+  // 원본문·원대상과 실제 바이트 지문을 함께 대조한다. 64자리 문자열만으로 무결성을 주장하지 않는다.
+  const command = { client_request_id: row.request_id, task_id: row.task_id, target, feedback: row.feedback, input_draft: draft };
+  const { receipt_digest: receiptDigest, ...unsigned } = row;
+  if (await hash(command) !== row.command_digest || await hash(unsigned) !== receiptDigest) throw malformed();
+  const previous = expected as HotlSubmissionRecord | undefined;
+  if (expected && ((previous?.actor_id !== undefined && row.actor_id !== previous.actor_id)
+      || (previous?.command_digest !== undefined && row.command_digest !== previous.command_digest)
+      || row.created_at !== expected.created_at || Date.parse(string(row.updated_at)) < Date.parse(expected.updated_at)
+      || (expected.status !== 'PROCESSING' && row.receipt_digest !== expected.receipt_digest))) throw malformed();
+  return structuredClone(row) as unknown as HotlSubmissionRecord;
 }
 function string(value: unknown): string { return typeof value === 'string' ? value : ''; }
 export function isDecisionDigest(value: unknown): value is string { return typeof value === 'string' && /^[a-f0-9]{64}$/.test(value); }
@@ -211,15 +258,21 @@ export function createStudioDecisionApi(projectId: string, identity = studioIden
       const bound = !!body.client_request_id || !!body.input_draft;
       if (bound && !(body.client_request_id && body.input_draft)) throw malformed();
       const row = await request('/hotl/resume', body);
-      if (row.status !== 'resumed' || row.task_id !== body.task_id) throw malformed();
+      if (row.task_id !== body.task_id) throw malformed();
       //: 결속 제출인데 접수 기록이 없으면 초안을 닫을 근거가 없다. 조용히 성공으로 넘기지 않는다.
-      const submission = bound ? verifiedSubmission(row.submission, body) : undefined;
-      return { status: 'resumed', task_id: body.task_id, ...(submission ? { submission } : {}) };
+      const submission = bound ? verifiedSubmissionSummary(row.submission, body) : undefined;
+      current();
+      const status = !submission || submission.status === 'ACCEPTED' ? 'resumed' : 'submission_recorded';
+      if (row.status !== status) throw malformed();
+      return { status, task_id: body.task_id, ...(submission ? { submission } : {}) };
     },
-    async readSubmission(requestId) {
+    async readSubmission(requestId, original, expected) {
+      current();
+      if (!original?.input_draft || original.client_request_id !== requestId) throw malformed();
       const row = object((await request(`/hotl/submissions/${encodeURIComponent(requestId)}`)).submission);
-      if (row.request_id !== requestId) throw malformed();
-      return verifiedSubmission(row, null);
+      const receipt = await verifiedSubmission(row, original, projectId, expected);
+      current();
+      return receipt;
     },
     decide: (body) => guarded(async () => {
       const row = await decideContractReview(projectId, body);

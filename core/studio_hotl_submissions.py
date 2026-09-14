@@ -24,7 +24,7 @@ import sqlite3
 import uuid
 
 from core.enterprise_context.process_schema import ProcessError
-from core.studio_input_drafts import Target, canonical, digest, validate_content
+from core.studio_input_drafts import InputDraftError, InputDraftStore, Target, canonical, digest, validate_content
 
 MAX_REQUEST_BYTES = 64 * 1024
 OUTCOMES = frozenset({"ACCEPTED", "REJECTED", "UNKNOWN"})
@@ -177,8 +177,39 @@ class HOTLSubmissionStore:
         payload = dict(boundary=json.loads(boundary_json), record=value)
         return value, canonical(payload), digest(payload)
 
-    def begin(self, *, project_id, actor_id, boundary, submission):
-        """PROCESSING 선기록. 같은 저장 초안 판을 두 번 접수하지 않는다."""
+    def _assert_current_draft(self, conn, identity, command):
+        """접수 INSERT와 같은 BEGIN IMMEDIATE 연결에서만 초안 판을 확인한다."""
+        ref = command["input_draft"]
+        try:
+            row = InputDraftStore(self.store)._get(conn,
+                (identity[2], identity[1], identity[0]), ref["draft_id"])
+        except InputDraftError as exc:
+            if exc.status_code == 404:
+                fail("DRAFT_CONFLICT", "접수할 저장 초안을 현재 문맥에서 확인할 수 없습니다.")
+            raise HOTLSubmissionError("STUDIO_HOTL_DRAFT_INTEGRITY",
+                "접수할 초안의 무결성을 확인하지 못했습니다.", 503) from exc
+        if (row["status"] != "DRAFT" or row["target"] != command["target"]
+                or row["revision"] != ref["revision"] or row["digest"] != ref["digest"]):
+            fail("DRAFT_CONFLICT", "접수 직전 저장 초안의 상태·대상·판본이 바뀌었습니다.")
+        try:
+            content = validate_content(row["target"], row["content"])
+        except (ValueError, KeyError, ProcessError) as exc:
+            raise HOTLSubmissionError("STUDIO_HOTL_DRAFT_INTEGRITY",
+                "접수할 초안 본문의 무결성을 확인하지 못했습니다.", 503) from exc
+        # 명확화 조합은 API가 락 밖에서 검증한다. 같은 초안 digest를 재검증했으므로
+        # 검증한 선택/메모가 접수 사이 바뀌면 위에서 차단된다.
+        if row["target"]["kind"] == "DECISION_COMMENT" and command["feedback"] != content["text"].strip():
+            fail("DRAFT_CONFLICT", "제출 의견과 저장 초안 본문이 다릅니다.")
+
+    def begin(self, *, project_id, actor_id, boundary, submission, require_current_draft=False):
+        """PROCESSING 선기록. HTTP 접수는 require_current_draft=True를 필수로 전달한다.
+
+        기존 단독 원장 호출은 기본값으로 호환한다. 현재 권한/질문 조회는 락 밖에서
+        호출자가 수행하며 여기서는 동일 DB 초안 판만 검사한다. 원키 replay는
+        이미 접수된 판을 반환하므로 소비/수정된 현재 초안을 다시 요구하지 않는다.
+        """
+        if type(require_current_draft) is not bool:
+            fail("INVALID", "초안 현재판 검증 여부는 명시적 bool이어야 합니다.", 422)
         identity, command = _identity(project_id, actor_id, boundary), _submission(submission)
         key, fingerprint = command["client_request_id"], digest(command)
         with self.transaction(write=True) as conn:
@@ -188,6 +219,8 @@ class HOTLSubmissionStore:
                 if value["command_digest"] != fingerprint:
                     fail("IDEMPOTENCY_CONFLICT", "같은 요청 ID의 제출 내용이 다릅니다.")
                 return value, False
+            if require_current_draft:
+                self._assert_current_draft(conn, identity, command)
             #: ★ 요청 키를 바꿔도 같은 초안 판으로 두 번 제출하지 않는다. 같은 사용자·문맥만 본다 —
             #:   타인의 본문/판본을 이 판정으로 노출하지 않는다.
             for row in conn.execute("""SELECT * FROM studio_hotl_submissions
