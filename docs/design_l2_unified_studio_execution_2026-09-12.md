@@ -337,7 +337,23 @@ v1 writer 차단, 데이터 없는 지도 승인, 정확한 artifact/bundle dige
 - L2와 앱은 다대다. 연결 변경으로 기존 앱/release ID를 복제하거나 코드 재생성을 자동 실행하지 않는다.
 - 원문 업무/지식 설명은 요구사항 데이터다. 그 안의 지시문이 권한이나 도구 실행 지시가 되지 않는다.
 
-### 8.3 API 변경 목록(제안, 아직 미구현)
+### 8.3 API 변경 목록(제안 → **대부분 구현됨. 2026-09-14 실측 대조**)
+
+> **정정 2026-09-14 (Claude Code):** 이 절의 「아직 미구현」은 **2026-09-12 작성 시점**의 상태다.
+> 그 뒤 B1~B5 가 진행됐으므로 실제 소스와 대조해 아래 표에 결과를 적는다. 낡은 표시를 그대로
+> 두면 다음 담당이 이미 있는 것을 다시 만든다.
+>
+> | 행 | 실측 | 근거 |
+> |---|---|---|
+> | ECM process-configurations/context | **구현** | `api/routes/process_configuration_control.py` — `/context`·`/resolved`·`/events`·`/changes` |
+> | advisor 초안의 process reference | **구현** | `core/advisor_revision_store.py` 컬럼 `process_context`·`process_ref`, `core/studio_drafts.py` |
+> | project meta/state 의 process context 보존 | **구현** | `core/studio_project_context.py` (`meta["process_context"]["context_key"]`) |
+> | kit_app_contract / app_runtime_contract | **구현** | `core/app_runtime_contract.py` schema_version·의미 판정 단일화(`business_data_semantics`) |
+> | sprint/clarify/HOTL/release 공통 actions | **구현** | `frontend/src/factory/sprintActions.ts`·`studioNextAction.ts`, B5 에서 실행 명령·HOTL 결속까지 |
+> | process changes/approve/install/resume | **구현** | `/process-changes/{id}/validate·approve·reject`, `/process-installations/plan·{id}/resume` |
+>
+> ★ **표의 「계약 변경 및 검증」 열은 여전히 유효한 설계 기준이다** — 구현됐다는 것이 그 기준을
+> 모두 만족한다는 뜻은 아니다. 각 배치의 출구 판정은 해당 인계 문서를 따른다.
 
 | 생산자/저장 | 소비자 | 계약 변경 및 검증 |
 |---|---|---|
@@ -561,6 +577,14 @@ Supervisor의 추가 요청에 따라 이후 단계 보고에는 **현재 전체
 요청 Codex / 독립 사전 대조 James / 메인 소스 재확인. B1/B2의 ID 지정 API가 존재하는 것과
 새 담당자가 대기 작업을 찾아서 승인·새로고침까지 마치는 것은 다르다. 아래는 B4의 기존
 설치→조회→기본 수정→별도 승인 출구를 완결하기 위한 보강이며, 이 기록 시점에는 구현하지 않았다.
+
+> **정정 2026-09-14 (Claude Code):** 위 「구현하지 않았다」는 **09-13 09:40 기준**이다. B4 는 같은 날
+> 17:14 에 마감됐고, 실측 대조 결과 **다섯 항목 모두 구현돼 있다.**
+> ① `permitted_actions` 별도 제공 ② `/process-installations` 목록·상세 GET
+> ③ 수정 명령 8종(`ADD_NODE`·`RENAME`·`SET_USAGE`·`MOVE_NODE`·`ADD_SHORTCUT`·`REMOVE_SHORTCUT`
+> + 보강분 `REORDER`·`SET_NOTE`) ④ 실제 경로 `/process-installations` ⑤ `companyApi`·
+> `CompanySetupPanel`·`ProcessConfigurationEditor`·`ProcessStructureEditor`.
+> 실제 브라우저·현업 수용은 여전히 B7 이다.
 
 1. **서버 문맥과 행동 조회.** 명시 선택 scope에서 B1의 활성·유효기간·단일 OPERATING_PARENT
    검증으로 확정한 root/boundary를 반환한다. 표시 트리의 default_parent_id나 회사 ID로 대체하지 않는다.

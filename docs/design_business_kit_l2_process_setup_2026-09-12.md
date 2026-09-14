@@ -1,6 +1,20 @@
 # 업무키트 L2 표준 프로세스 셋업 상세 설계
 
-> 작성: Codex · 2026-09-12 · 상태: 상세 설계안 / 제품 코드 미구현
+> 작성: Codex · 2026-09-12 · 상태: 상세 설계안
+>
+> **정정 2026-09-14 (Claude Code):** 머리말의 「제품 코드 미구현」은 **작성 시점(09-12)** 의
+> 상태다. 그 뒤 B1·B2 가 이 설계의 상당 부분을 구현했으므로 실측 결과를 남긴다.
+>
+> | 이 문서의 절 | 실측 | 근거 |
+> |---|---|---|
+> | §5 패키지 계약(배치·버전·불변 보존) | **구현** | `process_packs/afs.manufacturing.materials-processes/1.1.0/` (manifest·profile·blueprints·processes) |
+> | §6 회사별 데이터 모델(v2 저장·문맥 키) | **구현** | `core/enterprise_context/process_{schema,configuration,context,references,installation}.py` |
+> | §7 키트 설치·적용 흐름 | **구현** | `api/routes/process_installation_control.py` (plan → start → resume → 승인) |
+> | §4 초기 L2 표준 카탈로그 | **부분** | 팩에 8 L1/29 L2 등재. 개별 ERP 업무 앱 전량 구현은 명시적 범위 밖 |
+>
+> ⚠️ **구현됐다는 것이 이 문서의 합격 기준을 모두 만족한다는 뜻은 아니다.** 각 배치의 출구
+> 판정은 `docs/handoff/L2_STUDIO_B*.md` 를 따르고, 실제 브라우저·현업 수용은 B7 로 남아 있다.
+> 운영 회사 데이터에 이 팩이 적용된 상태도 아니다.
 >
 > 사용자 확정 방향: 업무키트 제공 시 L2 표준 프로세스까지 셋업하며, 현업이 변경할 수 있어야 한다.
 >
