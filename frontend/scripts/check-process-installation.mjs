@@ -1648,7 +1648,12 @@ test('STATIC: 두 진입 버튼의 단일 패널·닫기 재조회 배선 / DOM�
     } else {
       assert.match(entry, /setRevision\(\(\s*(\w+)\s*\)\s*=>\s*\1\s*\+\s*1\)/);
       assert.match(entry, /setInstances\(null\)/);
-      assert.match(text, /\},\s*\[revision\]\)/);
+      // 위 EnterprisePage 와 같은 방식으로 **의존성 목록에 들어 있는지**만 본다.
+      // ⚠️ 종전에는 `[revision]` 정확 일치를 요구해, 같은 커밋(58713ed1d)이 문맥 전환
+      //   재조회를 위해 `identity` 를 더하자 정상 배선이 실패로 닫혔다. 의존성 추가는
+      //   이 검사가 막으려는 것(재조회 미배선)이 아니다.
+      const instanceDeps = text.match(/listInstances\(\)[\s\S]*?\},\s*\[([^\]]*)\]\)/)?.[1] || '';
+      assert.match(instanceDeps, /\brevision\b/);
       assert.match(text, /setSelected\(\(previous\)\s*=>\s*rows\.some\([\s\S]*?===\s*previous\)\s*\?\s*previous\s*:\s*rows\.length\s*===\s*1\s*\?\s*String\(rows\[0\]\.instance_id\s*\|\|\s*''\)\s*:\s*''\)/);
     }
     assert.match(text, /<button\s+ref=\{processButton\}[\s\S]*?onClick=\{\(\)\s*=>\s*setShowProcessConfiguration\(true\)\}>업무 구성 · L1\/L2 수정<\/button>/, name);

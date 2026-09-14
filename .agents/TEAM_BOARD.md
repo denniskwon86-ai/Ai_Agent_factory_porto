@@ -3,7 +3,7 @@
 ## Claude Code B5 일반HOTL 초안 소비·구 release/replan 접수 기록 — 2026-09-14 KST
 
 - 작성자/왜지금: Claude Code. Codex 23:03 인계 §8.1이 「다음 구현」으로 지정한 일반HOTL 저장 초안 결속과, 같은 인계가 잔여로 남긴 구 release/replan 원키 없는 UNKNOWN 을 닫았다. 사용자 지시로 codex/l2-unified-studio-20260912 브랜치를 이어받아 작업했다.
-- 근거: 서버 310PASS/177.52초, 프런트 137PASS(기존127+신규10), tsc0·build PASS. 착수 전 기준선 157PASS 선확인. 계약 첫 실행 135PASS/2FAIL(`operations` 목록 누락) 수정 이력 보존. `check-process-installation.mjs` 104PASS 뒤 중단은 이 워크트리 CRLF 체크아웃 사유이며 변경 파일 아님.
+- 근거: 서버 310PASS/177.52초, 프런트 137PASS(기존127+신규10), tsc0·build PASS. 착수 전 기준선 157PASS 선확인. 계약 첫 실행 135PASS/2FAIL(`operations` 목록 누락) 수정 이력 보존. `check-process-installation.mjs` 104PASS 뒤 중단은 **CRLF 가 아니었다** — 58713ed1d 가 소스 의존성에 `identity` 를 더했는데 검사가 정확 일치를 요구한 회귀다. 검사를 동일 파일 기존 방식에 맞춰 105PASS 복구(제품 소스 불변).
 - 결정/상태: 일반HOTL 제출에 접수 기록을 붙이고 초안 소비를 명시 CAS 로 연결. RELEASE·REPLAN 을 실행 명령에 편입(고정 task_id `PROJECT`). **명확화 초안 소비는 임의로 정하지 않고 설계 결정 대기로 남겼다** — 제출 본문이 화면 조합이라 서버 대조가 불가능하고, 조합 규칙을 서버에 복제하면 표시 문구가 두 곳이 된다. 전체21/40=52.5%·로컬18/28 유지, 제품 관문 신규 완료 아님.
 - 다음/담당/조건: 명확화 소비는 사용자 결정 후 착수(선택지 두 개는 인계 문서에 정리). B6 단일 진입은 병렬개발 통합계획 원본 확보가 선행 조건이며 지정 두 경로·저장소 전체·모든 브랜치 이력에서 미확인 — 사용자 제공 필요. B7 실제 브라우저 수용은 별도.
 - 영향/주의: main.py·App.tsx diff0. 기존 `/hotl/resume`·`/release`·`/wbs/replan` 경로와 서버 동작 불변, 구 호출 호환 유지. 원본 트리(`C:/AI Workspace/Ai_Agent_factory_porto-dev`, integration 브랜치)는 건드리지 않았다 — 두 세션이 같은 저장소를 공유한다. 이 워크트리 venv 는 Python 3.12.10 이며 경로 길이 제한으로 torch·transformers 제외 설치다.
