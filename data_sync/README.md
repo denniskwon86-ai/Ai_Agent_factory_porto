@@ -1,5 +1,53 @@
 # 세션 간 설정·업무 데이터 전달
 
+## 최신: 키 없이 다른 PC로 복원 — 2026-09-15
+
+사용자가 “그냥 복호화하고 다 공유해줘요”로 기존 스냅샷 평문 공유를 승인했다.
+이제 **session-data-20260913.zip을 pull로 받으면 키가 필요 없다.**
+공개 저장소에서 누구나 내용을 읽을 수 있다. 암호화본과 같은 164파일(15DB·143RAW·설정6개)을
+바이트 변경 없이 전달하며, 스냅샷 내부 manifest도 보존했다. 새로 추출한 최신 데이터가 아니라
+**2026-09-13 시점의 데이터**다.
+
+### 다른 Windows PC에서 실행
+
+1. codex/l2-unified-studio-20260912 브랜치를 최신 상태로 받는다.
+2. 새 checkout 경로를 C:\WorkSpace\gemini_agent_team_verG로 맞춘다.
+   기존 DB가 있는 checkout은 덮어쓰지 않는다. 원본 PC에는 복원하지 않는다.
+3. Python 가상환경과 저장소 의존성을 준비하고 앱을 중지한다.
+4. 저장소 루트에서 다음 명령을 순서대로 실행한다. 각 명령이 성공한 뒤 다음으로 진행한다.
+
+    venv/Scripts/python.exe -B scripts/session_data_snapshot.py verify --bundle data_sync/session-data-20260913.zip
+
+    venv/Scripts/python.exe -B scripts/session_data_snapshot.py restore --bundle data_sync/session-data-20260913.zip --destination C:/WorkSpace/gemini_agent_team_verG
+
+검증 기대값: verified_files=164, verified_databases=15, all_file_hashes_match=true.
+평문 ZIP이므로 authenticated_decryption=false가 정상이다. SHA 검사는 손상 검사용이며
+독립적인 배포자 서명/인증을 제공하지 않는다.
+복원은 DB/RAW/설정을 명시적으로 채우는 단계다. **pull만 해서는 실행 DB가 자동 생성되지 않는다.**
+기존 파일 때문에 거절되면 삭제로 해결하지 말고 충돌 경로를 보고한다.
+
+다른 경로/OS에서는 DB 내부 절대 참조 때문에 아래 **검사용 사본**만 지원한다.
+이 사본을 실행 환경 이관 완료로 보고하지 않는다.
+
+    venv/Scripts/python.exe -B scripts/session_data_snapshot.py restore --bundle data_sync/session-data-20260913.zip --destination output/session-handoff/plain-inspection --copy-only
+
+### 범위와 검증
+
+- 암호화본에서 제외했던 .env·API 키·비밀번호·인증 DB·세션·커넥터·개인 대화·로그·생성 프로젝트·체크포인트·library는 여전히 제외다. 이를 추가로 수집한 “PC 전체 백업”이 아니다.
+- 로그인 계정은 새 환경에서 별도 준비한다. 실제 화면·권한·참조 자산 확인은 복원 후 필요하다.
+- 원본 암호화본/키/업무 DB는 수정하지 않았다. 키는 Git에 추가하지 않는다.
+- ZIP SHA256: 9c60dccd210974fecc7a65f3945d2617371d416cb12a01153fa80d411977ab34.
+- ZIP 크기: 13,671,964bytes. 164개 파일 해시 및 암호화본과의 전체 내용 일치 확인.
+- 이관 도구 회귀15건 통과. 대표 자격증명 패턴 미탐지이며 전체 개인정보/DLP 무결점 보장은 아니다.
+- 실제 검사 사본 복원 후164파일 해시와15DB quick_check·전체 표별 건수를 원본 manifest와 대조해 통과했다. 다른 PC 앱 실행 수용은 아직 별도다.
+- 기존 암호화본은 호환성을 위해 남겨두지만 **같은 내용의 평문을 공개했으므로 그 내용의 기밀성은 더 이상 보장되지 않는다.**
+
+## 이하: 이전 암호화본 절차 — 새 PC에서는 위 ZIP 절차 우선
+
+아래 “키 별도 전달/평문 금지”는 이전 승인 당시 기록이다.
+2026-09-15 사용자 승인으로 **이 특정 스냅샷의 평문 공유만** 변경되었다.
+다른 데이터/자격증명 전체 공개나 기존 데이터 덮어쓰기를 허용하는 것은 아니다.
+
 > **전달 상태: 사용자 명시 승인으로 암호문 Git 포함(2026-09-13 23:45 KST).** 공개 저장소에 암호화 업무 스냅샷을 추가하고 복호화 키는 별도 비공개 전달한다는 조건을 안내한 후 사용자가 “네 승인합니다”로 승인했다. 이 추가 커밋은 `session-data-20260913.aesgcm`을 포함한다. `pull`로 암호문을 받고, 별도 키를 준비한 뒤 아래 명령으로 검증·복원한다. 평문 DB·키·인증정보는 Git에 추가하지 않는다. 앞선 `58713ed1d`에서는 암호문이 제외돼 있었다.
 
 GitHub 원격은 2026-09-13 확인 시 **public**이다. 평문 운영 DB를 강제 추적하지 않는다.

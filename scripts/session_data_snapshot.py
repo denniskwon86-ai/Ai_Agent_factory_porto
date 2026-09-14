@@ -1,6 +1,6 @@
-"""Encrypted, non-overwriting cross-session business-data transport (no app imports).
+"""Non-overwriting encrypted or user-approved plaintext data transport.
 
-The ciphertext may be committed; its random key MUST travel separately.
+Encrypted bundles require a separately held key; plaintext ZIPs do not.
 This is a configuration/data backup, not a running-worker/checkpointer migration.
 """
 from __future__ import annotations
@@ -173,15 +173,23 @@ def export_snapshot(root: Path, bundle: Path, key_file: Path, report: Path) -> d
     return public
 
 
-def read_snapshot(bundle: Path, key_file: Path):
+def read_snapshot(bundle: Path, key_file: Path | None = None):
     cipher = bundle.read_bytes()
+    if zipfile.is_zipfile(io.BytesIO(cipher)):
+        return read_archive(cipher)
     if not cipher.startswith(MAGIC) or len(cipher) < len(MAGIC) + 28:
         raise ValueError("Unknown bundle format")
+    if key_file is None:
+        raise ValueError("Encrypted bundle requires --key-file")
     key = base64.urlsafe_b64decode(key_file.read_bytes().strip())
     if len(key) != 32:
         raise ValueError("Invalid key length")
     nonce = cipher[len(MAGIC):len(MAGIC) + 12]
     plain = AESGCM(key).decrypt(nonce, cipher[len(MAGIC) + 12:], MAGIC)
+    return read_archive(plain)
+
+
+def read_archive(plain: bytes):
     with zipfile.ZipFile(io.BytesIO(plain)) as archive:
         names = archive.namelist()
         if len(names) != len(set(names)):
@@ -200,7 +208,29 @@ def read_snapshot(bundle: Path, key_file: Path):
     return manifest, files
 
 
-def restore_snapshot(bundle: Path, key_file: Path, destination: Path, *, copy_only=False) -> dict:
+def decrypt_snapshot(bundle: Path, key_file: Path, output_bundle: Path) -> dict:
+    """기존 승인 범위만 평문 ZIP으로 전달하며 원본과 키를 보존한다."""
+    if output_bundle.exists() or output_bundle.resolve() in (bundle.resolve(), key_file.resolve()):
+        raise ValueError("Output already exists or overlaps input; no overwrite")
+    manifest, files = read_snapshot(bundle, key_file)
+    stream = io.BytesIO()
+    with zipfile.ZipFile(stream, "w", zipfile.ZIP_DEFLATED, compresslevel=6) as archive:
+        for name, raw in files.items():
+            archive.writestr(name, raw)
+        archive.writestr("manifest.json", json.dumps(manifest, ensure_ascii=False, indent=2))
+    plain = stream.getvalue()
+    # 검증을 마친 뒤에만 새 파일을 생성한다. 본문/키는 출력하지 않는다.
+    if read_archive(plain) != (manifest, files):
+        raise ValueError("Plaintext round-trip mismatch")
+    exclusive_write(output_bundle, plain)
+    return {"file_count": len(files), "database_count": len(manifest["tables"]),
+            "bundle_sha256": digest(plain), "bundle_bytes": len(plain),
+            "encrypted": False, "requires_separate_key": False,
+            "source_snapshot_created_at": manifest["created_at"],
+            "excluded": manifest["excluded"]}
+
+
+def restore_snapshot(bundle: Path, key_file: Path | None, destination: Path, *, copy_only=False) -> dict:
     manifest, files = read_snapshot(bundle, key_file)
     destination = destination.absolute()
     regular(destination, destination)
@@ -239,21 +269,27 @@ def restore_snapshot(bundle: Path, key_file: Path, destination: Path, *, copy_on
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("operation", choices=("export", "verify", "restore"))
+    parser.add_argument("operation", choices=("export", "verify", "restore", "decrypt"))
     parser.add_argument("--bundle", type=Path, required=True)
-    parser.add_argument("--key-file", type=Path, required=True)
+    parser.add_argument("--key-file", type=Path)
+    parser.add_argument("--output-bundle", type=Path)
     parser.add_argument("--report", type=Path)
     parser.add_argument("--destination", type=Path)
     parser.add_argument("--copy-only", action="store_true")
     args = parser.parse_args()
     if args.operation == "export":
-        if args.report is None:
-            parser.error("export requires --report")
+        if args.report is None or args.key_file is None:
+            parser.error("export requires --report and --key-file")
         result = export_snapshot(ROOT, args.bundle, args.key_file, args.report)
+    elif args.operation == "decrypt":
+        if args.key_file is None or args.output_bundle is None:
+            parser.error("decrypt requires --key-file and --output-bundle")
+        result = decrypt_snapshot(args.bundle, args.key_file, args.output_bundle)
     elif args.operation == "verify":
         manifest, files = read_snapshot(args.bundle, args.key_file)
         result = {"verified_files": len(files), "verified_databases": len(manifest["tables"]),
-                  "authenticated_decryption": True, "all_file_hashes_match": True}
+                  "authenticated_decryption": args.bundle.read_bytes().startswith(MAGIC),
+                  "all_file_hashes_match": True}
     else:
         if args.destination is None:
             parser.error("restore requires --destination")

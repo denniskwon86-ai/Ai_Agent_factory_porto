@@ -8,7 +8,7 @@ import unittest
 
 from cryptography.exceptions import InvalidTag
 from scripts.session_data_snapshot import (
-    allowed, export_snapshot, read_snapshot, restore_snapshot, safe_relative,
+    allowed, decrypt_snapshot, export_snapshot, read_snapshot, restore_snapshot, safe_relative,
 )
 
 
@@ -60,6 +60,37 @@ class SessionDataSnapshotTests(unittest.TestCase):
         with self.assertRaises(InvalidTag):
             restore_snapshot(self.bundle, self.key, Path(self.temp.name) / "copy", copy_only=True)
         self.assertFalse((Path(self.temp.name) / "copy").exists())
+
+    def test_plaintext_round_trip_without_key(self):
+        self.export()
+        plain = Path(self.temp.name) / "shared.zip"
+        result = decrypt_snapshot(self.bundle, self.key, plain)
+        self.assertFalse(result["requires_separate_key"])
+        self.assertEqual(read_snapshot(plain), read_snapshot(self.bundle, self.key))
+        target = Path(self.temp.name) / "plain-copy"
+        self.assertEqual(restore_snapshot(plain, None, target, copy_only=True)["files_restored"], 3)
+        self.assertFalse((target / "inspection-files/data/auth.db").exists())
+        with self.assertRaisesRegex(ValueError, "already exists"):
+            decrypt_snapshot(self.bundle, self.key, plain)
+
+    def test_encrypted_input_still_requires_key(self):
+        self.export()
+        with self.assertRaisesRegex(ValueError, "requires --key-file"):
+            read_snapshot(self.bundle)
+
+    def test_plaintext_tampering_rejected_before_restore(self):
+        import zipfile
+        self.export()
+        manifest, files = read_snapshot(self.bundle, self.key)
+        plain = Path(self.temp.name) / "tampered.zip"
+        with zipfile.ZipFile(plain, "w") as archive:
+            archive.writestr("manifest.json", json.dumps(manifest))
+            for name, raw in files.items():
+                archive.writestr(name, b"tampered" if name.endswith(".csv") else raw)
+        target = Path(self.temp.name) / "tampered-copy"
+        with self.assertRaisesRegex(ValueError, "hash mismatch"):
+            restore_snapshot(plain, None, target, copy_only=True)
+        self.assertFalse(target.exists())
 
     def test_wrong_key_rejected(self):
         self.export()
