@@ -107,6 +107,17 @@ def test_server_cohort_prevents_restored_release_downgrade(runtime, damage):
         require(runtime)
 
 
+@pytest.mark.parametrize("operation", [None, {"stage": "RESERVED"}, {"stage": "LEDGER_PENDING"},
+                                       {"stage": "FAILED_RETRYABLE"}, {"stage": "FAILED_BLOCKED"}])
+def test_incomplete_project_setup_blocks_release_even_with_approved_contract(runtime, operation):
+    """저장소는 미완료 단계도 그대로 돌려준다. 실행 허용 단계 확인은 이 경계의 책임이다."""
+    from core.advisor_revision_store import RevisionStoreError
+    # 승인 계약·고정 적용본은 온전하다. 막는 근거는 계약이 아니라 프로젝트 준비 단계다.
+    indexed = SimpleNamespace(is_v2_project=lambda _: True, get_for_project=lambda **_: operation)
+    with pytest.raises(RevisionStoreError, match="준비"):
+        require(runtime, revisions=indexed)
+
+
 def test_actual_route_dispatch_consumes_fixed_only(runtime, monkeypatch):
     from api.routes import app_data_runtime as route
     from core import studio_release_context as rc, studio_runtime_data as data

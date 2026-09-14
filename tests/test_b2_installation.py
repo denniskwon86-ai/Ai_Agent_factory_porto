@@ -512,6 +512,41 @@ def test_next_business_kit_reuses_explicit_instance_and_resolves_existing_shortc
     assert optional["enabled"] is False
 
 
+def test_same_standard_task_reuses_one_canonical_node_and_never_duplicates(installation):
+    """같은 표준 업무는 한 정본으로 재사용한다. 재설치가 업무를 늘리지 않는다."""
+    w = installation
+    first = _prepared(w)
+    _apply(w, first)
+    before = {node["process_id"]: node["template_key"] for node in _read(w)["payload"]["nodes"]}
+    planned = _plan(w, business_kit_ids=["BK-01"], instance_id=first["kit_instance_ref"],
+                    reason="같은 업무키트 재설치")
+    _apply(w, _resume(w, _start(w, planned, key="install-same-kit")))
+    assert {node["process_id"]: node["template_key"] for node in _read(w)["payload"]["nodes"]} == before
+
+
+@pytest.mark.parametrize("case,message", [("fixed_mapping", "이미 고정된"), ("level", "계층·부모"),
+                                          ("already_bound", "이미 다른 표준")])
+def test_standard_task_mapping_conflict_is_explicit_and_never_merges_by_name(installation, case, message):
+    """표준 업무를 이름으로 합치지 않는다. 어긋난 대응은 계획 단계에서 갈래별로 막는다."""
+    from core.enterprise_context.process_schema import ProcessError
+    w = installation
+    first = _prepared(w)
+    _apply(w, first)
+    before = _state(w)
+    keys = {node["template_key"]: node["process_id"] for node in _read(w)["payload"]["nodes"]}
+    kits, mapping = {
+        "fixed_mapping": (["BK-01"], {"sourcing": "proc_" + "0" * 32}),
+        "level": (["BK-02"], {"logistics": keys["sourcing.plan"]}),
+        "already_bound": (["BK-02"], {"logistics": keys["sourcing"]}),
+    }[case]
+    with pytest.raises(ProcessError) as raised:
+        _plan(w, business_kit_ids=kits, instance_id=first["kit_instance_ref"],
+              template_mapping=mapping, reason="표준 업무 대응 검토")
+    assert raised.value.reason_code == "PROCESS_MAPPING_CONFLICT" and raised.value.status_code == 409
+    assert message in str(raised.value)
+    assert _state(w) == before
+
+
 def test_bundle_stub_synthetic_mode_never_installs_into_real_context(installation, monkeypatch):
     w = installation
     stub = copy.deepcopy(w["bundle"])

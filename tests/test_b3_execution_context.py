@@ -35,6 +35,28 @@ def project(real_studio):
                            project_id=operation["project_id"], workspace=Path(workspace_path(operation["project_id"])))
 
 
+@pytest.fixture
+def incomplete(real_studio, monkeypatch):
+    """원장 접수 직전에서 멈춘 프로젝트. 고정 파일은 다 쓰였고 준비만 끝나지 않았다."""
+    from tests.test_b3_studio_bootstrap import _make_bootstrap, _bootstrap, _operation
+    from core.advisor_revision_store import RevisionStoreError
+    from core.paths import workspace_path
+
+    env = _make_bootstrap(real_studio)
+    approved = _decide(env, _save(env))
+
+    def unacknowledged(*_, **__):
+        raise OSError("원장 접수 실패")
+
+    monkeypatch.setattr(env.bootstrap, "_append_event", unacknowledged)
+    with pytest.raises(RevisionStoreError):
+        _bootstrap(env, approved)
+    operation = _operation(env)
+    assert operation["stage"] != "COMPLETED" and operation["resume_stage"] == "LEDGER_PENDING"
+    return SimpleNamespace(**vars(env), operation=operation, approved=approved,
+                           project_id=operation["project_id"], workspace=Path(workspace_path(operation["project_id"])))
+
+
 def check(env, action="DRAFT", **changes):
     from core.studio_project_context import project_context
     return project_context(env.project_id, **{"actor": env.author, "context": env.context,
@@ -53,6 +75,17 @@ def test_no_data_project_cannot_generate_or_run_or_release(project):
     for action in ("GENERATE", "RUN", "RELEASE"):
         with pytest.raises(ProcessError):
             check(project, action, actor=project.reviewer)
+
+
+def test_incomplete_setup_blocks_every_action_even_with_intact_files(incomplete):
+    """저장소는 미완료 단계도 반환한다. 실행 허용 단계 확인은 이 경계의 책임이다."""
+    from core.studio_project_files import read_json
+    from core.advisor_revision_store import RevisionStoreError
+    # 고정 파일은 온전하다. 막는 근거는 파일 손상이 아니라 준비 단계다.
+    assert read_json(incomplete.workspace / "project_meta.json")["process_context"] == incomplete.approved["process_ref"]
+    for action in ("DRAFT", "GENERATE", "RUN", "RELEASE"):
+        with pytest.raises(RevisionStoreError, match="준비"):
+            check(incomplete, action, actor=incomplete.reviewer)
 
 
 @pytest.mark.parametrize("meta", [None, {"runtime_document_version": "1.0"}])
