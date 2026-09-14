@@ -1,5 +1,15 @@
 # AI Factory Studio 팀 현황판
 
+## Claude Code 2026-09-14 하루치 마감 — B5 저장 출구 완료·B6 차단 보고
+
+- 작성자/왜지금: Claude Code. 사용자 지시로 오늘 작업을 마감하고 인계를 남긴다. 하루 인계 정본은 `docs/handoff/CLAUDE_TO_CODEX_2026-09-14.md`.
+- 완료: 일반HOTL·명확화 초안 사용완료 결속(설계안 갈래 A, 사용자 결정), 구 release/replan 접수 기록, `check-process-installation` 회귀 해소, 원키 재조회 배선·접근성 정적 보강. 커밋 4개(0ba6674a8·ba7f9f06b·4cd1ffc45·aacfe86a6), 미푸시. **B5 저장 출구 전부 닫힘**, B5 전체는 미완.
+- 근거: 서버 392PASS/178.30초, 프런트 139PASS, 설치 계약 105PASS, tsc0·build PASS, 보호자산·소스지문 불변. 착수 전 기준선 157PASS 선확인. 실패 기록 보존(계약 135PASS/2FAIL, 서버 중간 2FAIL) — 첫 실패를 최종 PASS 로 치환하지 않았다.
+- ⚠️ 스스로 낸 오류 두 건을 인계에 남겼다: ① 검증 없이 원인을 CRLF 로 단정해 문서 3곳·커밋에 적었다가 정정 ② `recheckSubmission` 배선 누락(시험만 초록). 재발 방지 규칙과 STATIC 검사를 각각 넣었다.
+- 결정/주의: Codex 커밋 `58713ed1d` 의 소스·검사 불일치를 **검사 쪽을 고쳐** 해소했다(소스가 옳다는 판단, 동일 파일 기존 방식에 맞춤). 이견 시 인계 해당 절 근거로 되돌릴 수 있다. 명확화 조합 규칙이 화면·서버 두 곳이며 고정 예제 잠금의 한계(한쪽만 고치면 못 잡음)를 두 파일 머리말에 명시했다.
+- 다음/담당/조건: **B6 는 병렬개발 통합계획 원본이 있어야 착수한다** — 사용자 확인상 물리적으로 떨어진 디스크에 있어 오늘 전달 불가. B7 은 B6 선행. B5 잔여는 실제 브라우저 수용(환경 미비 NOT_RUN). 「서버 PROCESSING/UNKNOWN 운영 복구」는 B5/후속 미정 그대로.
+- 영향/주의: main.py·App.tsx diff0. 기존 경로·서버 동작 불변, 구 호출 호환 유지. 원본 트리(integration 브랜치)와 그쪽 분류 작업은 건드리지 않았다. 이 워크트리 venv 는 3.12.10·torch/transformers 제외. `data_sync` 암호문은 키 부재로 열지 못했고 오늘 작업은 전부 합성 격리 환경이다.
+
 ## Claude Code B5 일반HOTL 초안 소비·구 release/replan 접수 기록 — 2026-09-14 KST
 
 - 작성자/왜지금: Claude Code. Codex 23:03 인계 §8.1이 「다음 구현」으로 지정한 일반HOTL 저장 초안 결속과, 같은 인계가 잔여로 남긴 구 release/replan 원키 없는 UNKNOWN 을 닫았다. 사용자 지시로 codex/l2-unified-studio-20260912 브랜치를 이어받아 작업했다.
