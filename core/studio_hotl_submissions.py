@@ -5,10 +5,16 @@
 지문 규칙은 `studio_input_drafts`와 같은 것을 쓴다 — 초안 판본과 대조해야 하므로
 두 벌을 두면 같은 본문이 서로 다른 지문을 갖는다.
 
-⚠️ **명확화 답변(CLARIFICATION)은 이 저장소가 받지 않는다.** 화면이
-`serializeClarifyAnswers`로 질문·선택지·설명을 엮어 제출하므로 저장한 초안의
-`selections`와 제출 본문을 서버가 대조할 수 없다. 조합 규칙을 서버에 복제하면
-표시 문구가 두 곳이 되고 조용히 어긋난다. 그 결속은 별도 설계 대상이다.
+일반 HOTL 검토 의견과 명확화 답변을 받는다. 계약·능력·데이터셋 결정은 원장 사건이
+증거이므로 여기 오지 않는다(`studio_input_drafts.verify_decision_submission`).
+
+★ 두 종류는 **본문 대조 지점이 다르다.**
+  · 일반 HOTL — 제출 본문이 초안 `content.text` 를 다듬은 것이라 소비 시점에 바로 맞춘다.
+  · 명확화 — 화면이 질문·선택지·설명을 엮어 제출하므로 **접수 시점에** 서버가
+    `core.clarify_answers.serialize` 로 재현해 대조한다(설계안 갈래 A,
+    `docs/design_l2_clarification_draft_consumption_2026-09-14.md`). 접수된 뒤에는 그
+    대조가 끝났으므로 소비는 저장 판본 결속만 확인한다 — 차수가 지나가면 질문을 다시
+    읽을 수 없기 때문이다.
 """
 from contextlib import contextmanager
 from datetime import datetime, timezone
@@ -66,9 +72,10 @@ def _submission(value):
         target = Target.model_validate(value["target"]).model_dump()
     except Exception as exc:
         raise HOTLSubmissionError("STUDIO_HOTL_INVALID", "현재 결정 대상을 확인하십시오.", 422) from exc
-    #: ⚠️ 명확화는 위 머리말의 이유로 거절한다. 「지원하지 않는다」를 조용한 성공으로 만들지 않는다.
-    if target["kind"] != "DECISION_COMMENT" or target["decision_kind"] != "GENERAL_HOTL":
-        fail("TARGET_UNSUPPORTED", "일반 HOTL 검토 의견만 이 경로로 접수합니다.", 422)
+    #: 일반 HOTL 검토 의견과 명확화 답변만 받는다. 계약·능력·데이터셋 결정은 원장 사건이 증거다.
+    if not ((target["kind"] == "DECISION_COMMENT" and target["decision_kind"] == "GENERAL_HOTL")
+            or (target["kind"] == "CLARIFICATION" and not target["decision_kind"])):
+        fail("TARGET_UNSUPPORTED", "일반 HOTL 검토 의견과 명확화 답변만 이 경로로 접수합니다.", 422)
     if target["task_id"] != task:
         fail("TARGET_CONFLICT", "제출 task와 대상 task가 다릅니다.")
     command = dict(client_request_id=request_key(value["client_request_id"]), task_id=task,
@@ -233,9 +240,13 @@ def verify_consumption(row, receipt, *, expected_revision, expected_digest):
     content = validate_content(row["target"], row["content"])
     ref = receipt["input_draft"]
     if (receipt["project_id"] != row["project_id"] or receipt["actor_id"].casefold() != row["actor"]
-            or receipt["target"] != row["target"] or receipt["feedback"] != content["text"].strip()
+            or receipt["target"] != row["target"]
             or ref != dict(draft_id=row["draft_id"], revision=expected_revision, digest=expected_digest)):
-        fail("SUBMISSION_CONFLICT", "제출 기록의 사용자·대상·저장 초안·본문이 다릅니다.")
+        fail("SUBMISSION_CONFLICT", "제출 기록의 사용자·대상·저장 초안이 다릅니다.")
+    #: 일반 HOTL 만 여기서 본문을 맞춘다. 명확화는 접수 시점에 서버가 질문으로 재현해
+    #: 대조를 끝냈다 — 차수가 지나가면 그 질문을 다시 읽을 수 없으므로 여기서 되풀이하지 않는다.
+    if row["target"]["kind"] == "DECISION_COMMENT" and receipt["feedback"] != content["text"].strip():
+        fail("SUBMISSION_CONFLICT", "제출 기록의 본문이 저장한 초안과 다릅니다.")
     if row["status"] == "DRAFT":
         if row["revision"] != expected_revision or row["digest"] != expected_digest:
             fail("DRAFT_CONFLICT", "제출한 초안 판본과 현재 초안이 다릅니다.")

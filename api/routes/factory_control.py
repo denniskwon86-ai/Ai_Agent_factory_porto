@@ -2066,6 +2066,44 @@ def _hotl_resumed(req, receipt=None):
     return body
 
 
+async def _hotl_is_clarification(project_id, task_id):
+    """현재 대기가 명확화인지 서버에서 읽는다. 화면이 말한 종류를 믿지 않는다."""
+    current = await orchestrator.read_hotl_context(task_id, project_id)
+    return bool(current.get("available")) and current.get("decision_kind") == "CLARIFICATION"
+
+
+async def _assert_clarify_body_matches_draft(project_id, p, boundary, target, req):
+    """[B5] 명확화 제출 본문을 **서버가 재현해** 저장 초안과 대조한다.
+
+    화면이 질문·선택지·설명을 한 문자열로 엮어 보내므로 저장된 `selections` 와 모양이
+    다르다. 서버가 같은 질문으로 조합해 맞춘다(설계안 갈래 A). 접수 전에 끝내는 이유는
+    차수가 지나가면 그 질문을 다시 읽을 수 없기 때문이다.
+
+    ⚠️ 조합 규칙이 화면과 서버 두 곳에 있다 — `core/clarify_answers.py` 머리말 참조."""
+    from core.clarify_answers import ClarifyFormatError, serialize
+    from core.enterprise_context.process_schema import ProcessError
+    from api.routes import studio_input_draft_control as drafts
+    from core.studio_input_drafts import validate_content
+    row = await asyncio.to_thread(drafts._storage().get, boundary=boundary, actor=p.user_id,
+                                  project_id=project_id, draft_id=req.input_draft.get("draft_id", ""))
+    if (row["target"] != target or row["status"] != "DRAFT"
+            or row["revision"] != req.input_draft.get("revision")
+            or row["digest"] != req.input_draft.get("digest")):
+        raise ProcessError("STUDIO_HOTL_DRAFT_CONFLICT",
+            "저장한 초안의 대상·판본이 제출과 다릅니다. 입력을 보존합니다.", 409)
+    content = validate_content(row["target"], row["content"])
+    state = await drafts._state(project_id, req.task_id, True)
+    try:
+        expected = serialize(state.get("clarification_questions") or [],
+                             content.get("selections") or {}, content.get("text", ""))
+    except ClarifyFormatError as exc:
+        raise ProcessError("STUDIO_HOTL_QUESTIONS_UNAVAILABLE",
+            "현재 질문으로 답변 본문을 확인하지 못했습니다. 입력을 보존합니다.", 503) from exc
+    if (req.feedback or "") != expected:
+        raise ProcessError("STUDIO_HOTL_DRAFT_CONFLICT",
+            "제출한 답변이 저장한 선택·메모와 다릅니다. 초안을 닫지 않습니다.", 409)
+
+
 async def _hotl_submission_tracker(project_id, req, p, studio):
     """요청 ID·초안 참조가 **함께** 있을 때만 PROCESSING 을 선기록한다.
 
@@ -2082,13 +2120,17 @@ async def _hotl_submission_tracker(project_id, req, p, studio):
     from api.routes.process_configuration_control import error as _process_error
     try:
         boundary, draft_studio = await asyncio.to_thread(drafts._authorized, project_id, p, True)
-        target = await drafts._target(project_id, kind="DECISION_COMMENT", task_id=req.task_id,
-                                      decision_kind="GENERAL_HOTL", studio=draft_studio)
+        clarify = bool(draft_studio) and await _hotl_is_clarification(project_id, req.task_id)
+        target = await drafts._target(project_id,
+            kind="CLARIFICATION" if clarify else "DECISION_COMMENT", task_id=req.task_id,
+            decision_kind="" if clarify else "GENERAL_HOTL", studio=draft_studio)
         #: ★ 화면이 보낸 차수와 서버가 방금 읽은 차수가 같아야 한다. 다르면 답변이 옛 질문의 것이다.
         if (target["request_id"] != req.expected_request_id
                 or target["target_digest"] != req.expected_questions_digest):
             raise ProcessError("STUDIO_HOTL_ROUND_CONFLICT",
                 "대기 차수가 바뀌었습니다. 입력을 보존하고 현재 요청을 다시 확인하십시오.", 409)
+        if clarify:
+            await _assert_clarify_body_matches_draft(project_id, p, boundary, target, req)
         storage = _hotl_submission_store()
         identity = dict(project_id=project_id, actor_id=p.user_id, boundary=boundary)
         submission = dict(client_request_id=req.client_request_id, task_id=req.task_id, target=target,

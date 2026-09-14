@@ -274,9 +274,16 @@ def test_api_artifact_path_escape_and_foreign_checkpoint_are_rejected(api):
 
 
 def test_api_clarification_submission_claim_cannot_consume(api):
+    """[B5] 명확화도 소비 대상이 됐지만 **임의 주장으로는 닫히지 않는다.**
+
+    종전에는 종류 자체가 미지원이라 409 였다. 지금은 서버 제출 기록을 요구하므로
+    형식이 틀린 ID 는 422, 형식이 맞아도 기록이 없으면 404 다. 어느 쪽도 초안을 닫지 않는다."""
     row = api_save(api).json()["data"]
-    response = api_change(api, row, "consume", submission_id="claimed-resume")
-    assert response.status_code == 409
+    assert api_change(api, row, "consume", submission_id="claimed-resume").status_code == 422
+    assert target_get(api).json()["data"]["draft"]["status"] == "DRAFT"
+    current = target_get(api).json()["data"]["draft"]
+    absent = api_change(api, current, "consume", submission_id="00000000-0000-4000-8000-000000000000")
+    assert absent.status_code == 404, absent.text
     assert target_get(api).json()["data"]["draft"]["status"] == "DRAFT"
 
 

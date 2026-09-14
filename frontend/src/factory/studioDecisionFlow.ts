@@ -135,9 +135,9 @@ export function createStudioDecisionFlow(projectId: string, api: StudioDecisionA
     async resume(feedback: string, questionProof?: HotlQuestionVerification, draft?: HotlDraftRef | null) {
       const row = state.hotl;
       if (!row || !model.canResume()) return;
-      //: ★ [B5] 저장 초안 결속은 **일반 HOTL 만**이다. 명확화는 화면이 질문·선택지를 엮어
-      //:   제출하므로 서버가 저장한 선택과 제출 본문을 대조할 수 없다(서버 저장소 머리말 참조).
-      const bound = row.decision_kind !== 'CLARIFICATION' && !!draft ? { ...draft } : null;
+      //: ★ [B5] 일반 HOTL 과 명확화 모두 저장 초안을 닫는다. 명확화는 서버가 같은 질문으로
+      //:   본문을 재현해 접수 시점에 대조한다(설계안 갈래 A).
+      const bound = draft ? { ...draft } : null;
       await mutate('HOTL', hotlSubject(row), async () => {
         if (row.decision_kind === 'CLARIFICATION'
             && (!questionProof || !await verifyHotlQuestions(questionProof, row.questions_digest))) {

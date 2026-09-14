@@ -38,20 +38,32 @@ const choiceLabels: Record<string, string> = {
   REDUCE: '요구 범위 줄이기', WAIT: '보류하기', REQUEST_HOST_FEATURE: 'Host 기능 지원 요청',
 };
 
+/** 저장한 선택과 지금 화면의 선택이 같은가. 순서 차이는 같은 것으로 본다. */
+function sameSelections(saved: Record<string, string[]> | undefined, current: ClarifySelections) {
+  const left = saved || {}, right = current || {};
+  const keys = new Set([...Object.keys(left), ...Object.keys(right)].filter(
+    key => (left[key] || []).length || (right[key] || []).length));
+  return [...keys].every(key => {
+    const a = [...(left[key] || [])].sort(), b = [...(right[key] || [])].sort();
+    return a.length === b.length && a.every((value, index) => value === b[index]);
+  });
+}
+
 function DecisionDraftReceipt({ projectId, record }: { projectId: string; record: DecisionRecord }) {
   if (!record.eventId) return null;
   const drafts = studioInputMemory.projectValues<{ draft: InputDraft | null }>(projectId, 'server-input-draft')
-    .map(row => row.draft).filter((draft): draft is InputDraft => !!draft && draft.target.kind === 'DECISION_COMMENT'
+    .map(row => row.draft).filter((draft): draft is InputDraft => !!draft
       && (record.kind === 'HOTL'
-        //: ★ [B5] 일반 HOTL 만 서버 제출 기록으로 초안을 닫는다. 명확화는 대상 자체가 다르다.
-        ? draft.target.decision_kind === 'GENERAL_HOTL' && draft.target.request_id === record.body?.expected_request_id
+        //: ★ [B5] 일반 HOTL 과 명확화 모두 서버 제출 기록으로 닫는다. 둘은 대상 종류가 다르다.
+        ? (draft.target.kind === 'CLARIFICATION' || draft.target.decision_kind === 'GENERAL_HOTL')
+          && draft.target.request_id === record.body?.expected_request_id
           && draft.target.target_digest === record.body?.expected_questions_digest
           && draft.target.task_id === record.body?.task_id
-        : record.kind === 'HOST'
+        : draft.target.kind === 'DECISION_COMMENT' && (record.kind === 'HOST'
         ? draft.target.decision_kind === 'HOST_CONTRACT' && draft.target.request_id === record.hostReceipt?.request_event_id
           && draft.target.target_digest === record.hostReceipt?.contract_fingerprint
         : draft.target.request_id === record.body?.decision_request_id && draft.target.target_digest === record.body?.expected_digest
-          && draft.target.subject_id === (record.body?.dataset_key || record.body?.capability)));
+          && draft.target.subject_id === (record.body?.dataset_key || record.body?.capability))));
   return <>{drafts.map(draft => <StudioInputDraftControls key={draft.draft_id} projectId={projectId}
     selector={{ kind: draft.target.kind, task_id: draft.target.task_id, decision_kind: draft.target.decision_kind,
       request_id: draft.target.request_id, subject_id: draft.target.subject_id }} expectedTarget={draft.target}
@@ -247,7 +259,7 @@ export function StudioDecisionPanel({ vm, selections, onDecisionKeyChange, onRes
             target_digest: hotl.questions_digest, subject_id: '' }}
           content={{ text: hotlDraft?.note || '', decision: '', ...(isClarify ? { selections } : {}) }}
           disabled={hotlLocked || !clarifyReady || (isClarify && !onRestoreSelections)}
-          onDraftChange={draft => setHotlServerDraft(draft && !isClarify ? draft : null)}
+          onDraftChange={draft => setHotlServerDraft(draft)}
           onRestore={content => {
             if (hotlLocked || !clarifyReady || (isClarify && !onRestoreSelections)) return;
             flow.edit('HOTL', hotlSubject(hotl), 'note', content.text);
@@ -261,7 +273,9 @@ export function StudioDecisionPanel({ vm, selections, onDecisionKeyChange, onRes
             ? serializeClarifyAnswers(vm.clarify.questions, selections, hotlDraft?.note || '') : (hotlDraft?.note || '').trim(),
             isClarify ? { rawQuestions: structuredClone(rawQuestions), displayedQuestions: structuredClone(vm.clarify.questions) } : undefined,
             //: 저장한 초안과 지금 입력이 같을 때만 결속한다. 다르면 닫지 않고 그대로 둔다.
-            !isClarify && hotlServerDraft && hotlServerDraft.content?.text.trim() === (hotlDraft?.note || '').trim()
+            //: 명확화는 메모뿐 아니라 선택값도 같아야 한다 — 서버가 둘로 본문을 재현해 대조한다.
+            hotlServerDraft && hotlServerDraft.content?.text.trim() === (hotlDraft?.note || '').trim()
+              && (!isClarify || sameSelections(hotlServerDraft.content?.selections, selections))
               ? { draft_id: hotlServerDraft.draft_id, revision: hotlServerDraft.revision, digest: hotlServerDraft.digest } : null); }}>
           {isClarify ? '현재 답변 제출하고 재개' : '검토 의견 제출하고 재개'}</button>
       </section>}

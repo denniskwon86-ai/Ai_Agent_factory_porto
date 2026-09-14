@@ -6,7 +6,7 @@
 - 사용자 변화: ① 일반 HOTL 검토 의견을 제출하면 저장한 초안이 사용완료로 닫힌다. 요청 ID·초안 참조를 함께 보낼 때만이며 없으면 기존 재개와 동일하다. 응답 유실 시 `GET /hotl/submissions/{uuid}`로 접수만 확인하고 재전송하지 않는다. ② 릴리스 저장·작업 재분할이 원키 접수 기록을 남긴다. **되돌릴 수 없는 재분할을 응답 유실 뒤 다시 눌러 WBS 를 또 지우는 경로를 막았다.**
 - 기능: 신규 `core/studio_hotl_submissions.py`(AdvisorStore 전용 표, PROCESSING→ACCEPTED/REJECTED/UNKNOWN 종결 CAS, 3중 지문, 동일 초안 판 재제출 409, 차수 불일치 접수 거절). 실행 명령에 RELEASE·REPLAN 추가(EXECUTIONS·PROJECT_SCOPED·고정 task_id `PROJECT`). `consume_supported`에 GENERAL_HOTL 추가. 기존 handler·경로·서버 동작은 바꾸지 않았다.
 - 검증: 서버 **310PASS/177.52초**, 프런트 **137PASS**(기존127+신규10), tsc 오류0·제품 build PASS 2.01초. 착수 전 기준선 157PASS 선확인. 실패 기록 보존 — 계약 첫 실행 135PASS/2FAIL(`operations` 허용 목록 누락)을 수정 후 137 재통과. `check-process-installation.mjs` 104PASS 뒤 중단은 **CRLF 가 아니라** 58713ed1d 가 같은 커밋에서 `KitOperationsPanel` 의존성에 `identity` 를 더했는데 검사가 `[revision]` 정확 일치를 요구한 회귀였다. 검사를 같은 파일의 EnterprisePage 방식(의존성 포함 여부)으로 맞춰 **105PASS** 로 복구했다. 제품 소스는 고치지 않았다.
-- 미완료/제한: **명확화(CLARIFICATION) 초안 소비는 설계 결정 대기**다. 화면이 질문·선택지·설명을 한 문자열로 엮어 제출해 서버가 저장한 선택과 대조할 수 없고, 조합 규칙을 서버에 복제하면 표시 문구가 두 곳이 된다. 세부 접근성·실제 브라우저 수용 NOT_RUN. main.py/App.tsx diff0. B6는 병렬개발 통합계획 원본 미확보로 착수하지 않았다.
+- **명확화 초안 소비도 닫았다(설계안 갈래 A 채택).** 서버가 `core/clarify_answers.py` 로 같은 본문을 재현해 **접수 시점에** 저장 초안과 대조한다. 착수 전 두 구현의 출력이 바이트 단위로 같음을 실측했고 고정 예제를 양쪽 시험에 두어 잠갔다. ⚠️ 표시 문구가 화면·서버 두 곳이며 예제를 한쪽만 고치면 잠금이 잡지 못한다. **이로써 B5 저장 출구는 모두 닫혔다.** 세부 접근성·실제 브라우저 수용 NOT_RUN. main.py/App.tsx diff0. B6는 병렬개발 통합계획 원본 미확보로 착수하지 않았다.
 
 ## 암호화 데이터 추가 전달 승인 반영 — 2026-09-13 23:45 KST
 

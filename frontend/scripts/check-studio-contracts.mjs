@@ -86,6 +86,7 @@ const decisionApi = load('../src/factory/studioDecisionApi.ts', {
   '../lib/api': api, '../lib/contractReviewApi': reviewApi, './studioInputMemory': memory });
 const decisionFlow = load('../src/factory/studioDecisionFlow.ts', {
   './studioDecisionApi': decisionApi, './studioInputMemory': memory });
+const clarify = load('../src/factory/clarifyAnswers.ts', {});
 const processApi = load('../src/lib/processInstallationApi.ts', { './api': api });
 const kitReviewApi = load('../src/lib/kitContractReviewApi.ts', {
   './api': api, '../factory/studioInputMemory': memory });
@@ -352,6 +353,27 @@ await test('HOTL 실제 Flow 원 차수·지문 제출 및 접수 후 재결정 
     expected_request_id: roundId, expected_questions_digest: emptyQuestionsDigest });
   assert.equal(recordOf(flow, 'HOTL').outcome, 'CONFIRMED');
 });
+// ── [B5] 명확화 답변 본문 형식 잠금 ──────────────────────────────────────────
+// ⚠️ 조합 규칙이 화면과 서버(`core/clarify_answers.py`) 두 곳에 있다. 아래 예제는 서버
+//    시험(`tests/test_b5_clarify_answers.py`)의 GOLDEN 과 **같은 값**이어야 한다.
+//    형식을 바꾸면 양쪽 예제를 함께 고쳐야 한다 — 한쪽만 고치면 이 잠금은 잡지 못한다.
+await test('B5 명확화 본문 형식은 서버 재현과 같은 고정 예제를 지킨다', async () => {
+  const questions = [
+    { id: 'q1', question: '원료 도입 주기를 어떻게 잡습니까?',
+      options: [{ label: '월 1회', description: '재고 부담이 크다' }, { label: '주 1회' }] },
+    { id: 'q2', question: '품질 기준을 누가 정합니까?', multi: true,
+      options: [{ label: '품질팀' }, { label: '생산팀' }] },
+  ];
+  const golden = ['[요구 확인 인터뷰 답변]', '1. 원료 도입 주기를 어떻게 잡습니까?',
+    '→ 선택: 월 1회 (재고 부담이 크다)', '2. 품질 기준을 누가 정합니까?',
+    '→ 선택 없음 (전문가 추천안대로 진행)', '', '[추가 의견]', '추가로 확인할 것이 있습니다.'].join('\n');
+  assert.equal(clarify.serializeClarifyAnswers(questions, { q1: ['월 1회'] }, '  추가로 확인할 것이 있습니다.  '), golden);
+  // 고른 항목의 출력 순서는 선택 순서가 아니라 선택지 순서다. 서버 재현도 같은 규칙이다.
+  assert.equal(clarify.serializeClarifyAnswers(
+    [{ id: 'q', question: '누가?', multi: true, options: [{ label: '가' }, { label: '나' }, { label: '다' }] }],
+    { q: ['다', '가'] }, ''), '[요구 확인 인터뷰 답변]\n1. 누가?\n→ 선택: 가\n→ 선택: 다');
+});
+
 // ── [B5] 일반 HOTL 저장 초안 결속 ────────────────────────────────────────────
 const hotlDraftRef = { draft_id: 'sid_b5hotl', revision: 2, digest: 'd'.repeat(64) };
 const hotlReceipt = (patch = {}) => ({ request_id: '', task_id: 'TASK_1', status: 'ACCEPTED',
@@ -382,7 +404,7 @@ await test('B5 초안 참조 없는 제출은 결속하지 않고 소비 근거�
   assert.equal('client_request_id' in sent, false); assert.equal('input_draft' in sent, false);
   assert.equal(recordOf(flow, 'HOTL').eventId, undefined);
 });
-await test('B5 명확화는 초안 참조를 받아도 결속하지 않는다', async () => {
+await test('B5 명확화도 초안 참조를 실어 보낸다 — 본문 대조는 서버가 접수 시점에 한다', async () => {
   const { flow, world } = await decisionWorld({ hotl: { status: 'success', hotl_task_id: 'TASK_1', hotl_context: {
     status: 'PENDING', pending: true, available: true, decision_kind: 'CLARIFICATION',
     request_id: roundId, questions_digest: emptyQuestionsDigest, reason_code: 'HOTL_PENDING' } } });
@@ -390,7 +412,8 @@ await test('B5 명확화는 초안 참조를 받아도 결속하지 않는다', 
   await flow.resume('답변', { rawQuestions: [], displayedQuestions: [] }, { ...hotlDraftRef });
   assert.equal(writes().length, 1);
   const sent = bodyOf(writes()[0]);
-  assert.equal('input_draft' in sent, false); assert.equal(recordOf(flow, 'HOTL').eventId, undefined);
+  assert.deepEqual(sent.input_draft, hotlDraftRef);
+  assert.equal(recordOf(flow, 'HOTL').eventId, sent.client_request_id);
 });
 await test('B5 접수 기록이 없거나 요청과 다르면 소비 근거로 쓰지 않는다', async () => {
   for (const [label, patch] of [['없음', null], ['다른 초안', { input_draft: { ...hotlDraftRef, revision: 9 } }]]) {

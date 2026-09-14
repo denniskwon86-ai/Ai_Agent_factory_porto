@@ -1,5 +1,54 @@
 # B5 일반 HOTL 저장 초안 사용완료 결속 — 구현·집중 검증 인계
 
+## 추가: 명확화 초안 소비 — 설계안 갈래 A 구현 — 2026-09-14 KST
+
+Claude Code / 권고4·7·10 / G2→G3. 전체21/40=52.5% **유지**. 사용자가
+`docs/design_l2_clarification_draft_consumption_2026-09-14.md` 의 **갈래 A** 를 채택해
+구현했다. 이로써 **B5 저장 출구가 모두 닫혔다.** B5 전체는 세부 접근성·실제 브라우저가
+남아 아직 닫히지 않는다.
+
+### 구현 계약
+
+- 신규 `core/clarify_answers.py` — 화면 `serializeClarifyAnswers` 와 같은 문자열을 서버가
+  재현한다. 재료(`question`·`options[].label`·`options[].description`)는 체크포인트의
+  `clarification_questions` 에 전부 있고, 화면 질문과 같다는 것은 `questions_digest` 가 보증한다.
+- 대조는 **접수 시점**에 끝낸다(`factory_control._assert_clarify_body_matches_draft`).
+  서버가 저장 초안을 읽어 `selections`·`text` 로 본문을 만들고 제출 `feedback` 과 비교한다.
+  다르면 접수하지 않고 409, 초안도 닫지 않는다. 차수가 지나가면 질문을 다시 읽을 수 없으므로
+  소비 시점에 되풀이하지 않는다 — 소비는 저장 판본 결속만 확인한다.
+- 대기 종류는 **서버가 읽는다**(`_hotl_is_clarification`). 화면이 말한 종류를 믿지 않는다.
+- 화면은 저장 초안의 메모와 **선택값이 모두 같을 때만** 결속한다(`sameSelections`, 순서 무시).
+  다르면 결속 없이 제출하고 초안은 열린 채로 둔다.
+- `consume_supported` 와 처리 기록 렌더에 CLARIFICATION 을 더했다.
+
+### ⚠️ 남는 위험 — 표시 문구가 두 곳이다
+
+갈래 A 의 대가다. 조합 규칙이 화면과 `core/clarify_answers.py` 양쪽에 있고, 한쪽만 고치면
+정상 제출이 대조 실패로 닫힌다.
+
+잠금: 같은 고정 예제를 `tests/test_b5_clarify_answers.py` 와
+`frontend/scripts/check-studio-contracts.mjs` 양쪽에 두고 각자 자기 구현과 비교한다.
+착수 전 두 구현의 실제 출력이 **바이트 단위로 같음을 실측**했다(임시 스크립트로 프런트
+`serializeClarifyAnswers` 를 실행해 서버 `GOLDEN_TEXT` 와 대조, 일치).
+
+★ **이 잠금의 한계는 설계안 §4 에 적은 그대로다** — 예제를 한쪽만 고치면 잡지 못한다.
+형식을 바꿀 때는 양쪽 예제를 함께 고쳐야 하고, 그 사실을 두 파일 머리말에 적어 두었다.
+
+### 검증 증거와 범위
+
+- 서버 **320 수집/실행/PASS, 172.87초**. `protected_assets_unchanged`·`sources_unchanged` true.
+  신규 `test_b5_clarify_answers.py` 는 고정 예제·미선택 표기·선택지 순서·설명 유무·메모 절·
+  신뢰할 수 없는 질문 형태 실패를 덮는다.
+- 프런트 **138PASS/0FAIL**(직전 137 + 형식 잠금 1). tsc 0, build PASS,
+  `check-process-installation` 105PASS.
+- 기존 시험 두 건을 갱신했다. ① `test_b5_hotl_submissions` 의 「명확화 거절」은 이제 「명확화
+  수락 + 계약·능력·데이터셋 거절」이다. ② `test_b5_input_drafts.test_api_clarification_submission_claim_cannot_consume`
+  은 종류 미지원 409 를 기대했으나, 지금은 형식 오류 422 와 **기록 없음 404** 를 검사한다.
+  ★ 보장(임의 주장으로 닫히지 않는다 · DRAFT 유지)은 그대로이며 오히려 강해졌다.
+- 실제 브라우저·현업 수용 NOT_RUN. 실제 LLM/Host 실행으로 검증하지 않았다.
+
+---
+
 ## 추가: `check-process-installation` 회귀 해소 — 2026-09-14 KST
 
 Claude Code / 권고10 / G3. 전체21/40=52.5% **유지**(검사 복구이며 제품 기능 변화 없음).

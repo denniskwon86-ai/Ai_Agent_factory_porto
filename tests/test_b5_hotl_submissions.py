@@ -89,10 +89,22 @@ def test_a_new_key_cannot_submit_the_same_saved_draft_revision_twice(env):
             409, "DRAFT_ALREADY_SUBMITTED")
 
 
-def test_clarification_and_mismatched_task_are_refused_at_the_boundary(env):
+def test_clarification_is_accepted_and_other_decision_kinds_are_refused(env):
+    """[B5] 명확화도 받는다 — 본문 대조는 접수 전에 API 가 서버 조합으로 끝낸다."""
     row = save_draft(env)
-    failure(lambda: env.store.begin(**env.args, submission=submission(
-        row, target=target(kind="CLARIFICATION", decision_kind=""))), 422, "TARGET_UNSUPPORTED")
+    value, _ = env.store.begin(**env.args, submission=submission(
+        row, client_request_id=key(9), target=target(kind="CLARIFICATION", decision_kind="")))
+    assert value["target"]["kind"] == "CLARIFICATION"
+    #: 계약·능력·데이터셋 결정은 원장 사건이 증거다. 이 경로로 오면 안 된다.
+    #: subject_id 규칙은 종류마다 다르다 — 모델 검증에 먼저 걸리면 대상 판정을 시험하지 못한다.
+    for kind, subject in [("HOST_CONTRACT", ""), ("CAPABILITY", "cap-1"), ("DATASET", "ds-1")]:
+        failure(lambda kind=kind, subject=subject: env.store.begin(**env.args, submission=submission(
+            row, client_request_id=key(8), target=target(decision_kind=kind, subject_id=subject))),
+            422, "TARGET_UNSUPPORTED")
+
+
+def test_mismatched_task_or_blank_feedback_is_refused_at_the_boundary(env):
+    row = save_draft(env)
     failure(lambda: env.store.begin(**env.args, submission=submission(row, task_id="TASK-99")),
             409, "TARGET_CONFLICT")
     failure(lambda: env.store.begin(**env.args, submission=submission(row, feedback="   ")),
