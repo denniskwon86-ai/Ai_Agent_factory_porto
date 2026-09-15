@@ -168,7 +168,8 @@
 |---|---|
 | 서버 (strict-writes, 7파일) | **148 PASS / 0 FAIL** · 229.32초 |
 | 격리 증거 | `sources_unchanged`·`protected_assets_unchanged` **true** · 차단 쓰기 0 · conftest 미적재 |
-| 프런트 B5 계약 | **153 PASS** |
+| 프런트 B5 계약 | **157 PASS** (153 + STATIC 배선 4) |
+| kit-app-entry (신규) | **14 PASS** |
 | project-entry / studio-location | **26 / 25 PASS** |
 | 설치 계약 | **105 PASS** |
 | tsc · 제품 build | 오류 0 · PASS |
