@@ -217,3 +217,64 @@ B6 인계가 이미 경고했다 — 「후속 공통화 시 **이중 규칙의 
 - 제안한 엔드포인트는 아직 없다. 위 경로·함수명은 2026-09-15 시점 소스를 읽어 적은 것이다.
 
 Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>
+
+## 8. `kit_app` 연결 전 기준선 — 실측 (2026-09-15)
+
+복원 데이터에 자산이 있으므로(§7) 연결 전 현재 동작을 먼저 기록해 둔다. 나중 개선의
+대조군이다.
+
+### 8.1 URL 진입 — 조용히 목록면으로 떨어진다
+
+`?space=build&target=kit_app&instance=ki_6b06ffb50a994a&app=APP-03` 으로 들어가면:
+
+- URL 이 `?space=build` 로 정리되고(§12.3 의 진입 키 제거가 작동)
+- **앱 제작 목록면이 뜬다.** 오류도 안내도 없다.
+
+★ `project` 의 연결 전 상태(**잘못 열림** — 없는 프로젝트인데 작업공간이 렌더링되고 404 가
+「서버 연결 끊김」으로 보임)와 **다른 종류의 문제**다. `kit_app` 은 **조용히 안 열림**이다.
+링크를 받은 사용자는 왜 목록이 떴는지 알 수 없다.
+
+### 8.2 서버 거절 경로
+
+| 호출 | 결과 |
+|---|---|
+| `/instances/{정상}/apps` | **200** — 앱 7개, 전부 `AVAILABLE` |
+| `/instances/{없는 id}/apps` | **404** 「키트 인스턴스를 찾을 수 없습니다」 |
+| `/instances/{형식 위반}/apps` | **404** — 같은 문구(은닉 유지) |
+| `/instances/{정상}/apps` + `X-Enterprise-Scope: 다른 조직` | ⚠️ **200** |
+| `/instances/{정상}/apps` + `X-Enterprise-Tenant: 다른 테넌트` | ⚠️ **200** |
+| `/apps/{app}/contract/v2` — 문맥 미선택(권한 범위 전체) | **422** `PROCESS_CONTEXT_REQUIRED` |
+| `/apps/{app}/contract/v2` — 제련공장 문맥 | **404** `PROCESS_INSTANCE_NOT_FOUND` |
+
+### 8.3 ⚠️ 같은 라우터 안에서 문맥 판정이 셋으로 갈린다
+
+이것이 이 조사의 핵심이며 **진입 확인 API 설계에 직접 영향을 준다.**
+
+| 판정자 | 규칙 |
+|---|---|
+| `_instance_or_404`(`data_preparation_control.py:129`) | **`p.scope.unrestricted` 면 문맥 비교를 건너뛴다** |
+| `_kit_review_context`(`:258`) | 명시 문맥을 **필수**로 요구 — 없으면 **422** |
+| project 의 `entry-metadata` | 소유 대 조회 문맥을 `context_visible` 로 비교 — **unrestricted 여도 다르면 404** |
+
+★ 화면은 「선택한 문맥은 모든 제품 화면과 조회에 함께 적용됩니다」라고 약속한다.
+`_instance_or_404` 의 unrestricted 분기는 그 약속과 어긋나 보인다. **다만 전사 조회 권한의
+의도된 설계일 수 있어 결함으로 단정하지 않는다** — Codex 판단이 필요하다.
+
+⚠️ `contract/v2` 가 소유 조직(`plant-afs-smelting-01`) 문맥에서도 404 인 **원인은
+특정하지 못했다.** `_visible_v2_instance` 가 `context_root_id` 또는 `binding_for_instance`
+에서 막는 것으로 보이나 확인하지 않았으므로 원인이라고 적지 않는다.
+
+### 8.4 그래서 진입 확인은 무엇을 물어야 하나
+
+- **앱 목록(`/apps`)만으로 「이 인스턴스에 이 앱이 있고 볼 수 있다」는 답이 나온다.**
+  계약 상세(`contract/v2`)는 그보다 엄격하며 진입 확인의 범위를 넘는다(§2.3 「상태·원문을
+  주지 않는다」).
+- 따라서 제안한 `instances/{id}/apps/{app_id}/entry-metadata` 는 **목록 수준 가시성 +
+  app_id 존재**만 답하고, 계약·준비도·릴리스 결속은 각 단계가 다시 확인하는 편이 계약에 맞다.
+
+### 8.5 §6 에 더할 결정 사항
+
+6. **진입 확인이 `unrestricted` 를 어떻게 다룰 것인가.** `_instance_or_404` 처럼 문맥
+   비교를 건너뛸 것인가, project 처럼 소유 대 조회를 항상 비교할 것인가. **둘이 다르면
+   같은 사용자가 대상에 따라 다른 답을 받는다.**
+
