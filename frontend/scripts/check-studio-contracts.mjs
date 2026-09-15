@@ -365,6 +365,58 @@ await test('B5 STATIC 원키 재조회가 화면에 실제로 배선돼 있다',
   assert.match(panel, /aria-describedby=\{`\$\{record\.key\}-recheck-why`\}/);
 });
 
+// ── [B6] 진입 확인이 App 에 실제로 배선돼 있는지 ─────────────────────────────
+// ⚠️⚠️ 모듈과 게이트를 만들어도 **App 이 부르지 않으면** 사용자는 예전 동작을 그대로 본다
+//    — 없는 프로젝트가 열리고, 회사를 바꿔도 화면이 남는다. 계약 검사는 초록인데 제품은
+//    돌아간 상태다. 이 저장소가 반복해 겪은 「생산자→소비자 배선 누락」이라 소스로 잠근다.
+// ★ 실제 클릭·렌더가 아니다. 브라우저 확인은 별도다.
+await test('B6 STATIC 진입 확인 네 대상이 App 에 배선돼 있다', () => {
+  const app = fs.readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8');
+  // 문법 판정은 순수 모듈 한 곳에서만 한다 — App 이 쿼리를 다시 해석하면 규칙이 갈라진다.
+  assert.match(app, /parseStudioLocation\(/);
+  // ★ `space` 는 App 소유다(파서가 다른 공간을 NOT_STUDIO 로 넘긴다). 금지할 것은
+  //   **진입 대상 키**를 App 이 직접 읽는 것이다 — 그러면 대상 규칙이 두 곳으로 갈린다.
+  assert.doesNotMatch(app, /URLSearchParams\([^)]*\)\.get\('(project|target|instance|app|release|mega|child|draft)'\)/);
+  // project 와 kit_app 은 게이트를 거친다.
+  assert.match(app, /<StudioProjectEntryGate[\s\S]{0,400}projectId=/);
+  assert.match(app, /<StudioKitAppEntryGate[\s\S]{0,400}instanceId=/);
+  // release 는 조회 실패를 상태로 남기고 화면이 그것을 읽는다.
+  assert.match(app, /releaseLoad === 'failed' \|\| releaseLoad === 'forbidden'/);
+  // new 는 조회 대상이 없으므로 게이트를 태우지 않는다 — 확인할 것이 없는 곳에 확인 화면을 띄우지 않는다.
+  assert.match(app, /initialEntry\.current\.isNew/);
+});
+await test('B6 STATIC 회사·사용자 전환이 열린 Studio 를 다시 확인시킨다', () => {
+  const app = fs.readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8');
+  assert.match(app, /const revalidateOpenProject = useCallback/);
+  // 두 전환 이벤트 **모두** 에 붙어 있어야 한다. 한쪽만 붙이면 그 경로로 옛 화면이 남는다.
+  for (const event of ['factory:acting-user-changed', 'factory:enterprise-context-changed']) {
+    const at = app.indexOf(event);
+    assert.ok(at > 0, event + ' 구독이 없다');
+    assert.ok(app.slice(Math.max(0, at - 700), at).includes('revalidateOpenProject()'),
+      event + ' 핸들러가 재확인을 부르지 않는다');
+  }
+});
+await test('B6 STATIC URL 진입 키를 App 이 걷어 낸다', () => {
+  // ⚠️ 남겨 두면 새로고침·뒤로가기가 **이미 처리한 진입을 다시 실행**한다.
+  const app = fs.readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8');
+  for (const key of ['target', 'draft_kind', 'draft', 'revision', 'instance', 'app', 'release', 'mega', 'child']) {
+    assert.ok(app.includes(`'${key}'`), `진입 키 ${key} 가 제거 목록에 없다`);
+  }
+  assert.match(app, /searchParams\.delete\(key\)/);
+});
+await test('B6 STATIC 조회 실패를 삼키지 않는다', () => {
+  // ⚠️ 종전 viewRelease 는 res.ok 가 아니면 **아무 일도 하지 않았다** — 화면이 멎는다.
+  const store = fs.readFileSync(new URL('../src/store/useFactoryStore.ts', import.meta.url), 'utf8');
+  // ⚠️ 타입 선언이 아니라 **구현**을 본다. 선언만 잡으면 이 검사가 공허해진다.
+  const at = store.indexOf('viewRelease: async');
+  assert.ok(at > 0, 'viewRelease 구현을 찾지 못했다');
+  const body = store.slice(at, at + 1600);
+  assert.match(body, /releaseLoad: 'loading'/);
+  assert.match(body, /releaseLoad: hidden \? 'forbidden' : 'failed'/);
+  // 401·403·404 를 한 문구로 접는다 — 나누면 존재 여부가 샌다.
+  assert.match(body, /status === 401 \|\| res\.status === 403 \|\| res\.status === 404/);
+});
+
 // ── [B5] 명확화 답변 본문 형식 잠금 ──────────────────────────────────────────
 // ⚠️ 조합 규칙이 화면과 서버(`core/clarify_answers.py`) 두 곳에 있다. 아래 예제는 서버
 //    시험(`tests/test_b5_clarify_answers.py`)의 GOLDEN 과 **같은 값**이어야 한다.
