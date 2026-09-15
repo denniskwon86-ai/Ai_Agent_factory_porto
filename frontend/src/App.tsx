@@ -153,6 +153,20 @@ function AppShell() {
     // 확인이 끝났으므로 이제 URL 을 현재 선택 상태로 다시 써도 된다.
     setRouteRestored(true);
   }, []);
+  //   ★★★ [B6] 회사·사용자가 바뀌면 **열려 있던 Studio 를 즉시 내리고 다시 확인한다.**
+  //     종전에는 SSE 만 다시 맺고 `currentProjectId` 를 그대로 두었다 — 바뀐 문맥에서 볼 수
+  //     없는 프로젝트가 화면에 남고, 그 위의 숫자가 어느 회사 것인지 알 수 없게 된다.
+  //   ⚠️ 닫기만 하지 않고 **같은 프로젝트를 새 문맥으로 다시 확인**한다. 상위/하위 조직으로
+  //     옮긴 경우처럼 여전히 볼 수 있으면 확인 뒤 그대로 열리고, 볼 수 없으면 거절 화면이
+  //     뜬다. 판정은 서버가 한다 — 여기서 조직 ID 를 비교해 흉내 내지 않는다.
+  const revalidateOpenProject = useCallback(() => {
+    const open = useFactoryStore.getState().currentProjectId;
+    if (!open) return;
+    setCurrentProject(null);
+    setEntryGateId(open);
+    // 확인이 끝날 때까지 URL 의 project 를 지우지 않는다(새로고침으로 잃지 않게).
+    setRouteRestored(false);
+  }, [setCurrentProject]);
   useEffect(() => {
     if (!routeRestored || typeof window === 'undefined') return;
     const next = new URL(window.location.href);
@@ -253,20 +267,22 @@ function AppShell() {
       //     계속 **이전 사용자의 스트림**이다. 새 사용자의 알림은 안 오고 이전 사용자의
       //     알림이 이 화면으로 들어온다. 두 번째가 더 나쁘다.
       connectSSE();
+      // [B6] 사용자가 바뀌면 열려 있던 프로젝트도 새 권한으로 다시 확인한다.
+      revalidateOpenProject();
     };
     window.addEventListener('factory:acting-user-changed', h);
     return () => window.removeEventListener('factory:acting-user-changed', h);
-  }, [connectSSE]);
+  }, [connectSSE, revalidateOpenProject]);
 
   // ★★★ [G1-C1.2] 회사·사업부를 바꾸면 **SSE 를 다시 맺는다.**
   //   티켓에 조직 범위가 봉인돼 있어서, 스트림을 그대로 두면 목록은 A 인데 실시간 이벤트는
   //   계속 B 로 흐른다. 회사 선택기와 실시간 데이터 범위가 어긋나면 사용자는 자기가 보는
   //   숫자가 어느 회사 것인지 알 수 없다 — 경영 화면에서 그것은 오답보다 나쁘다.
   useEffect(() => {
-    const h = () => { connectSSE(); };
+    const h = () => { connectSSE(); revalidateOpenProject(); };
     window.addEventListener('factory:enterprise-context-changed', h);
     return () => window.removeEventListener('factory:enterprise-context-changed', h);
-  }, [connectSSE]);
+  }, [connectSSE, revalidateOpenProject]);
 
   useEffect(() => {
     // 런처 진입 시 지식팩 목록 로드(생성 폼의 선택지)
