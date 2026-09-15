@@ -72,6 +72,25 @@ import {
 } from './lib/api';
 
 
+/** [B6] 최초 URL 의 Studio 진입 대상을 한 번만 읽는다.
+ *
+ *  ⚠️ 문법 판정은 `parseStudioLocation` 한 곳에서만 한다. 여기서 쿼리를 다시 해석하면
+ *    대상 규칙이 갈라지고, 갈라지면 한쪽만 고쳐도 조용히 다른 답을 준다.
+ *  ★ `new` 는 **만들기 흐름**이라 조회할 대상이 없다 — 서버 진입 확인을 태우지 않는다.
+ *    실제 생성 POST 는 사용자가 폼에서 눌러야 나간다. */
+function readStudioEntry(): { project: string | null; isNew: boolean; release: string | null } {
+  const none = { project: null, isNew: false, release: null };
+  if (typeof window === 'undefined') return none;
+  const parsed = parseStudioLocation(window.location.search);
+  if (parsed.kind !== 'MATCH') return none;
+  const target = parsed.location.target;
+  return {
+    project: target.kind === 'project' ? target.projectId : null,
+    isNew: target.kind === 'new',
+    release: target.kind === 'release' ? target.releaseId : null,
+  };
+}
+
 /** [B6] 서버가 확인해 준 진입 대상만 실제 선택으로 옮긴다.
  *
  *  ⚠️ 렌더 중에 store 를 바꾸지 않는다 — effect 에서만 옮기고, 옮겨지기 전에는 아무것도
@@ -97,6 +116,8 @@ function AppShell() {
   const fetchReleases = useFactoryStore((state) => state.fetchReleases);
   const viewRelease = useFactoryStore((state) => state.viewRelease);
   const closeRelease = useFactoryStore((state) => state.closeRelease);
+  const releaseLoad = useFactoryStore((state) => state.releaseLoad);
+  const releaseError = useFactoryStore((state) => state.releaseError);
   // deleteRelease 는 더 이상 목록에서 쓰지 않는다 — 서버가 삭제를 거부하고 사용 중단을
   //   안내한다(사용자 결정 2026-07-30). 스토어 액션 자체는 남겨둔다.
   const showAgentPanel = useFactoryStore((state) => state.showAgentPanel);
@@ -115,12 +136,8 @@ function AppShell() {
   //     `URLSearchParams` 를 읽으면 대상 판정 규칙이 두 곳으로 갈라지고, 갈라지면
   //     한쪽만 고쳐도 조용히 다른 답을 준다. legacy `?project=` 단독은 그 모듈이
   //     `kind:'project'` 로 정규화하므로 기존 링크 동작은 그대로다.
-  const initialProject = React.useRef<string | null>((() => {
-    if (typeof window === 'undefined') return null;
-    const parsed = parseStudioLocation(window.location.search);
-    return parsed.kind === 'MATCH' && parsed.location.target.kind === 'project'
-      ? parsed.location.target.projectId : null;
-  })());
+  const initialEntry = React.useRef(readStudioEntry());
+  const initialProject = React.useRef<string | null>(initialEntry.current.project);
   const [space, setSpace] = useState<'enterprise' | 'about' | 'build' | 'operate' | 'twin' | 'report' | 'knowledge' | 'agent'
     | 'advisor' | 'data' | 'calc' | 'path' | 'briefing'
     | 'master' | 'terminology' | 'crosswalk' | 'governance' | 'planning' | 'shadow'
@@ -170,6 +187,11 @@ function AppShell() {
   useEffect(() => {
     if (!routeRestored || typeof window === 'undefined') return;
     const next = new URL(window.location.href);
+    // [B6] 진입 대상 키는 App 상태가 소유한다. URL 에 남겨 두면 새로고침·뒤로가기가
+    //   이미 처리한 진입을 다시 실행하거나, 반쪽짜리 쿼리가 남아 다음 해석을 흐린다.
+    //   legacy `project` 만 아래에서 다시 쓴다 — 기존 공유 링크가 그 형태다.
+    for (const key of ['target', 'draft_kind', 'draft', 'revision', 'instance', 'app',
+                       'release', 'mega', 'child']) next.searchParams.delete(key);
     if (currentProjectId) {
       next.searchParams.set('space', 'build');
       next.searchParams.set('project', currentProjectId);
@@ -192,6 +214,24 @@ function AppShell() {
     setBuildStartType(type);
     setBuildStart(true);
   };
+  //   ★ [B6] `?space=build&target=new` 로 들어오면 만들기 흐름을 연다. 조회 대상이 없으므로
+  //     진입 확인 게이트를 태우지 않는다 — 확인할 것이 없는 곳에 확인 화면을 띄우지 않는다.
+  //   ⚠️ 한 번만 연다. 닫은 뒤 새로고침·뒤로가기로 폼이 되살아나면 사용자는 자기가 만들려던
+  //     것인지 아닌지 알 수 없다. URL 의 `target` 은 아래 URL 동기화 effect 가 걷어 낸다.
+  useEffect(() => {
+    if (!initialEntry.current.isNew) return;
+    initialEntry.current = { ...initialEntry.current, isNew: false };
+    setBuildStartType('software_app');
+    setBuildStart(true);
+  }, []);
+  //   ★ [B6] `?space=build&target=release&release=<id>` 직접 링크. `viewRelease` 가 서버에
+  //     묻고 실패를 상태로 남기므로 별도 게이트를 두지 않는다 — 판정은 서버가 한다.
+  useEffect(() => {
+    const target = initialEntry.current.release;
+    if (!target) return;
+    initialEntry.current = { ...initialEntry.current, release: null };
+    void viewRelease(target);
+  }, [viewRelease]);
   const [showSkillEvolution, setShowSkillEvolution] = useState(false);
   const [showKnowledgeHub, setShowKnowledgeHub] = useState(false);
   const [knowledgeInitialView, setKnowledgeInitialView] = useState<KnowledgeView>('packs');
@@ -772,6 +812,33 @@ function AppShell() {
     </HomeNavContext.Provider>
   );
 
+
+  //   [B6] 조회 실패를 빈 화면으로 두지 않는다. 결과물을 못 열었으면 그렇게 말하고
+  //     되돌아갈 길과 다시 시도할 길을 함께 준다.
+  if (!viewingRelease && (releaseLoad === 'failed' || releaseLoad === 'forbidden')) {
+    return (
+      <ErrorBoundary>
+        {overlays}
+        <div className="afs-scope afs-page h-screen w-full flex flex-col overflow-hidden font-sans">
+          <div className="flex items-center gap-3 px-4 py-3 border-b afs-border">
+            <button
+              onClick={() => { closeRelease(); setSpace('enterprise'); }}
+              className="text-sm font-bold text-gray-100 hover:text-white bg-indigo-700 hover:bg-indigo-600 px-3 py-1.5 rounded transition-colors"
+            >⌂ 경영 홈</button>
+            <button
+              onClick={() => { closeRelease(); setSpace('build'); }}
+              className="text-sm font-bold text-gray-400 hover:text-gray-100 bg-gray-700 px-3 py-1.5 rounded transition-colors"
+            >◀ 앱 제작</button>
+          </div>
+          <main className="flex-1 min-h-0 overflow-auto p-6">
+            <section aria-label="결과물 확인 필요">
+              <p role="alert">{releaseError || '결과물을 확인하지 못했습니다.'}</p>
+            </section>
+          </main>
+        </div>
+      </ErrorBoundary>
+    );
+  }
 
   if (viewingRelease) {
     return (

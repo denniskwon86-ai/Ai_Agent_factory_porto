@@ -81,6 +81,10 @@ interface FactoryStore {
   supervisorFeed: any[];
   releases: any[];
   viewingRelease: any | null;
+  /** [B6] 결과물 조회의 진행·실패. `viewingRelease` 가 null 인 것만으로는
+   *  「아직 안 열었다」와 「열려다 실패했다」를 구분할 수 없다. */
+  releaseLoad: 'idle' | 'loading' | 'failed' | 'forbidden';
+  releaseError: string;
   agentRegistry: any | null;
   /** [UIUX-AUDIT-30 §5] 로드 실패 사유. 비어 있으면 «아직 안 왔다», 차 있으면 «못 가져왔다». */
   agentRegistryError: string;
@@ -276,6 +280,8 @@ export const useFactoryStore = create<FactoryStore>()((set, get) => ({
   supervisorFeed: [],
   releases: [],
   viewingRelease: null,
+  releaseLoad: 'idle',
+  releaseError: '',
   agentRegistry: null,
   agentRegistryError: '',
   agentActionError: '',
@@ -577,19 +583,38 @@ export const useFactoryStore = create<FactoryStore>()((set, get) => ({
     return result;
   },
 
+  //: ⚠️⚠️ [B6] 종전에는 `res.ok` 가 아니면 **아무 일도 하지 않았다** — console 에만 남고
+  //:   화면은 반응이 없었다. 목록에서 눌러 여는 동안에는 잘 드러나지 않지만, 직접 링크로
+  //:   들어오면 사용자는 **멎은 화면**을 본다. 조회 실패와 「아직 안 열었다」가 같아진다.
+  //: ★ 401·403·404 는 **같은 문구**로 답한다. 나누면 존재 여부가 응답으로 새고, 사용자가
+  //:   할 일은 어느 쪽이든 같다.
   viewRelease: async (releaseId: string) => {
+    set({ releaseLoad: 'loading', releaseError: '' });
     try {
       const res = await fetch(`${API_BASE_URL}/api/v1/factory/library/item/${releaseId}`);
-      if (res.ok) {
-        const r = await res.json();
-        set({ viewingRelease: r.data });
+      if (!res.ok) {
+        const hidden = res.status === 401 || res.status === 403 || res.status === 404;
+        set({ viewingRelease: null,
+              releaseLoad: hidden ? 'forbidden' : 'failed',
+              releaseError: hidden
+                ? '현재 회사·권한에서 결과물을 찾을 수 없습니다.'
+                : `결과물을 불러오지 못했습니다 (HTTP ${res.status}). 잠시 후 다시 확인하십시오.` });
+        return;
       }
+      const r = await res.json();
+      if (!r || r.status !== 'success' || !r.data) {
+        set({ viewingRelease: null, releaseLoad: 'failed',
+              releaseError: '서버가 결과물을 확인해 주지 않았습니다. 다시 확인하십시오.' });
+        return;
+      }
+      set({ viewingRelease: r.data, releaseLoad: 'idle', releaseError: '' });
     } catch (error) {
-      console.error("결과물 로드 실패:", error);
+      set({ viewingRelease: null, releaseLoad: 'failed',
+            releaseError: '연결을 확인하지 못했습니다. 다시 확인하십시오.' });
     }
   },
 
-  closeRelease: () => set({ viewingRelease: null }),
+  closeRelease: () => set({ viewingRelease: null, releaseLoad: 'idle', releaseError: '' }),
 
   // ⚠️ [사용자 결정 2026-07-30] 서버는 기본적으로 **삭제를 거부**한다(409).
   //   배포된 프로그램을 지우면 다른 사용자가 남긴 기록이 고아가 되기 때문이며,
