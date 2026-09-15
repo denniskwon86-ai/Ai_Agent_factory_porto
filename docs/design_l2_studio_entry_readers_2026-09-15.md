@@ -260,9 +260,42 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>
 `_instance_or_404` 의 unrestricted 분기는 그 약속과 어긋나 보인다. **다만 전사 조회 권한의
 의도된 설계일 수 있어 결함으로 단정하지 않는다** — Codex 판단이 필요하다.
 
-⚠️ `contract/v2` 가 소유 조직(`plant-afs-smelting-01`) 문맥에서도 404 인 **원인은
-특정하지 못했다.** `_visible_v2_instance` 가 `context_root_id` 또는 `binding_for_instance`
-에서 막는 것으로 보이나 확인하지 않았으므로 원인이라고 적지 않는다.
+### 8.3.1 `contract/v2` 404 의 원인 — 확정했다
+
+소유 조직 문맥에서도 404 이므로 문맥 문제가 아니었다. 조건을 하나씩 평가해 확정했다.
+
+```
+store.get_instance('ki_6b06ffb50a994a')  →  정상
+  tenant-afs-demo-materials / REAL / plant-afs-smelting-01 / active
+binding_for_instance(store, inst)        →  None   ← 여기서 막힌다
+```
+
+`process_kit_instances.binding_for_instance:68` 이 **표 자체가 없으면 `None` 을 돌려준다.**
+
+```python
+if not conn.execute("SELECT 1 FROM sqlite_master WHERE type='table'
+                     AND name='kit_process_instances'").fetchone():
+    return None
+```
+
+그리고 `_visible_v2_instance` 가 `if not link: raise missing()` → **404**.
+
+**복원 데이터의 `data_preparation.db` 에 `kit_process_instances` 표가 없다.**
+`kit_process_artifacts` 도 없다. 둘 다 **B2 프로세스 설치가 만드는 표**다
+(`test_b2_installation.py` 가 설치 후 `kit_instances` 와 `kit_process_instances` 가 1:1 로
+생기는 것을 확인한다). 시험 seed 도 이 둘을 dp 필수 표로 둔다(`b3_kit_seed.py:22`).
+
+복원 데이터의 표 구성(17개):
+`kit_instances`(1) · `kit_app_contracts`(7) · `kit_registry_versions`(2) ·
+`source_bindings`(35) · `dataset_snapshots`(38) · `dataset_ownership_bindings`(35) ·
+`object_scope_index`(37,748) · `baseline_builds`(1) · `calc_execution_approvals`(3) ·
+인증 계열 7표(전부 0행).
+
+★ **결함이 아니라 데이터 상태다.** 이 키트 인스턴스는 **B1/B2 프로세스 구성과 연결되지
+않은 채** 만들어졌다. 그래서 v2 계약 경로가 「새 업무 팩 적용본을 찾을 수 없습니다」로
+**의도대로 차단**한다. 차단이 옳게 동작하는 것을 확인한 셈이다.
+
+⚠️ **다만 이것이 진입 확인 설계에 직접 영향을 준다** — §8.4 참조.
 
 ### 8.4 그래서 진입 확인은 무엇을 물어야 하나
 
@@ -272,9 +305,21 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>
 - 따라서 제안한 `instances/{id}/apps/{app_id}/entry-metadata` 는 **목록 수준 가시성 +
   app_id 존재**만 답하고, 계약·준비도·릴리스 결속은 각 단계가 다시 확인하는 편이 계약에 맞다.
 
+★★ **§8.3.1 이 이 선택을 강하게 뒷받침한다.** 진입 확인을 v2 계약 경로 위에 얹으면
+`kit_process_instances` 가 없는 이 데이터에서는 **모든 키트 앱 링크가 404** 가 된다.
+사용자는 화면 목록에서 앱 7개를 보면서 링크로는 못 여는 상태가 된다 — 같은 자원에
+**두 답**이 나오는 것이고, 그것이 이 저장소가 반복해서 막아 온 결함 유형이다.
+
+⚠️ 반대로 목록 수준만 보면 **v2 연결이 없는 인스턴스의 앱도 열린다.** 그것이 맞는지는
+제품 판단이다 — 「조회 가능 ≠ 실행·게시 승인」(§2.3) 원칙대로라면 **열되 각 단계가 다시
+막는 것**이 일관되나, Codex 확인이 필요하다(§6-7).
+
 ### 8.5 §6 에 더할 결정 사항
 
 6. **진입 확인이 `unrestricted` 를 어떻게 다룰 것인가.** `_instance_or_404` 처럼 문맥
    비교를 건너뛸 것인가, project 처럼 소유 대 조회를 항상 비교할 것인가. **둘이 다르면
    같은 사용자가 대상에 따라 다른 답을 받는다.**
+7. **v2 연결이 없는 키트 인스턴스의 앱을 진입 확인이 통과시킬 것인가.** 복원 데이터가
+   정확히 그 상태다(§8.3.1). 통과시키면 화면 목록과 링크가 같은 답을 주지만 v2 계약이 없는
+   대상을 열게 되고, 막으면 목록에 보이는 앱을 링크로는 못 여는 상태가 된다.
 
