@@ -6,6 +6,9 @@ import { Group, Panel, Separator } from 'react-resizable-panels';
 
 import ControlPanel from './components/ControlPanel';
 import { AdaptiveProductionStudio } from './factory/AdaptiveProductionStudio';
+import { parseStudioLocation } from './factory/studioLocation';
+import { StudioProjectEntryGate } from './factory/StudioProjectEntryGate';
+import type { ProjectEntry } from './factory/studioProjectEntry';
 import TimelinePanel from './components/TimelinePanel';
 import PreviewPanel from './components/PreviewPanel';
 import WorkflowStrip from './components/WorkflowStrip';
@@ -69,6 +72,15 @@ import {
 } from './lib/api';
 
 
+/** [B6] 서버가 확인해 준 진입 대상만 실제 선택으로 옮긴다.
+ *
+ *  ⚠️ 렌더 중에 store 를 바꾸지 않는다 — effect 에서만 옮기고, 옮겨지기 전에는 아무것도
+ *    그리지 않는다. 조회 가능은 실행·게시 승인이 아니므로 여기서 더 하는 일은 없다. */
+function StudioEntryCommit({ entry, onCommit }: { entry: ProjectEntry; onCommit: (id: string) => void }) {
+  useEffect(() => { onCommit(entry.project_id); }, [entry.project_id, onCommit]);
+  return null;
+}
+
 function AppShell() {
   const connectSSE = useFactoryStore((state) => state.connectSSE);
   const isConnected = useFactoryStore((state) => state.isConnected);
@@ -99,9 +111,16 @@ function AppShell() {
   //   (2026-07-28 리버스엔지니어링 AS-IS 그대로. 화면 이관은 개별 화면만 옮겼다).
   //   React Router 를 새로 들이지 않고도 최소 URL 상태 계약을 지킨다. `space`와 `project`는
   //   새로고침·공유 뒤 같은 제작 문맥을 복원한다. 인증·권한 검사는 URL 이 아니라 서버가 한다.
-  const initialProject = React.useRef<string | null>(
-    typeof window === 'undefined' ? null : new URLSearchParams(window.location.search).get('project')
-  );
+  //   ★ [B6] URL 해석은 순수 문법 모듈(`studioLocation`)에 맡긴다. 여기서 직접
+  //     `URLSearchParams` 를 읽으면 대상 판정 규칙이 두 곳으로 갈라지고, 갈라지면
+  //     한쪽만 고쳐도 조용히 다른 답을 준다. legacy `?project=` 단독은 그 모듈이
+  //     `kind:'project'` 로 정규화하므로 기존 링크 동작은 그대로다.
+  const initialProject = React.useRef<string | null>((() => {
+    if (typeof window === 'undefined') return null;
+    const parsed = parseStudioLocation(window.location.search);
+    return parsed.kind === 'MATCH' && parsed.location.target.kind === 'project'
+      ? parsed.location.target.projectId : null;
+  })());
   const [space, setSpace] = useState<'enterprise' | 'about' | 'build' | 'operate' | 'twin' | 'report' | 'knowledge' | 'agent'
     | 'advisor' | 'data' | 'calc' | 'path' | 'briefing'
     | 'master' | 'terminology' | 'crosswalk' | 'governance' | 'planning' | 'shadow'
@@ -122,11 +141,18 @@ function AppShell() {
       ? value : 'enterprise';
   });
   const [routeRestored, setRouteRestored] = useState(initialProject.current === null);
-  useEffect(() => {
-    if (!initialProject.current) return;
-    setCurrentProject(initialProject.current);
+  //   ★★★ [B6] 직접 링크로 들어온 프로젝트는 **서버가 확인하기 전에 열지 않는다.**
+  //     종전에는 여기서 곧바로 `setCurrentProject()` 를 불렀고, 그것이 wbs·state·hotl·feed
+  //     네 요청을 즉시 쏘았다. 없는 프로젝트여도 화면은 열렸고 404 네 건은 「서버 연결 끊김」
+  //     으로 보였다(실측: docs/handoff/L2_STUDIO_BROWSER_BASELINE_2026-09-15.md §4).
+  //   ⚠️ 목록에서 눌러 여는 경로(`onOpenProject`)는 **건드리지 않는다** — 그쪽은 서버가 준
+  //     목록에서 고른 것이라 진입 확인을 한 번 더 할 이유가 없다.
+  const [entryGateId, setEntryGateId] = useState<string | null>(initialProject.current);
+  const closeEntryGate = useCallback(() => {
+    setEntryGateId(null);
+    // 확인이 끝났으므로 이제 URL 을 현재 선택 상태로 다시 써도 된다.
     setRouteRestored(true);
-  }, [setCurrentProject]);
+  }, []);
   useEffect(() => {
     if (!routeRestored || typeof window === 'undefined') return;
     const next = new URL(window.location.href);
@@ -584,6 +610,9 @@ function AppShell() {
     setShowLogPopup(false);
     setShowCompany(false);
     setCurrentProject(null);
+    // [B6] 직접 링크 진입 게이트도 함께 닫는다 — 남겨 두면 확인 화면이 다시 뜬다.
+    setEntryGateId(null);
+    setRouteRestored(true);
     setSpace('enterprise');
   }, []);
 
@@ -1108,6 +1137,45 @@ function AppShell() {
     );
   }
 
+  // ★★★ [B6] 직접 링크 진입 — 서버 확인 전에는 목록도 Studio 도 보여 주지 않는다.
+  //   확인 중·거절 표시는 `StudioProjectEntryGate` 가 맡고, 여기서는 그 화면에서
+  //   빠져나갈 길(경영 홈·목록)만 함께 둔다. 확인되면 아래 기존 흐름으로 넘어간다.
+  if (entryGateId && !currentProjectId) {
+    return (
+      <ErrorBoundary>
+        {overlays}
+        <div className="afs-scope afs-page h-screen w-full flex flex-col overflow-hidden font-sans">
+          <div className="flex items-center gap-3 px-4 py-3 border-b afs-border">
+            <button
+              onClick={() => { closeEntryGate(); setSpace('enterprise'); }}
+              className="text-sm font-bold text-gray-100 hover:text-white flex items-center gap-1 bg-indigo-700 hover:bg-indigo-600 px-3 py-1.5 rounded transition-colors"
+              title="경영 홈으로 — 처음 화면으로 돌아갑니다"
+            >
+              ⌂ 경영 홈
+            </button>
+            <button
+              onClick={() => { closeEntryGate(); setSpace('build'); }}
+              className="text-sm font-bold text-gray-400 hover:text-gray-100 flex items-center gap-1 bg-gray-700 px-3 py-1.5 rounded transition-colors"
+              title="앱 제작 목록으로 돌아갑니다"
+            >
+              ◀ 앱 제작
+            </button>
+          </div>
+          <main className="flex-1 min-h-0 overflow-auto p-6">
+            <StudioProjectEntryGate projectId={entryGateId}>
+              {(entry) => (
+                <StudioEntryCommit entry={entry} onCommit={(id) => {
+                  setCurrentProject(id);
+                  closeEntryGate();
+                }} />
+              )}
+            </StudioProjectEntryGate>
+          </main>
+        </div>
+      </ErrorBoundary>
+    );
+  }
+
   if (!currentProjectId) {
     return (
       <ErrorBoundary>
@@ -1197,14 +1265,14 @@ function AppShell() {
                   돌아가기` 를 **항상** 표시한다」고 못박았다.
                 ★ 둘을 **함께** 둔다. 「한 칸 뒤로」와 「처음으로」는 다른 행동이다. */}
             <button
-              onClick={() => { setCurrentProject(null); setSpace('enterprise'); }}
+              onClick={() => { setCurrentProject(null); closeEntryGate(); setSpace('enterprise'); }}
               className="text-sm font-bold text-gray-100 hover:text-white flex items-center gap-1 bg-indigo-700 hover:bg-indigo-600 px-3 py-1.5 rounded transition-colors"
               title="경영 홈으로 — 처음 화면으로 돌아갑니다"
             >
               ⌂ 경영 홈
             </button>
             <button 
-              onClick={() => { setCurrentProject(null); setSpace(workbenchParent); }}
+              onClick={() => { setCurrentProject(null); closeEntryGate(); setSpace(workbenchParent); }}
               className="text-sm font-bold text-gray-400 hover:text-gray-100 flex items-center gap-1 bg-gray-700 px-3 py-1.5 rounded transition-colors"
               title={`${workbenchParentLabel} 목록으로 돌아갑니다`}
             >
