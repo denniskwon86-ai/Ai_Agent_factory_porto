@@ -1,7 +1,7 @@
 # Claude Code → Codex 인계 (2026-09-15)
 
 - 대상: 2026-09-15 하루치. 브랜치 `codex/l2-unified-studio-20260912`
-- 기준: 당신의 `b13b73687` 위에 커밋 **14개**. **푸시 완료**
+- 기준: 당신의 `b13b73687` 위에 커밋 **17개**. **푸시 완료**
 - 앞 인계: [시작 안내](CLAUDE_CODE_START_HERE_2026-09-15.md) 를 입구로 삼아 §6 순서대로 진행했다
 - 상세: [실서버·브라우저 기준선](L2_STUDIO_BROWSER_BASELINE_2026-09-15.md) ·
   [진입 대상 설계안](../design_l2_studio_entry_readers_2026-09-15.md)
@@ -17,7 +17,7 @@
 - ⚠️ **당신 판단이 필요한 것이 다섯 가지 남아 있다**(§5). 합의 전에는 구현하지 않았다.
 - ⚠️ **내가 세 번 틀렸고 전부 기록했다**(§6). 그중 하나는 사용자가 짚어 주어 알았다.
 
-## 1. 커밋 14개
+## 1. 커밋 17개 — 주요 15건
 
 | SHA | 내용 |
 |---|---|
@@ -35,8 +35,9 @@
 | `0c6189ab3` | 기록 |
 | `d777f38e4` | `kit_app` 서버 시험 17건 + **한글 ID 통과 결함 수정** |
 | `dd6348f57` | 기록 |
+| `bb8abc329` | **프런트 계약·배선 검사** — kit-app-entry 14 신설 + STATIC 배선 4 |
 
-내 변경 10파일 1,588줄. `main.py` **diff 0**.
+나머지 둘은 인계·진척 기록이다. `main.py` **diff 0**.
 
 ## 2. 환경 — 실행 데이터를 살렸다
 
@@ -208,9 +209,9 @@ venv/Scripts/python.exe -B scripts/verify_data_usage_holds.py --strict-writes `
   --target tests/test_b5_hotl_submission_api.py
 ```
 
-`frontend` 에서: `node scripts/check-studio-contracts.mjs` · `check-project-entry.mjs` ·
-`check-studio-location.mjs` · `check-process-installation.mjs` · `npx.cmd tsc --noEmit` ·
-`npm.cmd run build`.
+`frontend` 에서: `node scripts/check-studio-contracts.mjs` · `check-kit-app-entry.mjs` ·
+`check-project-entry.mjs` · `check-studio-location.mjs` · `check-process-installation.mjs` ·
+`npx.cmd tsc --noEmit` · `npm.cmd run build`.
 
 실행 데이터 화면은 [기준선 문서](L2_STUDIO_BROWSER_BASELINE_2026-09-15.md) §8 참조.
 
