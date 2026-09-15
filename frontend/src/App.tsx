@@ -9,6 +9,8 @@ import { AdaptiveProductionStudio } from './factory/AdaptiveProductionStudio';
 import { parseStudioLocation } from './factory/studioLocation';
 import { StudioProjectEntryGate } from './factory/StudioProjectEntryGate';
 import type { ProjectEntry } from './factory/studioProjectEntry';
+import { StudioKitAppEntryGate } from './factory/StudioKitAppEntryGate';
+import type { KitAppEntry } from './factory/studioKitAppEntry';
 import TimelinePanel from './components/TimelinePanel';
 import PreviewPanel from './components/PreviewPanel';
 import WorkflowStrip from './components/WorkflowStrip';
@@ -78,8 +80,12 @@ import {
  *    대상 규칙이 갈라지고, 갈라지면 한쪽만 고쳐도 조용히 다른 답을 준다.
  *  ★ `new` 는 **만들기 흐름**이라 조회할 대상이 없다 — 서버 진입 확인을 태우지 않는다.
  *    실제 생성 POST 는 사용자가 폼에서 눌러야 나간다. */
-function readStudioEntry(): { project: string | null; isNew: boolean; release: string | null } {
-  const none = { project: null, isNew: false, release: null };
+type StudioEntry = {
+  project: string | null; isNew: boolean; release: string | null;
+  kitApp: { instanceId: string; appId: string } | null;
+};
+function readStudioEntry(): StudioEntry {
+  const none: StudioEntry = { project: null, isNew: false, release: null, kitApp: null };
   if (typeof window === 'undefined') return none;
   const parsed = parseStudioLocation(window.location.search);
   if (parsed.kind !== 'MATCH') return none;
@@ -88,6 +94,9 @@ function readStudioEntry(): { project: string | null; isNew: boolean; release: s
     project: target.kind === 'project' ? target.projectId : null,
     isNew: target.kind === 'new',
     release: target.kind === 'release' ? target.releaseId : null,
+    //   ★ `releaseId` 는 진입 확인 범위 밖이다(설계안 §6-2 미결). 문법으로 받되 여기서는
+    //     쓰지 않는다 — 결정 전에 의미를 임의로 부여하지 않는다.
+    kitApp: target.kind === 'kit_app' ? { instanceId: target.instanceId, appId: target.appId } : null,
   };
 }
 
@@ -97,6 +106,14 @@ function readStudioEntry(): { project: string | null; isNew: boolean; release: s
  *    그리지 않는다. 조회 가능은 실행·게시 승인이 아니므로 여기서 더 하는 일은 없다. */
 function StudioEntryCommit({ entry, onCommit }: { entry: ProjectEntry; onCommit: (id: string) => void }) {
   useEffect(() => { onCommit(entry.project_id); }, [entry.project_id, onCommit]);
+  return null;
+}
+
+/** [B6] 확인된 업무 앱을 기존 시뮬레이션 진입과 **같은 자리**로 넘긴다. */
+function KitAppEntryCommit({ entry, onCommit }: {
+  entry: KitAppEntry; onCommit: (instanceId: string, appId: string) => void;
+}) {
+  useEffect(() => { onCommit(entry.instance_id, entry.app_id); }, [entry.instance_id, entry.app_id, onCommit]);
   return null;
 }
 
@@ -165,6 +182,7 @@ function AppShell() {
   //   ⚠️ 목록에서 눌러 여는 경로(`onOpenProject`)는 **건드리지 않는다** — 그쪽은 서버가 준
   //     목록에서 고른 것이라 진입 확인을 한 번 더 할 이유가 없다.
   const [entryGateId, setEntryGateId] = useState<string | null>(initialProject.current);
+  const [kitAppGate, setKitAppGate] = useState<{ instanceId: string; appId: string } | null>(initialEntry.current.kitApp);
   const closeEntryGate = useCallback(() => {
     setEntryGateId(null);
     // 확인이 끝났으므로 이제 URL 을 현재 선택 상태로 다시 써도 된다.
@@ -1216,6 +1234,38 @@ function AppShell() {
           </main>
         </div>
         {overlays}
+      </ErrorBoundary>
+    );
+  }
+
+  // ★ [B6] 업무 앱 직접 링크 — 서버가 확인해 준 뒤에만 시뮬레이션으로 넘긴다.
+  //   확인 전에는 목록을 보여 주지 않는다. 조회 가능은 실행 승인이 아니므로 여기서 더
+  //   하는 일은 없고, 확인되면 기존 「키트 운영 → 시뮬레이션」과 같은 자리로 넘어간다.
+  if (kitAppGate && !showPathCalc) {
+    return (
+      <ErrorBoundary>
+        {overlays}
+        <div className="afs-scope afs-page h-screen w-full flex flex-col overflow-hidden font-sans">
+          <div className="flex items-center gap-3 px-4 py-3 border-b afs-border">
+            <button
+              onClick={() => { setKitAppGate(null); setRouteRestored(true); setSpace('enterprise'); }}
+              className="text-sm font-bold text-gray-100 hover:text-white bg-indigo-700 hover:bg-indigo-600 px-3 py-1.5 rounded transition-colors"
+            >⌂ 경영 홈</button>
+          </div>
+          <main className="flex-1 min-h-0 overflow-auto p-6">
+            <StudioKitAppEntryGate instanceId={kitAppGate.instanceId} appId={kitAppGate.appId}>
+              {(entry) => (
+                <KitAppEntryCommit entry={entry} onCommit={(instanceId, appId) => {
+                  setPathCalcInitialInstanceId(instanceId);
+                  setPathCalcInitialAppId(appId);
+                  setShowPathCalc(true);
+                  setKitAppGate(null);
+                  setRouteRestored(true);
+                }} />
+              )}
+            </StudioKitAppEntryGate>
+          </main>
+        </div>
       </ErrorBoundary>
     );
   }

@@ -1131,6 +1131,70 @@ def _review_apps_v2(instance_id, p, *, runtime_visible):
         return {"status": "success", "data": {"instance_id": instance_id, "apps": apps}}
 
 
+@router.get("/instances/{instance_id}/apps/{app_id}/entry-metadata")
+async def app_entry_metadata(instance_id: str, app_id: str, p: Principal = Depends(current_principal)):
+    """[B6] 업무 앱 직접 링크의 **진입 확인**. 「이 인스턴스에 이 앱이 있고 지금 볼 수
+    있는가」만 답한다.
+
+    ★★★ **목록 수준**이다(사용자 결정 2026-09-15). 화면 목록이 보여 주는 것과 같은
+      조건으로 판정한다 — 목록에 보이는 앱을 링크로는 못 여는 상태를 만들지 않는다.
+      같은 자원에 두 답이 나오는 것이 이 저장소가 반복해서 막아 온 결함 유형이다.
+
+    ⚠️ **준비도·계약·릴리스 결속·원문을 주지 않는다.** 조회 가능은 실행·게시 승인이
+      아니며 그 판정은 각 단계가 다시 한다. 준비도를 여기서 계산하지도 않는다 —
+      진입 확인이 무거워지면 링크를 여는 일마다 그 비용을 낸다.
+    ⚠️ 없는 것과 못 보는 것을 **같은 404** 로 답한다. 나누면 그 응답이 「그 조직에 그런
+      자원이 있다」를 알려 주는 신호가 된다.
+    """
+    from core.data_preparation.process_kit_instances import binding_for_instance
+    from core.enterprise_context.process_context import ProcessContextService
+
+    hidden = "현재 문맥에서 업무 앱을 찾을 수 없습니다."
+    if not isinstance(app_id, str) or not app_id or len(app_id) > 160             or not all(ch.isalnum() or ch in "_-" for ch in app_id):
+        raise HTTPException(status_code=400, detail="잘못된 app_id 형식입니다.")
+    # ⚠️ `_instance_or_404` 의 기존 문구를 그대로 쓰면 「인스턴스는 있고 앱만 없다」와
+    #   「인스턴스가 없다」가 **다른 문구**가 되어 인스턴스 존재 여부가 샌다. 한 문구로 접는다.
+    try:
+        inst = _instance_or_404(p, instance_id)
+    except HTTPException as exc:
+        if exc.status_code == 404:
+            raise HTTPException(status_code=404, detail=hidden) from exc
+        raise
+    # 목록과 같은 분기. v2 로 연결된 인스턴스는 그 경로가, 아니면 legacy 권한이 정한다.
+    try:
+        with ProcessContextService._errors():
+            linked = binding_for_instance(store, inst)
+    except ProcessError as exc:
+        _process_error(exc, p.user_id, instance_id)
+    if not linked:
+        require_caps(p, PROJECT_RUN, resource="data_preparation",
+                     action=f"apps:entry:{instance_id}")
+    profile = _kit_profile_or_503(inst)
+    found = next((row for row in kit_registry.outputs(profile)
+                  if str(row.get("output") or "") == app_id), None)
+    if not found:
+        raise HTTPException(status_code=404, detail=hidden)
+    # 반환 직전 재확인 — 조회 중 권한·문맥이 바뀌었을 수 있다.
+    try:
+        again = _instance_or_404(p, instance_id)
+    except HTTPException as exc:
+        if exc.status_code == 404:
+            raise HTTPException(status_code=404, detail=hidden) from exc
+        raise
+    if any(str(again[k]) != str(inst[k]) for k in ("tenant_id", "entity_mode", "scope_node_id")):
+        raise HTTPException(status_code=404, detail=hidden)
+    view = _ctx(p)
+    return {"status": "success", "data": {
+        "instance_id": str(inst["instance_id"]), "app_id": app_id,
+        "app_label": str(found.get("label") or app_id),
+        "ownership": {"tenant_id": str(inst["tenant_id"]),
+                      "enterprise_scope_id": str(inst["scope_node_id"]),
+                      "entity_mode": str(inst["entity_mode"])},
+        "viewing_context": {"tenant_id": str(view.get("tenant_id") or ""),
+                            "scope_node_id": str(view.get("scope_node_id") or ""),
+                            "entity_mode": str(view.get("entity_mode") or "")}}}
+
+
 @router.get("/instances/{instance_id}/apps")
 async def list_apps(instance_id: str, p: Principal = Depends(current_principal)):
     """이 인스턴스에서 **지금 무엇을 만들 수 있고 무엇이 이미 있는가.**
