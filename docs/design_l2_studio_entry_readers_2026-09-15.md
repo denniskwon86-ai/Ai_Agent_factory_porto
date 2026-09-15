@@ -387,6 +387,40 @@ tsc 0 · build PASS · B5 계약 **153** · project-entry **26** · studio-locat
 서버 **83 PASS**(`test_b6_project_entry`·`test_b6_revision_reads`·`test_b2_installation`,
 소스·보호 자산 지문 불변).
 
-⚠️ **새 엔드포인트의 서버 시험은 아직 없다.** 기존 시험이 회귀만 막고 있다. project 가
-`test_b6_project_entry.py` 46건으로 잠긴 것과 같은 수준이 되려면 별도 묶음이 필요하다.
+### 9.5 서버 시험 — `tests/test_b6_kit_app_entry.py` **17건**
+
+실제 B2 설치로 인스턴스를 만들고 `data-preparation` 라우터만 mount 한 HTTP 회귀다.
+
+| 시험 | 무엇을 잠그나 |
+|---|---|
+| `..._same_set_as_the_visible_list` | **목록에 보이는 앱은 전부 진입 확인을 통과한다** — 두 답이 갈리지 않는다(6·7번 결정의 핵심) |
+| `..._no_readiness_or_contract_leak` | 응답 형태 고정 + `readiness_state`·`contract_status`·`release_id` 등 **7개 필드 비노출** |
+| `..._unknown_app_is_404...` | 없는 앱 3종 → 404, `data` 없음 |
+| `..._same_wording_as_missing_app` | **없는 인스턴스와 없는 앱이 같은 문구** — 인스턴스 존재 비노출 |
+| `..._rejected_with_400` | 라우팅을 통과하는 형식 위반 5종 → **400** |
+| `..._never_reaches_the_handler` | 슬래시·빈 값 3종 → 라우팅에서 갈림 |
+| `..._creates_nothing` | 없는 대상을 물어도 **세 DB 전체가 그대로** |
+| `..._ownership_reports_the_instance` | 소유는 인스턴스의 것 — 호출자 문맥을 되돌려 주지 않음 |
+| `..._unauthenticated_caller_is_rejected` | 미인증 차단 |
+
+**줄 단위로 검증했다.** 차단하는 줄을 지우면 대응 시험이 실패한다.
+
+| 제거한 것 | 실패 |
+|---|---|
+| 은닉 문구 통일 | 1건 — 정확히 그 시험만 |
+| 앱 존재 확인 | 6건 |
+| `app_id` 형식 검사 | 5건 |
+
+### 9.6 ⚠️ 시험이 내 결함을 둘 잡았다
+
+**하나는 느슨한 시험이었다.** 형식 위반 시험을 처음에 `status_code in (400, 404, 405)` 로
+썼다. 그러면 **형식 검사를 통째로 지워도 404 로 통과**한다 — 가짜 통과다. 줄 단위 검증에서
+「제거해도 실패 0건」이 나와 알았고, 라우팅을 통과하는 위반은 **400 을 강제**하도록 조였다.
+
+**하나는 제품 결함이었다.** 조인 시험이 곧바로 실패했다 — 한글 `앱` 이 400 이 아니었다.
+원인은 `str.isalnum()` 이 **유니코드 문자를 참으로 본다**는 것이다. 한글·한자 ID 가 형식
+검사를 통과하고 있었다. `re.fullmatch(r"[A-Za-z0-9_-]{1,160}")` 로 바꿨다 — 프런트 reader 와
+같은 집합이다.
+
+★ 느슨한 시험을 조이지 않았다면 이 결함은 그대로 남았다.
 

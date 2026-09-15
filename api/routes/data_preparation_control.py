@@ -15,6 +15,7 @@
 """
 import asyncio
 import os
+import re
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
@@ -1150,7 +1151,9 @@ async def app_entry_metadata(instance_id: str, app_id: str, p: Principal = Depen
     from core.enterprise_context.process_context import ProcessContextService
 
     hidden = "현재 문맥에서 업무 앱을 찾을 수 없습니다."
-    if not isinstance(app_id, str) or not app_id or len(app_id) > 160             or not all(ch.isalnum() or ch in "_-" for ch in app_id):
+    # ⚠️ `str.isalnum()` 을 쓰면 **한글·한자도 통과한다**(유니코드 문자다). 진입 대상 ID 는
+    #   ASCII 영숫자·밑줄·하이픈이며 프런트 reader 도 같은 집합을 쓴다. 명시 집합으로 막는다.
+    if not isinstance(app_id, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,160}", app_id):
         raise HTTPException(status_code=400, detail="잘못된 app_id 형식입니다.")
     # ⚠️ `_instance_or_404` 의 기존 문구를 그대로 쓰면 「인스턴스는 있고 앱만 없다」와
     #   「인스턴스가 없다」가 **다른 문구**가 되어 인스턴스 존재 여부가 샌다. 한 문구로 접는다.
