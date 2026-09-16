@@ -32,8 +32,20 @@ sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from core.data_preparation import kit_freeze  # noqa: E402
 import kit_defs  # noqa: E402
+import business_defs  # noqa: E402
 
 KIT_ID = "KIT-MFG-NONFERROUS-PROCUREMENT"
+#: ★ **키트는 회사가 아니라 사업의 조합이다.** 예전에는 제련과 전지소재가 생성기
+#:   안에 한 덩어리로 박혀 있어, 고려아연(제련만)·켐코(황산니켈만)에 줄 수 없었다.
+#:   `--business` 로 갈아 끼운다 — `scripts/business_defs/` 참고.
+DEFAULT_BUSINESSES = ("smelting_nonferrous", "battery_materials")
+BUSINESSES: list = []
+
+
+def use_businesses(codes) -> None:
+    """이 키트가 담을 사업을 정한다. **순서가 지문을 좌우하므로 바꾸지 않는다.**"""
+    global BUSINESSES
+    BUSINESSES = business_defs.load(list(codes))
 #: **판본은 `--version` 으로 받는다** (P2). 예전에는 여기에 "1.0.0" 이 박혀 있어서,
 #: 1.1.0 을 내려면 이 줄을 고쳐야 했고 고치는 순간 1.0.0 을 재현할 수 없게 됐다.
 #: `main()`/`build()` 이 아래 셋을 판본에 맞게 다시 세운다.
@@ -221,30 +233,40 @@ def infer_type(values: Sequence[Any]) -> str:
 
 
 def generate_org(profile: Profile) -> List[Dict[str, Any]]:
-    nodes = [
-        (GROUP_SCOPE, "ENTERPRISE_GROUP", "AFS_GROUP", "AFS 데모소재그룹", "", "VIRTUAL"),
-        (METALS_SCOPE, "LEGAL_ENTITY", "AFS_METALS", "AFS 메탈 주식회사", GROUP_SCOPE, "VIRTUAL"),
-        ("org-afs-metals-shared", "SHARED_SERVICE", "METALS_SHARED", "AFS 메탈 전사공통", METALS_SCOPE, "VIRTUAL"),
-        ("org-afs-smelting-bu", "BUSINESS_DIVISION", "SMELTING_BU", "제련사업부", METALS_SCOPE, "VIRTUAL"),
-        (PLANT1, "PLANT", "SMELTING_P1", "제1공장(제련·정제)", "org-afs-smelting-bu", "VIRTUAL"),
-        (ADV_SCOPE, "LEGAL_ENTITY", "AFS_ADVANCED", "AFS 첨단소재 주식회사", GROUP_SCOPE, "VIRTUAL"),
-        ("org-afs-advanced-shared", "SHARED_SERVICE", "ADV_SHARED", "AFS 첨단소재 전사공통", ADV_SCOPE, "VIRTUAL"),
-        ("org-afs-battery-bu", "BUSINESS_DIVISION", "BATTERY_BU", "배터리소재사업부", ADV_SCOPE, "VIRTUAL"),
-        (PLANT2, "PLANT", "BATTERY_P2", "제2공장(황산니켈)", "org-afs-battery-bu", "VIRTUAL"),
-        (PLANT3, "PLANT", "EXPANSION_P3", "증설 제3공장", "org-afs-battery-bu", "VIRTUAL_EXPANSION"),
-        ("dept-procurement", "DEPARTMENT", "PROC", "원료구매팀", "org-afs-battery-bu", "VIRTUAL"),
-        ("dept-logistics", "DEPARTMENT", "LOG", "물류팀", "org-afs-battery-bu", "VIRTUAL"),
-        ("dept-production", "DEPARTMENT", "MFG", "생산관리팀", "org-afs-battery-bu", "VIRTUAL"),
-        ("dept-finance", "DEPARTMENT", "FIN", "재무회계팀", "org-afs-advanced-shared", "VIRTUAL"),
-        ("dept-management", "DEPARTMENT", "MGT", "경영관리팀", "org-afs-advanced-shared", "VIRTUAL"),
+    #: ★ 법인·전사공통·사업부·공장은 **사업이 정한다**. 그룹과 부서만 여기 남는다.
+    #: ⚠️ 부서가 **마지막 사업**에 붙는 것은 지금 데이터가 그렇기 때문이고(배터리
+    #:   사업부 소속), 의미가 있어서가 아니다. 분리하면서 바꾸지 않았다.
+    host = BUSINESSES[-1]
+    nodes = [(GROUP_SCOPE, "ENTERPRISE_GROUP", "AFS_GROUP", "AFS 데모소재그룹", "", "VIRTUAL")]
+    for b in BUSINESSES:
+        eid, ecode, ename = b.legal_entity
+        sid, scode, sname = b.shared
+        did, dcode, dname = b.division
+        pid, pcode, pname = b.plant
+        nodes += [
+            (eid, "LEGAL_ENTITY", ecode, ename, GROUP_SCOPE, "VIRTUAL"),
+            (sid, "SHARED_SERVICE", scode, sname, eid, "VIRTUAL"),
+            (did, "BUSINESS_DIVISION", dcode, dname, eid, "VIRTUAL"),
+            (pid, "PLANT", pcode, pname, did, "VIRTUAL"),
+        ]
+    nodes += [
+        #: 증설 제3공장은 **사업이 아니라 시나리오**다(회사 프로파일).
+        (PLANT3, "PLANT", "EXPANSION_P3", "증설 제3공장", host.division_id, "VIRTUAL_EXPANSION"),
+        ("dept-procurement", "DEPARTMENT", "PROC", "원료구매팀", host.division_id, "VIRTUAL"),
+        ("dept-logistics", "DEPARTMENT", "LOG", "물류팀", host.division_id, "VIRTUAL"),
+        ("dept-production", "DEPARTMENT", "MFG", "생산관리팀", host.division_id, "VIRTUAL"),
+        ("dept-finance", "DEPARTMENT", "FIN", "재무회계팀", host.shared[0], "VIRTUAL"),
+        ("dept-management", "DEPARTMENT", "MGT", "경영관리팀", host.shared[0], "VIRTUAL"),
     ]
     if profile.name == "quick":
-        keep = {GROUP_SCOPE, ADV_SCOPE, "org-afs-battery-bu", PLANT2,
+        #: Quick 은 **마지막 사업 한 갈래**만 남긴다 — 그룹 → 법인 → 사업부 → 공장.
+        keep = {GROUP_SCOPE, host.entity_id, host.division_id, host.plant_id,
                 "dept-procurement", "dept-logistics", "dept-management"}
         nodes = [n for n in nodes if n[0] in keep]
-        parent_map = {ADV_SCOPE: GROUP_SCOPE, "org-afs-battery-bu": ADV_SCOPE, PLANT2: "org-afs-battery-bu",
-                      "dept-procurement": "org-afs-battery-bu", "dept-logistics": "org-afs-battery-bu",
-                      "dept-management": ADV_SCOPE}
+        parent_map = {host.entity_id: GROUP_SCOPE, host.division_id: host.entity_id,
+                      host.plant_id: host.division_id,
+                      "dept-procurement": host.division_id, "dept-logistics": host.division_id,
+                      "dept-management": host.entity_id}
         nodes = [(a, b, c, d, parent_map.get(a, e), f) for a, b, c, d, e, f in nodes]
     rows = [{"node_id": n[0], "node_type": n[1], "code": n[2], "name": n[3],
              "parent_id": n[4], "entity_mode": n[5], "industry_code": "C24",
@@ -298,32 +320,27 @@ def generate_references(profile: Profile, start: date, end: date) -> List[Dict[s
 
 
 def generate_materials(profile: Profile) -> List[Dict[str, Any]]:
-    fixed = [
-        ("RM-CU-CONC", "동정광", "RAW", "TON", PLANT1, "LME_COPPER"),
-        ("RM-MHP", "니켈 MHP", "RAW", "TON", PLANT2, "NICKEL"),
-        ("RM-H2SO4", "황산 98%", "RAW", "TON", PLANT2, "SULFURIC_ACID"),
-        ("RM-LIME", "소석회", "RAW", "TON", PLANT2, "INDUSTRIAL_CHEMICAL"),
-        ("WIP-MATTE", "동 매트", "WIP", "TON", PLANT1, ""),
-        ("WIP-ANODE", "아노드동", "WIP", "TON", PLANT1, ""),
-        ("WIP-NISO4", "조황산니켈 용액", "WIP", "TON", PLANT2, ""),
-        ("FG-CATHODE", "전기동", "FINISHED", "TON", PLANT1, "COPPER"),
-        ("FG-NISO4", "고순도 황산니켈", "FINISHED", "TON", PLANT2, "NICKEL_SULFATE"),
-        ("FG-LIOH", "배터리급 수산화리튬", "FINISHED", "TON", PLANT2, "LITHIUM"),
-        ("BP-H2SO4", "부산물 황산", "BYPRODUCT", "TON", PLANT1, "SULFURIC_ACID"),
-        ("BP-GOLD", "부산물 금", "BYPRODUCT", "KG", PLANT1, "GOLD"),
-    ]
+    #: ★ 품목은 **사업이 정한다**(`business_defs/`). 예전에는 제련과 전지소재가
+    #:   여기 한 목록으로 박혀 있어 따로 뽑을 수가 없었다.
+    #:   ⚠️ 원래 순서는 `RM-*` → `WIP-*` → `FG-*` → `BP-*` 로 **유형별**이었다.
+    #:   사업별로 모으면 순서가 달라지므로, 지문을 지키려고 유형 순으로 다시 세운다.
+    _order = {"RAW": 0, "WIP": 1, "FINISHED": 2, "BYPRODUCT": 3}
+    fixed = sorted(business_defs.materials_of(BUSINESSES),
+                   key=lambda m: _order.get(m["type"], 9))
     rows = []
-    for code, name, typ, uom, scope, benchmark in fixed:
+    for m in fixed:
+        code, name, typ = m["code"], m["name"], m["type"]
         rows.append({"material_id": code, "material_code": code, "material_name": name,
                      "aliases": f"{name}|{code.replace('-', ' ')}", "material_type": typ,
-                     "grade": "DEMO_STANDARD", "base_uom": uom, "valuation_class": typ,
-                     "benchmark_code": benchmark, "active": True, "_scope": scope})
+                     "grade": "DEMO_STANDARD", "base_uom": m["uom"], "valuation_class": typ,
+                     "benchmark_code": m["benchmark"], "active": True, "_scope": m["scope"]})
     categories = ["원료첨가제", "공정소모품", "포장재", "예비품", "중간재", "완제품"]
     while len(rows) < profile.materials:
         i = len(rows) + 1
         cat = categories[i % len(categories)]
         typ = "RAW" if i % 6 < 2 else "CONSUMABLE" if i % 6 < 4 else "WIP" if i % 6 == 4 else "FINISHED"
-        scope = PLANT1 if i % 2 == 0 else PLANT2
+        #: 더미 품목은 사업들에 번갈아 붙인다. 사업이 하나면 전부 그 사업으로 간다.
+        scope = BUSINESSES[i % len(BUSINESSES)].plant_id
         code = f"MAT-{typ[:2]}-{i:04d}"
         rows.append({"material_id": code, "material_code": code, "material_name": f"{cat} {i:03d}",
                      "aliases": f"{cat}{i:03d}|DEMO-{i:03d}", "material_type": typ,
@@ -360,17 +377,15 @@ def generate_customers(profile: Profile, products: Sequence[str]) -> List[Dict[s
 
 
 def generate_locations(profile: Profile) -> List[Dict[str, Any]]:
-    all_rows = [
-        ("LOC-P1-RAW", PLANT1, "원료창고", "RAW", 80000), ("LOC-P1-WIP", PLANT1, "공정재고", "WIP", 40000),
-        ("LOC-P1-FG", PLANT1, "제품창고", "FINISHED", 30000), ("LOC-P2-RAW", PLANT2, "원료창고", "RAW", 45000),
-        ("LOC-P2-QI", PLANT2, "품질검사창고", "QUALITY", 8000), ("LOC-P2-WIP", PLANT2, "공정재고", "WIP", 18000),
-        ("LOC-P2-FG", PLANT2, "제품창고", "FINISHED", 22000), ("LOC-P3-SIM", PLANT3, "가상 증설창고", "VIRTUAL", 35000),
-    ]
-    if profile.name == "quick":
-        # Quick 프로필도 두 실제 사업 범위의 입고 목적지를 모두 포함해야 한다.
-        # 그렇지 않으면 구매·물류 데이터가 존재하지 않는 창고를 참조하게 된다.
-        quick_ids = {"LOC-P1-RAW", "LOC-P1-FG", "LOC-P2-RAW", "LOC-P2-FG"}
-        all_rows = [r for r in all_rows if r[0] in quick_ids]
+    #: 창고는 사업이 정한다. Quick 프로필은 각 사업의 입고·출고 목적지만 남긴다 —
+    #: 그러지 않으면 구매·물류 데이터가 **존재하지 않는 창고**를 참조한다.
+    quick = profile.name == "quick"
+    all_rows = [(d["location_id"], d["site_id"], d["name"], d["storage_type"], d["capacity"])
+                for d in business_defs.locations_of(BUSINESSES, quick)]
+    #: ⚠️ 증설 제3공장 창고는 **사업이 아니라 시나리오**다(회사 프로파일
+    #:   `AFS-VIRTUAL-BATTERY-EXPANSION-2030`). 그래서 사업 정의에 두지 않는다.
+    if not quick:
+        all_rows.append(("LOC-P3-SIM", PLANT3, "가상 증설창고", "VIRTUAL", 35000))
     rows = [{"location_id": a, "site_id": b, "location_name": c, "storage_type": d,
              "capacity_quantity": e, "capacity_uom": "TON", "active": d != "VIRTUAL", "_scope": b}
             for a, b, c, d, e in all_rows]
@@ -378,11 +393,7 @@ def generate_locations(profile: Profile) -> List[Dict[str, Any]]:
 
 
 def generate_bom(profile: Profile, materials: Sequence[Mapping[str, Any]]) -> List[Dict[str, Any]]:
-    recipes = {
-        "FG-CATHODE": [("RM-CU-CONC", 3.30, "INPUT"), ("WIP-MATTE", 0.02, "RETURN")],
-        "FG-NISO4": [("RM-MHP", 1.15, "INPUT"), ("RM-H2SO4", 0.32, "INPUT"), ("RM-LIME", 0.08, "INPUT")],
-        "FG-LIOH": [("RM-H2SO4", 0.12, "INPUT"), ("RM-LIME", 0.05, "INPUT")],
-    }
+    recipes = business_defs.recipes_of(BUSINESSES)
     product_ids = [m["material_id"] for m in materials if m["material_type"] == "FINISHED"]
     raw_ids = [m["material_id"] for m in materials if m["material_type"] in {"RAW", "CONSUMABLE"}]
     rows = []
@@ -396,21 +407,22 @@ def generate_bom(profile: Profile, materials: Sequence[Mapping[str, Any]]) -> Li
             rows.append({"bom_id": f"BOM-{product}-{pidx//max(1,len(product_ids))+1:02d}", "line_no": line_no,
                          "output_material_id": product, "input_material_id": inp, "component_role": role,
                          "quantity_per_output": qty, "input_uom": "TON", "output_uom": "TON",
-                         "standard_yield": 0.98 if product == "FG-CATHODE" else 0.94,
-                         "byproduct_material_id": "BP-H2SO4" if product == "FG-CATHODE" else "",
+                         "standard_yield": business_defs.yield_of(BUSINESSES, product),
+                         "byproduct_material_id": business_defs.byproduct_of(BUSINESSES, product),
                          "effective_from": "2024-01-01", "effective_to": "9999-12-31",
-                         "_scope": PLANT1 if product == "FG-CATHODE" else PLANT2})
+                         "_scope": business_defs.owner_of(BUSINESSES, product)})
     return stamp("MDM-05", rows, kind="REFERENCE")
 
 
 def generate_routing(profile: Profile, materials: Sequence[Mapping[str, Any]]) -> List[Dict[str, Any]]:
-    products = [m["material_id"] for m in materials if m["material_type"] == "FINISHED"] or ["FG-NISO4"]
-    ops = ["원료준비", "침출·용해", "정제", "결정화", "건조·포장"]
+    products = ([m["material_id"] for m in materials if m["material_type"] == "FINISHED"]
+                or [BUSINESSES[-1].plant_id])
+    ops = business_defs.routing_ops_of(BUSINESSES)
     rows = []
     for i in range(profile.equipments):
         product = products[i % len(products)]
         op_seq = (i % len(ops) + 1) * 10
-        scope = PLANT1 if product == "FG-CATHODE" else PLANT2
+        scope = business_defs.owner_of(BUSINESSES, product)
         rows.append({"routing_id": f"ROUTE-{product}", "operation_seq": op_seq,
                      "operation_name": ops[i % len(ops)], "equipment_id": f"EQ-{scope[-2:]}-{i+1:03d}",
                      "equipment_name": f"{ops[i%len(ops)]} 설비 {i+1:02d}", "product_id": product,
@@ -501,7 +513,7 @@ def generate_external(profile: Profile, start: date, rng: random.Random) -> tupl
                          "vintage_date": iso(month_end(d)+timedelta(days=7)), "value": round(value, 4), "unit": unit,
                          "currency": "USD", "source_id": "AFS_SYNTHETIC_REFERENCE", "trust_grade": "DEMO_ONLY"})
         for code, value, unit, target in [("SEA_FREIGHT", freight, "USD/TON", "LANE"),
-                                          ("INDUSTRIAL_POWER", power, "KRW/KWH", PLANT2),
+                                          ("INDUSTRIAL_POWER", power, "KRW/KWH", BUSINESSES[-1].plant_id),
                                           ("MFG_DEMAND_INDEX", 100 + math.sin(i/4)*6, "INDEX", "INDUSTRY")]:
             ext3.append({"observation_id": f"EXT3-{code}-{d:%Y%m}", "indicator_code": code,
                          "target_ref": target, "observed_at": iso(month_end(d)),
@@ -607,7 +619,7 @@ def generate_purchase_and_logistics(profile: Profile, contracts: List[Dict[str, 
             transport_rows.append({"transport_event_id": f"TR-{ship_no:06d}-{seq}", "transport_id": f"TR-{ship_no:06d}",
                                    "shipment_id": shipment_id, "event_type": event,
                                    "event_at": iso(datetime.combine(actual, datetime.min.time(), tzinfo=timezone.utc)),
-                                   "destination_location_id": "LOC-P1-RAW" if c["scope_node_id"] == PLANT1 else "LOC-P2-RAW",
+                                   "destination_location_id": business_defs.by_plant(BUSINESSES, c["scope_node_id"]).raw_location,
                                    "delivered_quantity": quantity if event == "DELIVERED" else 0.0,
                                    "quantity_uom": c["quantity_uom"], "status": "COMPLETED", "_scope": c["scope_node_id"]})
     for c in contracts:
@@ -634,7 +646,7 @@ def generate_sales(profile: Profile, customers: Sequence[Mapping[str, Any]], pro
                      "actual_ship_date": iso(actual), "plan_quantity": qty, "order_quantity": qty,
                      "shipped_quantity": qty, "quantity_uom": "TON", "unit_price": price,
                      "currency": customer["currency"], "status": "SHIPPED",
-                     "_scope": PLANT1 if product == "FG-CATHODE" else PLANT2})
+                     "_scope": business_defs.owner_of(BUSINESSES, product)})
     return stamp("SLS-01", rows, kind="ACTUAL")
 
 
@@ -652,7 +664,7 @@ def generate_plans_batches_events(profile: Profile, bom: Sequence[Mapping[str, A
         d = start + timedelta(days=(i*5 + i//11) % span)
         qty = round(10 + (i%19)*2.1, 3)
         requirement = round(sum(float(x["quantity_per_output"]) for x in bom_by_product[product]) * qty, 3)
-        scope = PLANT1 if product == "FG-CATHODE" else PLANT2
+        scope = business_defs.owner_of(BUSINESSES, product)
         plans.append({"plan_line_id": f"MPS-{i+1:07d}", "plan_date": iso(d), "site_id": scope,
                       "product_id": product, "plan_quantity": qty, "quantity_uom": "TON",
                       "priority": 1 + i%3, "material_requirement": requirement,
@@ -703,9 +715,11 @@ def generate_movements_and_snapshots(profile: Profile, logistics: Sequence[Mappi
     material_ids = [m["material_id"] for m in materials]
     # Opening stock keeps production and sales movement sequences physically possible.
     for idx, m in enumerate(materials):
-        loc = "LOC-P1-RAW" if m["scope_node_id"] == PLANT1 and m["material_type"] == "RAW" else \
-              "LOC-P1-FG" if m["scope_node_id"] == PLANT1 else \
-              "LOC-P2-FG" if m["material_type"] == "FINISHED" else "LOC-P2-RAW"
+        #: 그 품목이 속한 사업의 창고로 넣는다. 예전에는 `PLANT1 이면 P1, 아니면 P2`
+        #: 로 굳어 있어 **사업이 셋이 되면 전부 두 번째로 갔다.**
+        _b = business_defs.by_plant(BUSINESSES, m["scope_node_id"])
+        loc = (_b.fg_location if m["material_type"] in _b.opening_stock_to_fg
+               else _b.raw_location)
         matches = [l for l in active_locations if l["location_id"] == loc and l["tenant_id"] == m["tenant_id"]]
         if len(matches) != 1 or matches[0]["scope_node_id"] != m["scope_node_id"]:
             raise ValueError(f"Opening warehouse unavailable or outside material scope: {loc}")
@@ -730,8 +744,8 @@ def generate_movements_and_snapshots(profile: Profile, logistics: Sequence[Mappi
                           "reference_id": tr["shipment_id"], "_scope": po["scope_node_id"]})
     # Production issue and receipt. Keep raw issue on the same day and product receipt after it.
     for b in batches:
-        raw_loc = "LOC-P1-RAW" if b["site_id"] == PLANT1 else "LOC-P2-RAW"
-        fg_loc = "LOC-P1-FG" if b["site_id"] == PLANT1 else "LOC-P2-FG"
+        _bd = business_defs.by_plant(BUSINESSES, b["site_id"])
+        raw_loc, fg_loc = _bd.raw_location, _bd.fg_location
         movements.append({"movement_id": f"MOV-ISS-{b['batch_id']}", "movement_date": b["production_date"],
                           "movement_type": "PRODUCTION_ISSUE", "material_id": b["input_material_id"],
                           "lot_id": b["input_lot_id"], "from_location_id": raw_loc, "to_location_id": "PRODUCTION",
@@ -743,7 +757,7 @@ def generate_movements_and_snapshots(profile: Profile, logistics: Sequence[Mappi
                           "quantity": float(b["output_quantity"]), "quantity_uom": b["quantity_uom"],
                           "reference_type": "BATCH", "reference_id": b["batch_id"], "_scope": b["site_id"]})
     for s in sales:
-        loc = "LOC-P1-FG" if s["scope_node_id"] == PLANT1 else "LOC-P2-FG"
+        loc = business_defs.by_plant(BUSINESSES, s["scope_node_id"]).fg_location
         movements.append({"movement_id": f"MOV-SO-{s['sales_line_id']}", "movement_date": s["actual_ship_date"],
                           "movement_type": "SALES_SHIPMENT", "material_id": s["product_id"],
                           "lot_id": f"LOT-SALES-{s['sales_line_id']}", "from_location_id": loc, "to_location_id": "CUSTOMER",
@@ -761,7 +775,7 @@ def generate_movements_and_snapshots(profile: Profile, logistics: Sequence[Mappi
                           "movement_type": "CYCLE_COUNT_ADJUSTMENT", "material_id": mat, "lot_id": f"LOT-ADJ-{i+1:07d}",
                           "from_location_id": "ADJUSTMENT", "to_location_id": loc, "quantity": qty,
                           "quantity_uom": "TON", "reference_type": "CYCLE_COUNT", "reference_id": f"CC-{i+1:07d}",
-                          "_scope": PLANT1 if "P1" in loc else PLANT2})
+                          "_scope": business_defs.by_location(BUSINESSES, loc).plant_id})
         i += 1
     movements = sorted(movements, key=lambda x: (x["movement_date"], x["movement_id"]))
     stamped_movements = stamp("INV-02", movements, kind="ACTUAL")
@@ -791,7 +805,7 @@ def generate_movements_and_snapshots(profile: Profile, logistics: Sequence[Mappi
                                   "location_id": loc, "material_id": mat, "lot_id": "ALL",
                                   "unrestricted_quantity": qty, "quality_quantity": 0.0, "blocked_quantity": 0.0,
                                   "safety_stock_quantity": 50.0 if mat.startswith("RM-") else 10.0,
-                                  "quantity_uom": "TON", "_scope": PLANT1 if "P1" in loc else PLANT2})
+                                  "quantity_uom": "TON", "_scope": business_defs.by_location(BUSINESSES, loc).plant_id})
         month_cursor = add_months(month_cursor, 1)
     return stamped_movements, stamp("INV-01", snapshots, kind="ACTUAL")
 
@@ -853,7 +867,7 @@ def generate_finance(profile: Profile, contracts: Sequence[Mapping[str, Any]], p
                 fin1.append({"cost_record_id": f"COST-{cursor:%Y%m}-{product}-{component}", "fiscal_period": f"{cursor:%Y-%m}",
                              "product_id": product, "cost_component": component, "standard_unit_cost": round(standard, 2),
                              "actual_unit_cost": round(actual, 2), "variance_amount": round(actual-standard, 2),
-                             "currency": "USD", "quantity_uom": "TON", "_scope": PLANT1 if product == "FG-CATHODE" else PLANT2})
+                             "currency": "USD", "quantity_uom": "TON", "_scope": business_defs.owner_of(BUSINESSES, product)})
         cursor = add_months(cursor, 1)
     fin1s = stamp("FIN-01", fin1, kind="ACTUAL")
 
@@ -1214,7 +1228,7 @@ def quarantine_fixture() -> tuple[List[Dict[str, Any]], Dict[str, Any]]:
             candidates.append({
                 "candidate_id": f"QTN-{sequence:04d}",
                 "tenant_id": TENANT_ID,
-                "scope_node_id": PLANT2 if sequence % 2 else PLANT1,
+                "scope_node_id": BUSINESSES[sequence % len(BUSINESSES)].plant_id,
                 "data_class": "SYNTHETIC",
                 "data_origin": "SYNTHETIC",
                 "source_dataset_id": dataset_id,
@@ -1238,7 +1252,9 @@ def quarantine_fixture() -> tuple[List[Dict[str, Any]], Dict[str, Any]]:
     return candidates, manifest
 
 
-def build(clean: bool = True, force: bool = False) -> Dict[str, Any]:
+def build(clean: bool = True, force: bool = False, businesses=None) -> Dict[str, Any]:
+    #: ★ 키트는 **사업의 조합**이다. 안 주면 기본 조합(제련 + 전지소재 = LS MnM 모델).
+    use_businesses(businesses or DEFAULT_BUSINESSES)
     # **확정 판본은 다시 만들지 않는다** (P1). 아래 `rmtree` 가 판본 디렉터리를 통째로
     # 지우므로, 검증이 끝난 판본에 이것을 돌리면 그 판본이 사라졌다가 다른 내용으로
     # 되살아난다. 실제로 1.0.0 이 그렇게 바뀌었고 아무 오류도 나지 않았다.
@@ -1321,13 +1337,23 @@ def main() -> None:
                         help="만들 판본 (scripts/kit_defs/v{판본}.py 가 있어야 한다)")
     parser.add_argument("--out", default="",
                         help="다른 경로에 생성 — 동결 판본을 건드리지 않고 대조할 때 쓴다")
+    parser.add_argument("--business", action="append", default=None, metavar="CODE",
+                        help="담을 사업 (여러 번 줄 수 있다). 기본: "
+                             + " + ".join(DEFAULT_BUSINESSES))
+    parser.add_argument("--list-businesses", action="store_true", help="쓸 수 있는 사업을 보여준다")
     parser.add_argument("--no-clean", action="store_true", help="기존 키트 디렉터리를 지우지 않음")
     parser.add_argument("--force", action="store_true",
                         help="확정 판본이어도 덮어쓴다 — 왜 그래야 하는지 커밋에 남길 것")
     args = parser.parse_args()
+    if args.list_businesses:
+        for c in business_defs.available():
+            d = business_defs.load([c])[0]
+            print("%-24s %-10s %s" % (c, d.name, d.sector))
+        return
     use_version(args.version, Path(args.out) if args.out else None)
-    manifest = build(clean=not args.no_clean, force=args.force)
+    manifest = build(clean=not args.no_clean, force=args.force, businesses=args.business)
     print(json.dumps({"status": "generated", "version": args.version,
+                      "businesses": [b.code for b in BUSINESSES],
                       "kit_root": str(KIT_ROOT),
                       "dataset_count": manifest["dataset_count"],
                       "quick_rows": sum(x.get("rows",0) for x in manifest["file_index"] if x.get("profile")=="quick"),
