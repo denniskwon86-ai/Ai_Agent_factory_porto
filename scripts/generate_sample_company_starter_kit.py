@@ -448,17 +448,26 @@ def generate_bom(profile: Profile, materials: Sequence[Mapping[str, Any]]) -> Li
 def generate_routing(profile: Profile, materials: Sequence[Mapping[str, Any]]) -> List[Dict[str, Any]]:
     products = ([m["material_id"] for m in materials if m["material_type"] == "FINISHED"]
                 or [BUSINESSES[-1].plant_id])
+    #: ★ **실제 제품부터 전체 공정을 채운다.** 예전에는 설비를 제품과 공정에 각각
+    #:   나머지 연산으로 돌려서 **어떤 제품도 전체 공정을 갖지 못했다** — 전기동이
+    #:   배소와 전로정련만 거치고 용련·정제·전해정련이 빠졌다. 제련 담당자가 열면
+    #:   바로 보이는 자리다.
+    plan: List[tuple[str, int, str]] = []
+    seen = set()
+    for product in [p for p in products if not p.startswith("MAT-")] + list(products):
+        for seq, op in enumerate(business_defs.routing_ops_for(BUSINESSES, product), 1):
+            if len(plan) >= profile.equipments:
+                break
+            if (product, op) in seen:
+                continue
+            seen.add((product, op))
+            plan.append((product, seq * 10, op))
     rows = []
-    for i in range(profile.equipments):
-        product = products[i % len(products)]
-        #: ★ 공정은 **그 제품을 만드는 사업**의 것이다 — 1.1.0 까지는 첫 사업 목록을
-        #:   전부에 써서 전기동도 습식 공정(침출·결정화)으로 만들어졌다.
-        ops = business_defs.routing_ops_for(BUSINESSES, product)
-        op_seq = (i % len(ops) + 1) * 10
+    for i, (product, op_seq, op_name) in enumerate(plan):
         scope = scope_of(product)
         rows.append({"routing_id": f"ROUTE-{product}", "operation_seq": op_seq,
-                     "operation_name": ops[i % len(ops)], "equipment_id": f"EQ-{scope[-2:]}-{i+1:03d}",
-                     "equipment_name": f"{ops[i%len(ops)]} 설비 {i+1:02d}", "product_id": product,
+                     "operation_name": op_name, "equipment_id": f"EQ-{scope[-2:]}-{i+1:03d}",
+                     "equipment_name": f"{op_name} 설비 {i+1:02d}", "product_id": product,
                      "rate_per_hour": round(3.5 + (i % 8) * 0.7, 2), "rate_uom": "TON/H",
                      "setup_hours": round(0.5 + (i % 4) * 0.25, 2), "rated_oee": round(0.82 + (i % 8) * 0.015, 3),
                      "calendar_hours_month": 720, "_scope": scope})

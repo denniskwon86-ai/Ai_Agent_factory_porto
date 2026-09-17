@@ -1,7 +1,7 @@
 {
   "algorithm": "sha256",
   "file_count": 140,
-  "computed_at": "2026-09-17T04:23:11+00:00",
+  "computed_at": "2026-09-17T04:31:04+00:00",
   "files": {
     "README.md": "22877f137f2ee5c39cf4871a555b5dda55f6b757cbbf20c6b17f7950d7f78066",
     "app_blueprints/APP-01.json": "ffc62e066713a96291c249c397b13da8d57a530bd32fe56723282d35b66adbe6",
@@ -54,7 +54,7 @@
     "contracts/SLS-01.contract.json": "92fa3a2aab5ce4410ad02e5c2d5988b151cb9311cbd00b379389261e6e5e7448",
     "golden_cases/full.expected_results.json": "6e4432b1ed92b147d9dbcfff003c05868a023283b572a6508de4f8e80ddb7586",
     "golden_cases/quick.expected_results.json": "6e4432b1ed92b147d9dbcfff003c05868a023283b572a6508de4f8e80ddb7586",
-    "manifest.json": "bd63c8cb97425e11689a4ce9a71a29c35bbcd9cea319d40c427004e795ecc70c",
+    "manifest.json": "c7bc729a437ee73d3aad4d3fb8863b2cfc575d5ebb7b68afca61d6ffca6a5387",
     "reports/RPT-01.json": "51b5b35ff5b662577f810d98f2e2fa56328b6b26494d69c4d7d42ae9197e7a9e",
     "reports/RPT-02.json": "a7c114c20a13977869ee8bb8f77c0e1d9c1e9f0695625cbb258103fcc2049c6c",
     "reports/RPT-03.json": "4d04650f7b0d33bbe243f5f1d8423e55341e407b6f0c29af574df2dc1dac40b6",
@@ -83,12 +83,12 @@
     "samples/full/MDM-03.csv": "ca829ea0780140cb925e680826b2a710390ea285b96e3a16aa84f8e26a8f6d6e",
     "samples/full/MDM-04.csv": "4064b49c5af6ebcbd5ba115c598b11d3b7f17d7cd3607b3acf7aee4057e7d99f",
     "samples/full/MDM-05.csv": "098fc8602db4cf66ea217f7cfd22fbf6afaae41aace5cca01d9b0c2097fc0088",
-    "samples/full/MDM-06.csv": "e2aedb72c817429206c026ad6746eaba4e6bdc22e7bce251f65e42eb8262b24e",
+    "samples/full/MDM-06.csv": "9d7454f254264d185592fe11285ab17565d91539dab6339d8d10636e76e0d8a0",
     "samples/full/MDM-07.csv": "7dbcca1267869d9b0672fb8dbe6216ae304a005ab49969c809a5b30853c890c8",
     "samples/full/MDM-08.csv": "263985f21b7cc0af7b696eab7b1ead15cdcee01a415ce69dfc0224c9bd0a3a8a",
     "samples/full/MFG-01.csv": "9a14d9eac58c00e662e5326f40130a44d3275175c80f9f1e3c4534115e41a379",
     "samples/full/MFG-02.csv": "e693c4a69ed97521d798b268c1067c1e9b11478b75104d85ef3a15c76fdd6ae0",
-    "samples/full/MFG-03.csv": "509d5966595f0097b44967c32c869ddcfaf6b94e4d052488b9c24b6781c11d5e",
+    "samples/full/MFG-03.csv": "ed9896a29b862d754e1d0c3259bf01d28b08f2c7dbf41a208a21430cc8049466",
     "samples/full/PRC-01.csv": "79c58697c7b163367564af859910f7925aa705ce63ec26a876faa5d4d70fd8a7",
     "samples/full/PRC-02.csv": "d599d540daed872e488d2e60e615566b4b37ca680a3414cab273807614168406",
     "samples/full/QLT-01.csv": "4514c12060fdf6cfbe68f5b7262506efc9247549483af61a4aadc24d63560002",
@@ -120,12 +120,12 @@
     "samples/quick/MDM-03.csv": "4cb80966f2e1b11721592d72cbd3f34002978bbf93e3e43c979059adf3077688",
     "samples/quick/MDM-04.csv": "37a2a6c6fbd30709ceb23eb7f7fa0c240217a74b7b44128c93dbc0ab861c4791",
     "samples/quick/MDM-05.csv": "6f947c76ebf8cad890c9a2ec19d82b77cc657b83022e7f4ee4e29def7011de68",
-    "samples/quick/MDM-06.csv": "ba0302ee36ad2e0fbfe71e9020d0eef9c962eec54a214cccec2386bed40e3aa5",
+    "samples/quick/MDM-06.csv": "515df03dac5af2046c54c8f0db4a7b3fde4fd74f5d34e45438707ac700a08b29",
     "samples/quick/MDM-07.csv": "e67e9642b44630886b2d37ad1bbbf20eb55e86a3de31b8da61be30b8565f0289",
     "samples/quick/MDM-08.csv": "e5566004050a04be2bc0021100b350b8533eb632669b04a7c7e2783a42c4644d",
     "samples/quick/MFG-01.csv": "1c67b408d0d37aa8295d791b35088440e32a35d1d7e41cdbb029c4781edc0d24",
     "samples/quick/MFG-02.csv": "6f33b4de632631638700d8a5039342d88318bf48f1946e94128fb2cac70701ab",
-    "samples/quick/MFG-03.csv": "0304106e781868911a2a191c8d51830b0f6883f8a44010dc6d75eabef9c809db",
+    "samples/quick/MFG-03.csv": "fc6b10b49917c1b52444a2452e83f7179c27c0a70a757577ca7546fe7e65259d",
     "samples/quick/PRC-01.csv": "cd7bff2b8439e590aa9b801d7e8e45f342330e44d2025fc9c9a6212536980543",
     "samples/quick/PRC-02.csv": "0571c5dc098c2b430af9aa676560eb4fc7637022c71c5990437b8c1aac88e392",
     "samples/quick/QLT-01.csv": "33cc8964faa5a926a45b24287dd9eb35a6b0061a9db4431d3c19515ba3624f69",
@@ -142,6 +142,6 @@
     "scenarios/SCN-08.json": "55b2c6cc7772f511190185d55d9cab1bf07ce9e5f52bcf8e3535af0b602937fa",
     "scenarios/SCN-09.json": "e5a0f17ba6b297fd403d413c2e055412583af5fbd3942730112e71d8007f4b05",
     "scenarios/SCN-10.json": "edd6b5af1a29c9d1cf7cfbaf7ef3ef76ad302351a685344c70c67460690f5877",
-    "validations/validation_report.json": "c971fb54312e735ef1519a3ef159d0ef431d6b4b7585e3cf5a353717e36f0096"
+    "validations/validation_report.json": "820cf3af5248958556329d25424d5e8afc7b56252b2a22e2eb4dceb4d66d9ae8"
   }
 }

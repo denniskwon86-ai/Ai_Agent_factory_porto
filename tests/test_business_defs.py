@@ -190,6 +190,16 @@ def test_부산물_산출량은_그_산업의_모양을_담는다():
     assert rates["BP-GOLD"] < 0.1, "금은 아주 조금 나온다"
 
 
+def test_실제_제품은_전체_공정을_거친다():
+    """★ 공정 이름을 갈라 놓고 **제품이 그 공정을 다 거치지 않으면 반쪽이다.**
+    1.2.0 초안에서 전기동이 「배소 → 전로정련」 둘뿐이었다 — 설비를 제품과 공정에
+    각각 나머지 연산으로 돌린 탓에 용련·정제·전해정련이 빠졌다.
+    """
+    defs = B.load([SMELT, BATTERY])
+    assert len(B.routing_ops_for(defs, "FG-CATHODE")) == 5
+    assert len(B.routing_ops_for(defs, "FG-NISO4")) == 5
+
+
 def test_금은_킬로그램으로_판다():
     """1.1.0 까지 판매 단위가 전부 `TON` 이라 **금을 톤으로 팔았다.**"""
     defs = B.load([SMELT])
