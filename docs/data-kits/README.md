@@ -25,6 +25,7 @@
 | [`DIFFUSION_READINESS_ANALYSIS_2026-09-16.md`](DIFFUSION_READINESS_ANALYSIS_2026-09-16.md) | **어느 범위까지 적용 가능한가.** 업태별 데이터셋 커버리지 · 제공 경계(우리/현업) · 네 층 |
 | [`TAXONOMY_TO_KIT_COVERAGE_2026-09-16.md`](TAXONOMY_TO_KIT_COVERAGE_2026-09-16.md) | **분류에서 키트로 넘어가는 연결고리.** 키트의 단위 · 선정 기준 · 생성 방법 |
 | [`KIT_DIFFUSION_IN_PLATFORM_2026-09-17.md`](KIT_DIFFUSION_IN_PLATFORM_2026-09-17.md) | **플랫폼 안에서 키트를 어떻게 늘리나.** 등록 경로 둘 · 끊긴 곳 · 사업 단위로 내기 |
+| [`KIT_SHELF_SPEC_2026-09-17.md`](KIT_SHELF_SPEC_2026-09-17.md) | **키트 선반 상세 설계.** 설계 결정 8 · 자료구조 · 영향 · 시험 · 순서 |
 | [`FIELD_LAYER_DESIGN_2026-09-16.md`](FIELD_LAYER_DESIGN_2026-09-16.md) | 필드를 **어느 층에** 붙이나 (A 업태 · B 업종 · 업무 형태) |
 | [`KIT_PLATFORM_BRIDGE_DESIGN_2026-09-16.md`](KIT_PLATFORM_BRIDGE_DESIGN_2026-09-16.md) | 키트가 준 것이 **플랫폼 동인 체계로** 가는 길 |
 | [`KIT_PLATFORM_BRIDGE_SPEC_2026-09-16.md`](KIT_PLATFORM_BRIDGE_SPEC_2026-09-16.md) | 그 구현 명세 — 대응표 · 함수 · 시험 |
