@@ -194,8 +194,16 @@ def test_원가센터_집합의_명칭과_범위가_다르면_색인을_세우�
 
 
 def test_저장된_MDM07_샘플과_계약은_원가센터_명칭을_필수로_갖는다():
+    """⚠️ **1.0.0 이 아니라 1.1.0 부터다.**
+
+    `cost_center_name` 은 1.1.0 에서 들어왔다. 그런데 이 시험은 1.0.0 을 보고 있었고,
+    `0ca2a58ad`(머지로 되살아난 1.0.0 in-place 수정을 되돌림)가 그 필드를 1.0.0 에서
+    걷어낸 뒤로 **계속 실패하고 있었다** — 2026-09-17 재점검에서 찾았다.
+
+    1.0.0 에 그 필드가 **없는 것이 정본이다.** 현재 판본을 본다.
+    """
     root = (Path(__file__).parents[1] / "starter_kits"
-            / "KIT-MFG-NONFERROUS-PROCUREMENT" / "1.0.0")
+            / "KIT-MFG-NONFERROUS-PROCUREMENT" / "1.2.0")
     contract = json.loads((root / "contracts" / "MDM-07.contract.json").read_text(
         encoding="utf-8"))
     fields = {field["name"]: field for field in contract["schema"]["fields"]}

@@ -149,11 +149,16 @@ class BusinessDef:
           제품창고로 갔다)였고 전지소재는 `FINISHED` 만 제품창고였다. **이유가
           없었고**, 분리할 때는 동작을 지키려고 그대로 옮겼다. 1.2.0 에서 고친다.
         """
-        for storage in self._OPENING_ORDER.get(material_type, ("RAW",)):
+        order = self._OPENING_ORDER.get(material_type, ("RAW",))
+        for storage in order:
             loc = self._loc(storage)
             if loc and (not available or loc in available):
                 return loc
-        return self.raw_location
+        #: ⚠️ 못 찾으면 **첫 후보를 그대로 돌려준다.** 호출부가 실재·범위를 검증해
+        #:   멈추게 돼 있는데(`Opening warehouse unavailable…`), 여기서 다른 창고로
+        #:   조용히 바꾸면 **그 안전장치가 무력해진다.** 실제로 그렇게 만들었다가
+        #:   `test_generator_must_stop_instead_of_falling_back` 이 잡았다.
+        return self._loc(order[0]) or self.raw_location
 
     def grade_of(self, material_id: str) -> str:
         """그 품목의 등급. **비어 있으면 `DEMO_STANDARD`** — 의미가 없다는 표시다."""

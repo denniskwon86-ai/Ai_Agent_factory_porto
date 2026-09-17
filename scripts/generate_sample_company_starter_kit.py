@@ -1341,6 +1341,16 @@ def quarantine_fixture() -> tuple[List[Dict[str, Any]], Dict[str, Any]]:
     return candidates, manifest
 
 
+#: ⚠️ **모듈을 임포트하기만 해도 기본 조합이 채워져 있어야 한다.**
+#:
+#:   시험 일부는 `build()` 를 거치지 않고 `generate_materials(p)` 처럼 **함수를 직접
+#:   부른다.** 게다가 `scripts.generate_...` 로 임포트하면 `generate_...` 와 **다른
+#:   모듈 객체**가 되어 전역도 따로 논다. 분리(`a86a45295`) 이후 `BUSINESSES` 가 빈
+#:   채로 남아 `i % len(BUSINESSES)` 가 ZeroDivisionError 를 냈고, 좁은 범위만
+#:   돌려서 2026-09-17 재점검까지 몰랐다.
+use_businesses(DEFAULT_BUSINESSES)
+
+
 def build(clean: bool = True, force: bool = False, businesses=None) -> Dict[str, Any]:
     #: ★ 키트는 **사업의 조합**이다. 안 주면 기본 조합(제련 + 전지소재 = LS MnM 모델).
     use_businesses(businesses or DEFAULT_BUSINESSES)
