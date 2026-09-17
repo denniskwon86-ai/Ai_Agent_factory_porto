@@ -14,6 +14,70 @@
 - [`SAMPLE_COMPANY_BATTERY_CHEMICAL_EXECUTION_PLAN_2026-08-11.md`](SAMPLE_COMPANY_BATTERY_CHEMICAL_EXECUTION_PLAN_2026-08-11.md)  
   AFS 배터리케미컬 35개 데이터 패키지별 사양, Quick/Full 생성량, 대사(Reconciliation) 4대 기준 및 생성계획.
 
+### 3. 확산 적용 사전 검토 (2026-09-16~17)
+
+⚠️ **사전 검토다.** 「향후 기능 완성 후 타 산업군·타사로 확산할 때 무엇을 준비해야
+하는가」를 대상화한 것이고, 운영 중인 시연·점검 작업과 분리해 진행했다.
+브랜치 `claude/diffusion-readiness-20260916`.
+
+| 문서 | 무엇을 답하나 |
+|---|---|
+| [`DIFFUSION_READINESS_ANALYSIS_2026-09-16.md`](DIFFUSION_READINESS_ANALYSIS_2026-09-16.md) | **어느 범위까지 적용 가능한가.** 업태별 데이터셋 커버리지 · 제공 경계(우리/현업) · 네 층 |
+| [`TAXONOMY_TO_KIT_COVERAGE_2026-09-16.md`](TAXONOMY_TO_KIT_COVERAGE_2026-09-16.md) | **분류에서 키트로 넘어가는 연결고리.** 키트의 단위 · 선정 기준 · 생성 방법 |
+| [`FIELD_LAYER_DESIGN_2026-09-16.md`](FIELD_LAYER_DESIGN_2026-09-16.md) | 필드를 **어느 층에** 붙이나 (A 업태 · B 업종 · 업무 형태) |
+| [`KIT_PLATFORM_BRIDGE_DESIGN_2026-09-16.md`](KIT_PLATFORM_BRIDGE_DESIGN_2026-09-16.md) | 키트가 준 것이 **플랫폼 동인 체계로** 가는 길 |
+| [`KIT_PLATFORM_BRIDGE_SPEC_2026-09-16.md`](KIT_PLATFORM_BRIDGE_SPEC_2026-09-16.md) | 그 구현 명세 — 대응표 · 함수 · 시험 |
+| [`WIRE_CABLE_SPECIALIZATION_DRAFT_2026-09-16.md`](WIRE_CABLE_SPECIALIZATION_DRAFT_2026-09-16.md) | 전선·케이블 3 단 특성화 초안 (⏸ 보류) |
+| [`LSMNM_BATTERY_NEWBIZ_REVIEW_2026-09-16.md`](LSMNM_BATTERY_NEWBIZ_REVIEW_2026-09-16.md) | 실적이 없는 **신규 사업부**에 키트를 어떻게 주나 |
+| [`../handoff/PLATFORM_REVIEW_ABSOLUTE_DRIVERS_2026-09-16.md`](../handoff/PLATFORM_REVIEW_ABSOLUTE_DRIVERS_2026-09-16.md) | 플랫폼 검토 건 — 동인이 **절대량**을 담지 못한다 |
+
+#### 이 검토에서 실제로 바뀐 것
+
+| | |
+|---|---|
+| ✅ **사업 정의 분리** (`a86a45295`) | `scripts/business_defs/` — **키트는 회사가 아니라 사업의 조합이다.** 제련·전지소재를 갈라 단독으로 뽑을 수 있다 |
+| ✅ 분류 집계 도구 | `docs/business-taxonomy/engine/diffusion_report.py` — 업태별 규모·커버리지 |
+
+#### ⏳ 남은 것
+
+**구현 안 된 설계**
+
+| | 무엇 | 어디에 |
+|---|---|---|
+| 1 | 필드 계층 (`FieldExtension`) | `FIELD_LAYER_DESIGN` |
+| 2 | 키트 → 플랫폼 이음매 | `KIT_PLATFORM_BRIDGE_SPEC` |
+| 3 | `ORDER:PROJECT` 축 (수주형) | `FIELD_LAYER_DESIGN` 3.2 |
+
+**설계조차 없는 것**
+
+| | 무엇 | 왜 |
+|---|---|---|
+| 4 | **기존 필드에 산업 의미 넣기** | 부산물이 마스터에 있는데 **팔리지 않고**, 동정광 품위가 `DEMO_STANDARD` 다. 네 층 중 이 층만 설계가 없다 |
+| 5 | 사업 **단계**(램프업·인증) | 36 개월 수율이 평평해 신규 사업을 그리지 못한다 |
+
+**분리하면서 일부러 고치지 않은 것** (고치면 지문이 바뀐다)
+
+| | 무엇 |
+|---|---|
+| 6 | 기초재고 창고 규칙이 **공장마다 비대칭** |
+| 7 | `routing_ops` 가 두 사업 공통 (건식 제련 ≠ 습식 정제) |
+| 8 | 부서가 **마지막 사업**에 붙는다 |
+
+**도메인 검토 대기** — 사람만 답할 수 있다
+
+| | 무엇 |
+|---|---|
+| 9 | 제련 드라이버 5 개 (TC/RC · 회수율 · 품위 · 부산물 · 프리미엄) |
+| 10 | 램프업 수치 (18 개월 · 0.85→0.94 · 인증 12 개월) |
+| 11 | 전선 드라이버 4 개 (전가율 · 가공비 · 수주잔고 · 생산능력) |
+
+**플랫폼 쪽**
+
+| | 무엇 |
+|---|---|
+| 12 | 동인이 절대량을 못 담는다 (검토 건 제출됨) |
+| 13 | 진행기준(공정률) 매출 — 35 종에 프로젝트 개념이 없다 |
+
 ---
 
 ## 구현 및 실행 시작점
