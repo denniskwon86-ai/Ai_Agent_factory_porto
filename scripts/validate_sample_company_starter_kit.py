@@ -196,8 +196,12 @@ def main() -> None:
     # 그 뒤에 대조하면 자기가 바꾼 것 때문에 항상 실패한다. 대장이 없는 판본
     # (아직 동결 전)은 검사하지 않고 지나간다
     _fp_ok, _fp_problems = kit_freeze.verify(str(KIT_ROOT))
+    #: ⚠️ 예전 메시지는 「대장 없음 또는 일치」였다 — **두 경우를 한 줄로 뭉갰다.**
+    #:   대장이 없는 것과 대조해서 맞은 것은 전혀 다른 일이다.
+    _has_ledger = kit_freeze.load_fingerprints(str(KIT_ROOT)) is not None
     v.check("동결:지문대조", _fp_ok,
-            "; ".join(_fp_problems[:6]) if _fp_problems else "대장 없음 또는 일치")
+            "; ".join(_fp_problems[:6]) if _fp_problems
+            else ("대장과 일치" if _has_ledger else "대장 없음 — 생성 중인 판본이라 대조하지 않았다"))
     v.check("manifest:kit_id", manifest.get("kit_id") == KIT_ID)
     v.check("manifest:version", manifest.get("version") == KIT_VERSION)
     v.check("manifest:35개", len(ids) == 35 and len(set(ids)) == 35, f"count={len(ids)}")

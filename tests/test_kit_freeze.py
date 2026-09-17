@@ -13,6 +13,7 @@ from core.data_preparation import kit_freeze as kf
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 NONFERROUS = os.path.join(REPO, "starter_kits", "KIT-MFG-NONFERROUS-PROCUREMENT", "1.0.0")
+NONFERROUS_110 = os.path.join(REPO, "starter_kits", "KIT-MFG-NONFERROUS-PROCUREMENT", "1.1.0")
 
 
 def _kit(tmp_path, status="GENERATED_UNDER_VALIDATION"):
@@ -65,9 +66,32 @@ def test_없는_디렉터리는_막지_않는다(tmp_path):
 
 # ── 지문 대조
 
-def test_대장이_없으면_통과시킨다(tmp_path):
+def test_생성중인_판본은_대장이_없어도_통과시킨다(tmp_path):
+    """아직 안 얼린 판본까지 실패로 만들면 생성 중인 것을 못 쓴다."""
     ok, problems = kf.verify(_kit(tmp_path))
     assert ok and problems == []
+
+
+@pytest.mark.parametrize("status", ["VALIDATED_FOR_DEMO", "VALIDATED"])
+def test_확정_판본에_대장이_없으면_실패한다(tmp_path, status):
+    """★ **확정이라면서 지킬 대장이 없으면 내용을 보증하지 못한다.**
+
+    예전에는 여기서도 통과했다. 그 결과 1.1.0 이 `VALIDATED_FOR_DEMO` 인데 대장
+    없이 `frozen: true · fingerprint: PASS` 를 냈고, **파일을 고쳐도 검증 406 건이
+    그대로 통과했다**(2026-09-17 실증). 1.0.0 이 머지로 조용히 바뀐 사고와 같은
+    구조가 1.1.0 에 남아 있었던 것이다.
+    """
+    ok, problems = kf.verify(_kit(tmp_path, status=status))
+    assert not ok, "확정 판본에 대장이 없는데 통과했다"
+    assert "지문 대장" in problems[0]
+
+
+def test_표식만_있고_대장이_없어도_실패한다(tmp_path):
+    """`.frozen` 을 손으로 놓고 대장을 안 만든 경우."""
+    root = _kit(tmp_path)
+    open(os.path.join(root, kf.FROZEN_MARK), "w").close()
+    ok, _ = kf.verify(root)
+    assert not ok
 
 
 def test_내용이_바뀌면_잡는다(tmp_path):
@@ -118,3 +142,12 @@ def test_비철키트_1_0_0_은_동결돼_있고_대조를_통과한다():
     assert kf.load_fingerprints(NONFERROUS), "지문 대장이 있어야 한다"
     ok, problems = kf.verify(NONFERROUS)
     assert ok, f"1.0.0 이 변경됐다: {problems[:5]}"
+
+
+def test_비철키트_1_1_0_도_동결돼_있고_대조를_통과한다():
+    """1.1.0 은 **2026-09-17 까지 대장이 없었다.** 확정 판본인데 아무것도 그 내용을
+    보증하지 않았고, 값을 바꿔도 검증이 통과했다."""
+    assert kf.is_frozen(NONFERROUS_110), "1.1.0 이 동결돼 있어야 한다"
+    assert kf.load_fingerprints(NONFERROUS_110), "지문 대장이 있어야 한다"
+    ok, problems = kf.verify(NONFERROUS_110)
+    assert ok, f"1.1.0 이 변경됐다: {problems[:5]}"

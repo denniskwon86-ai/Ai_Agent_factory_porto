@@ -150,10 +150,27 @@ def load_fingerprints(root: str) -> Optional[Dict[str, str]]:
 
 
 def verify(root: str) -> Tuple[bool, List[str]]:
-    """대장과 실제 파일을 대조한다. 대장이 없으면 **검사하지 않고 통과**시킨다 —
-    아직 동결하지 않은 판본까지 실패로 만들면 생성 중인 것을 못 쓴다."""
+    """대장과 실제 파일을 대조한다.
+
+    대장이 없을 때 무엇을 할지는 **그 판본이 확정됐는지에 달렸다.**
+
+    | 상태 | 대장 없음 | 왜 |
+    |---|---|---|
+    | 생성 중 | 통과 | 아직 안 얼린 판본까지 실패로 만들면 생성 중인 것을 못 쓴다 |
+    | **확정** | **실패** | 확정이라면서 **지킬 대장이 없다** — 내용을 보증하지 못한다 |
+
+    ⚠️ **예전에는 둘 다 통과였다.** 그래서 1.1.0 이 `VALIDATED_FOR_DEMO` 인데 대장이
+      없는 채로 `frozen: true · fingerprint: PASS` 를 냈고, 파일을 고쳐도 검증 406 건이
+      그대로 통과했다(2026-09-17 실증). 1.0.0 이 머지로 조용히 바뀐 사고(0ca2a58ad)와
+      같은 구조가 1.1.0 에 남아 있었던 것이다.
+    """
     recorded = load_fingerprints(root)
     if recorded is None:
+        if is_frozen(root):
+            return False, [
+                f"확정 판본인데 지문 대장({FINGERPRINT_FILE})이 없다 — 내용을 보증할 수 "
+                f"없다. `python scripts/freeze_starter_kit.py <KIT_ID> <판본>` 으로 "
+                f"대장을 만드십시오"]
         return True, []
     actual = fingerprint_dir(root)
     problems: List[str] = []
