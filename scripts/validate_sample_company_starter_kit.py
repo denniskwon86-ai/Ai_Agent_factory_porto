@@ -293,10 +293,17 @@ def main() -> None:
     _frozen = kit_freeze.is_frozen(str(KIT_ROOT))
     if _frozen:
         report["note"] = "동결 판본 — 보고서·manifest 를 갱신하지 않았다"
-        print(json.dumps({"status": report["status"], "frozen": True,
-                          "fingerprint": "PASS" if _fp_ok else "FAIL",
-                          "problems": _fp_problems[:10],
-                          "summary": report["summary"]}, ensure_ascii=False, indent=2))
+        #: ⚠️ **지문은 맞는데 검사는 실패하는 경우**가 있다. 내용이 바뀐 것이 아니라
+        #:   그 판본을 낸 뒤에 검사가 늘어난 것이다 — 낡은 판본에 새 기준을 대면
+        #:   당연히 걸리고, 그것이 판본을 올리는 이유다. 둘을 갈라 적는다.
+        _out = {"status": report["status"], "frozen": True,
+                "fingerprint": "PASS" if _fp_ok else "FAIL",
+                "problems": _fp_problems[:10], "summary": report["summary"]}
+        if _fp_ok and not v.passed:
+            _out["note"] = ("내용은 확정 당시 그대로다(지문 일치). 이 판본을 낸 뒤에 "
+                            "늘어난 검사에서 걸렸다 — 고치려면 새 판본으로 낸다")
+            _out["failed_checks"] = [c["check"] for c in v.checks if c["status"] != "PASS"][:10]
+        print(json.dumps(_out, ensure_ascii=False, indent=2))
         raise SystemExit(0 if v.passed and _fp_ok else 1)
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
