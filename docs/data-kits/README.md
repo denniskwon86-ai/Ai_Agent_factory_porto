@@ -32,6 +32,7 @@
 | [`WIRE_CABLE_SPECIALIZATION_DRAFT_2026-09-16.md`](WIRE_CABLE_SPECIALIZATION_DRAFT_2026-09-16.md) | 전선·케이블 3 단 특성화 초안 (⏸ 보류) |
 | [`LSMNM_BATTERY_NEWBIZ_REVIEW_2026-09-16.md`](LSMNM_BATTERY_NEWBIZ_REVIEW_2026-09-16.md) | 실적이 없는 **신규 사업부**에 키트를 어떻게 주나 |
 | [`../handoff/PLATFORM_REVIEW_ABSOLUTE_DRIVERS_2026-09-16.md`](../handoff/PLATFORM_REVIEW_ABSOLUTE_DRIVERS_2026-09-16.md) | 플랫폼 검토 건 — 동인이 **절대량**을 담지 못한다 |
+| [`../handoff/DIFFUSION_SESSION_HANDOFF_2026-09-17.md`](../handoff/DIFFUSION_SESSION_HANDOFF_2026-09-17.md) | **인수인계** — 어디까지 왔고 다음에 무엇을 하나 · **조심할 것** |
 
 #### 이 검토에서 실제로 바뀐 것
 
