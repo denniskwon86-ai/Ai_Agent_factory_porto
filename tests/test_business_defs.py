@@ -170,6 +170,26 @@ def test_제련은_부산물을_팔고_전지소재는_팔_것이_없다():
     assert "BP-GOLD" in sellable and "BP-H2SO4" in sellable
 
 
+def test_파는_것은_만들거나_사야_한다():
+    """★★★ **팔려면 있어야 한다.** `sellable_extra` 에 넣고 `byproduct_rates` 를
+    비우면 없는 것을 파는 셈이라 재고가 마이너스로 간다 — 1.2.0 을 만들면서 실제로
+    −1,203 톤까지 갔고, 검증 418 건이 그것을 못 잡았다(2026-09-17).
+    """
+    for d in B.load([SMELT, BATTERY]):
+        made = {bp for rates in d.byproduct_rates.values() for bp, _ in rates}
+        bought = {m[0] for m in d.materials if m[2] in ("RAW", "CONSUMABLE")}
+        for mid in d.sellable_extra:
+            assert mid in made or mid in bought,                 f"{d.code}: {mid} 를 파는데 만들지도 사지도 않는다"
+
+
+def test_부산물_산출량은_그_산업의_모양을_담는다():
+    """황산은 전기동보다 **많이**, 금은 **아주 적게** 나온다. 그 비대칭이 제련이다."""
+    smelt = B.load([SMELT])[0]
+    rates = dict(smelt.byproduct_rates["FG-CATHODE"])
+    assert rates["BP-H2SO4"] > 1.0, "황산은 전기동보다 많이 나온다"
+    assert rates["BP-GOLD"] < 0.1, "금은 아주 조금 나온다"
+
+
 def test_금은_킬로그램으로_판다():
     """1.1.0 까지 판매 단위가 전부 `TON` 이라 **금을 톤으로 팔았다.**"""
     defs = B.load([SMELT])

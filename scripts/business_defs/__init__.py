@@ -91,6 +91,12 @@ class BusinessDef:
     sellable_extra: Sequence[str] = ()
     #: {material_id: unit_price} — 판매 단가. 없으면 생성기 기본값
     sale_prices: Dict[str, float] = {}
+    #: {product_id: ((byproduct_id, 완제품 1 단위당 산출량), ...)}
+    #: ⚠️ **팔려면 만들어야 한다.** 이것을 비운 채 `sellable_extra` 만 넣으면
+    #:   재고가 마이너스로 간다 — 실제로 그렇게 만들었다가 잡았다(2026-09-17).
+    byproduct_rates: Dict[str, Sequence[Tuple[str, float]]] = {}
+    #: {material_id: 판매 1 건당 수량 배율}. 금은 kg 이고 양이 적다
+    sale_qty_scale: Dict[str, float] = {}
 
     # ── 편의
 
@@ -269,6 +275,21 @@ def sellable_of(defs: Sequence[BusinessDef], finished: Sequence[str]) -> List[st
             if mid not in out:
                 out.append(mid)
     return out
+
+
+def byproduct_rates_of(defs: Sequence[BusinessDef], product_id: str) -> Sequence[Tuple[str, float]]:
+    """그 제품을 만들 때 **함께 나오는 것**. 판매 가능한 부산물은 여기서 생긴다."""
+    for d in defs:
+        if product_id in d.byproduct_rates:
+            return d.byproduct_rates[product_id]
+    return ()
+
+
+def sale_qty_scale_of(defs: Sequence[BusinessDef], material_id: str) -> float:
+    for d in defs:
+        if material_id in d.sale_qty_scale:
+            return d.sale_qty_scale[material_id]
+    return 1.0
 
 
 def grade_of(defs: Sequence[BusinessDef], material_id: str) -> str:

@@ -96,6 +96,15 @@ def validate_profile(profile: str, dataset_ids: Sequence[str], v: Validation) ->
         v.check(f"{profile}:{ds}:품목범위가_마스터와_같다", not bad,
                 f"어긋남 {len(bad)}행: {sorted(set(bad))[:5]}")
 
+    #: ★ **재고가 마이너스로 가지 않는가.**
+    #:
+    #: ⚠️ 검사 418 건이 이것을 못 잡았다. 부산물을 팔게 해 놓고 **만들지 않아서**
+    #:   기말 잔고가 −1,203 톤이었다(2026-09-17). 없는 것을 파는 데이터는 어떤
+    #:   분석에도 쓸 수 없다.
+    neg = [(r["material_id"], r["location_id"], r["unrestricted_quantity"])
+           for r in (data.get("INV-01") or []) if float(r.get("unrestricted_quantity") or 0) < 0]
+    v.check(f"{profile}:재고가_음수가_아니다", not neg, f"음수 {len(neg)}행: {neg[:3]}")
+
     org = data["FND-01"]
     org_ids = {r["node_id"] for r in org}
     parents = {r["node_id"]: r.get("parent_id", "") for r in org}

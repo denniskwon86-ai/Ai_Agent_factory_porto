@@ -1,11 +1,11 @@
 {
   "kit_id": "KIT-MFG-NONFERROUS-PROCUREMENT",
   "version": "1.2.0",
-  "validated_at": "2026-09-17T04:09:37+00:00",
+  "validated_at": "2026-09-17T04:23:02+00:00",
   "status": "PASS",
   "summary": {
-    "checks": 418,
-    "passed": 418,
+    "checks": 420,
+    "passed": 420,
     "failed": 0,
     "quick_rows": 13401,
     "full_rows": 127752
@@ -922,6 +922,12 @@
       "status": "PASS",
       "severity": "ERROR",
       "detail": "어긋남 0행: []"
+    },
+    {
+      "check": "quick:재고가_음수가_아니다",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "음수 0행: []"
     },
     {
       "check": "quick:조직부모참조",
@@ -1918,6 +1924,12 @@
       "status": "PASS",
       "severity": "ERROR",
       "detail": "어긋남 0행: []"
+    },
+    {
+      "check": "full:재고가_음수가_아니다",
+      "status": "PASS",
+      "severity": "ERROR",
+      "detail": "음수 0행: []"
     },
     {
       "check": "full:조직부모참조",

@@ -640,7 +640,7 @@
     "path": "scripts/generate_sample_company_starter_kit.py",
     "version": "1.0.0"
   },
-  "generated_at": "2026-09-17T04:09:35+00:00",
+  "generated_at": "2026-09-17T04:23:00+00:00",
   "file_index": [
     {
       "path": "samples/quick/FND-01.csv",
@@ -770,14 +770,14 @@
     },
     {
       "path": "samples/quick/INV-01.csv",
-      "sha256": "085b05b2ab8a6e26597840452d26513b20e6854d7aebe3f6f0ddf5820fbece21",
+      "sha256": "be4905e163f4d764e7e63e46ff5f51544d9c0b10d590bd97f52e5cbf551f68dd",
       "rows": 360,
       "dataset_id": "INV-01",
       "profile": "quick"
     },
     {
       "path": "samples/quick/INV-02.csv",
-      "sha256": "79adbe6deb174633a3b68d31bfa70c3d756355766467c5a7d5073f8c2964652e",
+      "sha256": "ec6072b7c4c3f53c95b0e5fa1036f7c69ad3af53093de1619d2069a88d739526",
       "rows": 5000,
       "dataset_id": "INV-02",
       "profile": "quick"
@@ -812,7 +812,7 @@
     },
     {
       "path": "samples/quick/SLS-01.csv",
-      "sha256": "775dbc8cff992ed1644e8b791ae9818844c1a3899bbbcdb4d223d9f05eb13665",
+      "sha256": "428f682ce8d3d98e0c21a876b256c35feda2128e96e7537f2269a788b8d4ee43",
       "rows": 300,
       "dataset_id": "SLS-01",
       "profile": "quick"
@@ -826,14 +826,14 @@
     },
     {
       "path": "samples/quick/FIN-02.csv",
-      "sha256": "6cca474421246a714ecf207e9e70b39293d3f92cc6dedfeb3352a063892d08e6",
+      "sha256": "c703f15813067d0ddf32b92ffa6ced62f4746e1c45435243df75ea76eecab4ac",
       "rows": 420,
       "dataset_id": "FIN-02",
       "profile": "quick"
     },
     {
       "path": "samples/quick/FIN-03.csv",
-      "sha256": "d97c32d738d23e670dd430b32d4f6ef65da616537fd56fa210f87576f7879e16",
+      "sha256": "9b30d5e67dc278f21a12fbfd615aa5e58c7631ac795372242e5092d14853dde0",
       "rows": 1800,
       "dataset_id": "FIN-03",
       "profile": "quick"
@@ -1015,14 +1015,14 @@
     },
     {
       "path": "samples/full/INV-01.csv",
-      "sha256": "ee4355e2b79b83a3031ac89e3653e29f95ed325606fba09cd1ea0c665e0dcb44",
+      "sha256": "3aad2c17e057f114676977ff369f3283bdda479d7849ad3bac533d14b4ca09c4",
       "rows": 27684,
       "dataset_id": "INV-01",
       "profile": "full"
     },
     {
       "path": "samples/full/INV-02.csv",
-      "sha256": "195f3dacbba0dfa0f67d9d49f67a474f1fba17ecd156ef1b400837e07c45435f",
+      "sha256": "2348e96979c2bc303572b3a6bb3b26d763e187db2ec51888c41f7dc53a393b73",
       "rows": 30000,
       "dataset_id": "INV-02",
       "profile": "full"
@@ -1057,7 +1057,7 @@
     },
     {
       "path": "samples/full/SLS-01.csv",
-      "sha256": "87e8cadf0a65e5b2312a8b6c4ff4dc33c45bf307acc92998ad3d14f2cdb270de",
+      "sha256": "1110dad23211d38936bcf3e23541b13fb15361c649559c5ff7de2d818704875a",
       "rows": 2500,
       "dataset_id": "SLS-01",
       "profile": "full"
@@ -1071,14 +1071,14 @@
     },
     {
       "path": "samples/full/FIN-02.csv",
-      "sha256": "fdb6a05c5f03cf35e04ec8c91434d156edb6d5898c8c2ebe587bb2589f002a32",
+      "sha256": "c53d0cff742774416dc709b8ccdd344bdc7492ec8300cb32acc142c5cad780b4",
       "rows": 3700,
       "dataset_id": "FIN-02",
       "profile": "full"
     },
     {
       "path": "samples/full/FIN-03.csv",
-      "sha256": "baa3d355053bdea1fee1df0d90ba08a580d7539cae55eb3e66cbcc39ab150e01",
+      "sha256": "b533103aceed40c877d2a56d9a89680713783d19917661bc78f456c8590b6ed7",
       "rows": 15000,
       "dataset_id": "FIN-03",
       "profile": "full"
@@ -1402,7 +1402,7 @@
   "validation": {
     "status": "PASS",
     "report_path": "validations/validation_report.json",
-    "checks": 418,
-    "validated_at": "2026-09-17T04:09:37+00:00"
+    "checks": 420,
+    "validated_at": "2026-09-17T04:23:02+00:00"
   }
 }

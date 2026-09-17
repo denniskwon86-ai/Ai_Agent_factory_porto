@@ -671,7 +671,8 @@ def generate_sales(profile: Profile, customers: Sequence[Mapping[str, Any]], pro
         due = order_date + timedelta(days=20 + i%25)
         actual = due + timedelta(days=2 if i%31==0 else rng.randint(-2, 2))
         product = products[i % len(products)]
-        qty = round(8 + (i%17)*1.7, 3)
+        #: 품목마다 거래 단위가 다르다 — 금을 전기동과 같은 수량으로 팔 수는 없다
+        qty = round((8 + (i%17)*1.7) * business_defs.sale_qty_scale_of(BUSINESSES, product), 3)
         #: ★ 단가는 사업이 줄 수 있다 — 부산물은 완제품과 **자릿수가 다르다**
         #:   (황산은 싸고 많이, 금은 비싸고 조금).
         _base = 24000 if product == "FG-NISO4" else 9500 if product == "FG-CATHODE" else 32000
@@ -754,6 +755,14 @@ def generate_movements_and_snapshots(profile: Profile, logistics: Sequence[Mappi
     active_locations = [l for l in locations if str(l["active"]).lower() == "true"]
     material_ids = [m["material_id"] for m in materials]
     # Opening stock keeps production and sales movement sequences physically possible.
+    #: 생산이 이 품목을 얼마나 꺼내 쓰는가 — 기초재고가 그보다 적으면 음수가 난다
+    #: ⚠️ 생산 투입만 보면 모자란다 — **판매가 생산보다 앞선 달**에 완제품이 음수로
+    #:   간다. 월별 스냅샷은 그 시점을 그대로 찍는다.
+    _issue_need: Dict[str, float] = defaultdict(float)
+    for _b in batches:
+        _issue_need[str(_b["input_material_id"])] += abs(float(_b["input_quantity"]))
+    for _s in sales:
+        _issue_need[str(_s["product_id"])] += abs(float(_s["shipped_quantity"]))
     for idx, m in enumerate(materials):
         #: 그 품목이 속한 사업의 창고로 넣는다. 예전에는 `PLANT1 이면 P1, 아니면 P2`
         #: 로 굳어 있어 **사업이 셋이 되면 전부 두 번째로 갔다.**
@@ -766,7 +775,11 @@ def generate_movements_and_snapshots(profile: Profile, logistics: Sequence[Mappi
         matches = [l for l in active_locations if l["location_id"] == loc and l["tenant_id"] == m["tenant_id"]]
         if len(matches) != 1 or matches[0]["scope_node_id"] != m["scope_node_id"]:
             raise ValueError(f"Opening warehouse unavailable or outside material scope: {loc}")
-        qty = 2000.0 if m["material_type"] == "RAW" else 800.0 if m["material_type"] == "FINISHED" else 100.0
+        #: ★ **쓸 만큼은 있어야 한다.** 예전에는 유형별 고정값이라, 생산에 많이 들어가는
+        #:   원료는 기초재고가 모자라 **재고가 마이너스로 갔다**(1.1.0 에서 1,082 행,
+        #:   가장 깊은 곳 −5,276). 없는 것을 투입해 만든 데이터는 분석에 쓸 수 없다.
+        _base = 2000.0 if m["material_type"] == "RAW" else 800.0 if m["material_type"] == "FINISHED" else 100.0
+        qty = round(max(_base, _issue_need[m["material_id"]] * 1.15), 3)
         balances[(m["material_id"], loc)] += qty
         movements.append({"movement_id": f"MOV-OPEN-{idx+1:05d}", "movement_date": iso(start),
                           "movement_type": "OPENING", "material_id": m["material_id"], "lot_id": f"LOT-OPEN-{idx+1:05d}",
@@ -799,6 +812,16 @@ def generate_movements_and_snapshots(profile: Profile, logistics: Sequence[Mappi
                           "lot_id": b["output_lot_id"], "from_location_id": "PRODUCTION", "to_location_id": fg_loc,
                           "quantity": float(b["output_quantity"]), "quantity_uom": b["quantity_uom"],
                           "reference_type": "BATCH", "reference_id": b["batch_id"], "_scope": b["site_id"]})
+        #: ★ **부산물도 함께 나온다.** 이것이 없으면 부산물을 팔 때 재고가 마이너스로
+        #:   간다 — 1.2.0 을 만들면서 실제로 −1,203 톤까지 갔다.
+        for _bp, _rate in business_defs.byproduct_rates_of(BUSINESSES, b["output_material_id"]):
+            movements.append({"movement_id": f"MOV-BP-{_bp}-{b['batch_id']}", "movement_date": b["production_date"],
+                              "movement_type": "PRODUCTION_RECEIPT", "material_id": _bp,
+                              "lot_id": f"LOT-BP-{_bp}-{b['batch_id']}", "from_location_id": "PRODUCTION",
+                              "to_location_id": _bd.opening_location("BYPRODUCT", [l["location_id"] for l in active_locations]),
+                              "quantity": round(float(b["output_quantity"]) * _rate, 3),
+                              "quantity_uom": business_defs.uom_of(BUSINESSES, _bp),
+                              "reference_type": "BATCH", "reference_id": b["batch_id"], "_scope": b["site_id"]})
     for s in sales:
         loc = business_defs.by_plant(BUSINESSES, s["scope_node_id"]).fg_location
         movements.append({"movement_id": f"MOV-SO-{s['sales_line_id']}", "movement_date": s["actual_ship_date"],
