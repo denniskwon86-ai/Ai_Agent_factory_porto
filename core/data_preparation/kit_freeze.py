@@ -154,10 +154,17 @@ def verify(root: str) -> Tuple[bool, List[str]]:
 
     대장이 없을 때 무엇을 할지는 **그 판본이 확정됐는지에 달렸다.**
 
-    | 상태 | 대장 없음 | 왜 |
+    | `.frozen` | 대장 없음 | 왜 |
     |---|---|---|
-    | 생성 중 | 통과 | 아직 안 얼린 판본까지 실패로 만들면 생성 중인 것을 못 쓴다 |
-    | **확정** | **실패** | 확정이라면서 **지킬 대장이 없다** — 내용을 보증하지 못한다 |
+    | 없다 | 통과 | 아직 안 얼린 판본까지 실패로 만들면 생성 중인 것을 못 쓴다 |
+    | **있다** | **실패** | 봉인했다면서 **지킬 대장이 없다** — 내용을 보증하지 못한다 |
+
+    ⚠️ 여기서 보는 것은 **`.frozen` 표식뿐이다.** `is_frozen()` 은 manifest 가
+      `VALIDATED_*` 이기만 해도 참인데, 그것은 「검증을 통과했다」이지 「봉인했다」가
+      아니다. 그 둘을 섞으면 **검증을 두 번 돌리는 것만으로 실패한다** — 첫 번째가
+      manifest 를 `VALIDATED_FOR_DEMO` 로 바꾸기 때문이다 (실제로 그렇게 만들었다가
+      되돌렸다). 봉인은 `freeze_starter_kit.py` 가 하고, 그것은 표식과 대장을 **함께**
+      만든다. 그러니 표식이 있는데 대장이 없으면 비정상이다.
 
     ⚠️ **예전에는 둘 다 통과였다.** 그래서 1.1.0 이 `VALIDATED_FOR_DEMO` 인데 대장이
       없는 채로 `frozen: true · fingerprint: PASS` 를 냈고, 파일을 고쳐도 검증 406 건이
@@ -166,9 +173,10 @@ def verify(root: str) -> Tuple[bool, List[str]]:
     """
     recorded = load_fingerprints(root)
     if recorded is None:
-        if is_frozen(root):
+        if os.path.exists(os.path.join(root, FROZEN_MARK)):
             return False, [
-                f"확정 판본인데 지문 대장({FINGERPRINT_FILE})이 없다 — 내용을 보증할 수 "
+                f"봉인 표식({FROZEN_MARK})은 있는데 지문 대장({FINGERPRINT_FILE})이 "
+                f"없다 — 내용을 보증할 수 "
                 f"없다. `python scripts/freeze_starter_kit.py <KIT_ID> <판본>` 으로 "
                 f"대장을 만드십시오"]
         return True, []

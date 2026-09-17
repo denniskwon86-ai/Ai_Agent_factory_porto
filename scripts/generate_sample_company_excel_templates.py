@@ -27,7 +27,7 @@ KIT_ID = "KIT-MFG-NONFERROUS-PROCUREMENT"
 #: ⚠️ 여기가 `1.0.0` 으로 굳어 있었다. 판본이 둘이 된 뒤로는 **무심코 돌리면 동결된
 #:   1.0.0 의 Excel 을 덮어쓴다** — 2026-09-10 사고와 같은 경로다. 기본을 현재
 #:   판본으로 두고, 동결된 곳에는 `--force` 없이 쓰지 못하게 한다.
-KIT_VERSION = "1.1.0"
+KIT_VERSION = "1.2.0"
 KIT_ROOT = ROOT / "starter_kits" / KIT_ID / KIT_VERSION
 OUTPUT_ROOT = KIT_ROOT / "templates" / "excel"
 

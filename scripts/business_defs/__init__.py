@@ -30,13 +30,15 @@
     build(businesses=["smelting_nonferrous"])                        # 고려아연
     build(businesses=["battery_materials"])                          # 켐코
 
-## ★ 분리는 동작을 바꾸지 않는다
+## ★ 분리(1.1.0)와 개선(1.2.0)을 섞지 않았다
 
-이 패키지는 **생성기 안에 있던 값을 옮겨 담았을 뿐**이다. 둘을 다 넣으면 1.1.0 과
-지문이 같아야 하고, 그것이 「손실 없이 갈랐다」는 유일한 증거다.
+이 패키지는 처음에 **생성기 안에 있던 값을 옮겨 담기만 했다.** 둘을 다 넣으면
+1.1.0 과 지문이 한 글자도 다르지 않았고, 그것이 「손실 없이 갈랐다」는 증거다.
+그 증거는 이제 **1.1.0 의 지문 대장**이 갖고 있다.
 
-고칠 것이 보여도(예: `routing_ops` 가 두 사업 공통인데 실제 공정은 다르다) **여기서
-고치지 않는다.** 분리와 개선을 섞으면 무엇이 깨졌는지 알 수 없게 된다.
+그때 고칠 것이 보여도 고치지 않았다 — 분리와 개선을 섞으면 무엇이 깨졌는지 알 수
+없게 된다. 그 개선을 **1.2.0 에서 했다**: 공정 분리 · 등급 · 부산물 판매 · 판매
+단위 · 기초재고 창고 · 사업 경계(BOM 원료 · 실사 조정 · 재고 스냅샷).
 """
 from __future__ import annotations
 
@@ -71,13 +73,24 @@ class BusinessDef:
     yields: Dict[str, float] = {}
     #: {product_id: byproduct_material_id}
     byproducts: Dict[str, str] = {}
-    #: 공정 이름 — `MDM-06` Routing
+    #: 공정 이름 — `MDM-06` Routing. **사업마다 다르다** (건식 제련 ≠ 습식 정제)
     routing_ops: Sequence[str] = ()
-    #: 기초재고를 **제품창고**에 넣는 품목 유형. 나머지는 원료창고로 간다.
-    #: ⚠️ 원래 로직이 공장마다 달랐고 **이유가 없다** — 제련은 RAW 만 원료창고였고
-    #:   전지소재는 FINISHED 만 제품창고였다. 분리하면서 그대로 옮겼다(동작 보존).
-    #:   통일하면 `INV-01`·`INV-02` 지문이 바뀐다.
-    opening_stock_to_fg: Sequence[str] = ("FINISHED",)
+
+    # ── 산업의 의미 (「기존 필드에 의미 넣기」 층)
+    #
+    # 아래 셋은 **열을 늘리지 않는다.** 이미 있는 `grade`·`unit_price`·`product_id`
+    # 에 그 산업이 실제로 쓰는 값을 넣을 뿐이다. 스키마를 건드리지 않으므로 플랫폼
+    # 쪽 변경이 없고, 그러면서 현업이 열었을 때 「우리 얘기」가 된다.
+    #
+    # ⚠️ **값은 공개 지식으로 쓴 초안이다.** 등급 체계가 **존재한다**는 구조는 확실
+    #   하지만 정확한 품위·단가는 회사·계약마다 다르다 — 도메인 검토 대상.
+
+    #: {material_id: grade} — 그 산업이 실제로 쓰는 등급. 없으면 `DEMO_STANDARD`
+    grades: Dict[str, str] = {}
+    #: 완제품 말고 **더 파는 것**. 제련은 부산물(황산·금)이 손익의 큰 몫이다
+    sellable_extra: Sequence[str] = ()
+    #: {material_id: unit_price} — 판매 단가. 없으면 생성기 기본값
+    sale_prices: Dict[str, float] = {}
 
     # ── 편의
 
@@ -115,6 +128,30 @@ class BusinessDef:
 
     def has_location(self, loc_id: str) -> bool:
         return any(l[0] == loc_id for l in self.locations)
+
+    #: 품목 유형이 어느 보관구분으로 가나. 앞에서부터 있는 것을 쓴다.
+    _OPENING_ORDER = {
+        "RAW": ("RAW",), "CONSUMABLE": ("RAW",),
+        "WIP": ("WIP", "RAW"),                    # quick 에는 공정재고가 없다
+        "FINISHED": ("FINISHED",), "BYPRODUCT": ("FINISHED",),
+    }
+
+    def opening_location(self, material_type: str, available: Sequence[str] = ()) -> str:
+        """기초재고를 넣을 창고. **유형에 맞는 곳으로 간다.**
+
+        ⚠️ 예전에는 공장마다 규칙이 달랐다 — 제련은 `RAW` 만 원료창고(즉 WIP 도
+          제품창고로 갔다)였고 전지소재는 `FINISHED` 만 제품창고였다. **이유가
+          없었고**, 분리할 때는 동작을 지키려고 그대로 옮겼다. 1.2.0 에서 고친다.
+        """
+        for storage in self._OPENING_ORDER.get(material_type, ("RAW",)):
+            loc = self._loc(storage)
+            if loc and (not available or loc in available):
+                return loc
+        return self.raw_location
+
+    def grade_of(self, material_id: str) -> str:
+        """그 품목의 등급. **비어 있으면 `DEMO_STANDARD`** — 의미가 없다는 표시다."""
+        return self.grades.get(material_id) or "DEMO_STANDARD"
 
 
 def load(codes: Sequence[str]) -> List[BusinessDef]:
@@ -204,13 +241,58 @@ def byproduct_of(defs: Sequence[BusinessDef], product_id: str) -> str:
     return ""
 
 
-def routing_ops_of(defs: Sequence[BusinessDef]) -> List[str]:
-    """공정 이름. ⚠️ **지금은 두 사업이 같은 목록을 쓴다** — 실제로는 건식 제련과
-    습식 정제가 다르지만, 분리하면서 고치지 않았다(동작 보존)."""
+def routing_ops_for(defs: Sequence[BusinessDef], material_id: str) -> List[str]:
+    """**그 제품을 만드는 사업의** 공정 이름.
+
+    ⚠️ 예전 `routing_ops_of()` 는 **첫 사업 것을 전부에 썼다.** 그래서 전기동도
+      「침출·용해 → 결정화」라는 습식 공정으로 만들어졌다. 실제 동 제련은 건식
+      (배소 → 용련 → 전로정련 → 전해정련)이다.
+    """
     for d in defs:
+        if d.owns(material_id) and d.routing_ops:
+            return list(d.routing_ops)
+    for d in defs:                       # 더미 제품 — 첫 사업으로 떨어진다
         if d.routing_ops:
             return list(d.routing_ops)
     return []
+
+
+def sellable_of(defs: Sequence[BusinessDef], finished: Sequence[str]) -> List[str]:
+    """파는 품목. 완제품에 **사업이 더 판다고 한 것**(부산물)을 얹는다.
+
+    ⚠️ 예전에는 `FINISHED` 만 팔았다. 그래서 **제련인데 황산도 금도 팔지 않는**
+      데이터가 나왔다 — 제련사 손익의 큰 몫이 부산물인데도.
+    """
+    out = list(finished)
+    for d in defs:
+        for mid in d.sellable_extra:
+            if mid not in out:
+                out.append(mid)
+    return out
+
+
+def grade_of(defs: Sequence[BusinessDef], material_id: str) -> str:
+    for d in defs:
+        if d.owns(material_id):
+            return d.grade_of(material_id)
+    return "DEMO_STANDARD"
+
+
+def sale_price_of(defs: Sequence[BusinessDef], material_id: str, default: float) -> float:
+    for d in defs:
+        if material_id in d.sale_prices:
+            return d.sale_prices[material_id]
+    return default
+
+
+def uom_of(defs: Sequence[BusinessDef], material_id: str, default: str = "TON") -> str:
+    """판매·이동의 수량 단위. ⚠️ 예전에는 판매가 **전부 `TON` 고정**이었다 —
+    부산물 금을 팔면 톤으로 팔린다."""
+    for d in defs:
+        for code, _n, _t, uom, _b in d.materials:
+            if code == material_id:
+                return uom or default
+    return default
 
 
 def by_plant(defs: Sequence[BusinessDef], plant_id: str) -> BusinessDef:

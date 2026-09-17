@@ -42,6 +42,20 @@ DEFAULT_BUSINESSES = ("smelting_nonferrous", "battery_materials")
 BUSINESSES: list = []
 
 
+#: 품목 → 그 품목이 속한 사업의 공장. **품목 마스터(`MDM-01`)가 정본이다.**
+#:
+#: ⚠️ 예전에는 어디서나 `business_defs.owner_of()` 를 불렀는데, 그것은 **사업 정의에
+#:   적힌 품목만 안다.** 더미 품목(`MAT-*`)은 모르니 기본값(마지막 사업)으로 떨어졌고,
+#:   마침 1.1.0 에서는 더미 완제품이 전부 마지막 사업에 몰려 있어 **우연히 맞았다.**
+#:   배정을 고르게 고치자 판매 1,089 행이 마스터와 어긋났다.
+_MATERIAL_SCOPE: Dict[str, str] = {}
+
+
+def scope_of(material_id: str) -> str:
+    """그 품목의 사업 범위. 마스터에 있으면 그것, 없으면 사업 정의로."""
+    return _MATERIAL_SCOPE.get(material_id) or business_defs.owner_of(BUSINESSES, material_id)
+
+
 def use_businesses(codes) -> None:
     """이 키트가 담을 사업을 정한다. **순서가 지문을 좌우하므로 바꾸지 않는다.**"""
     global BUSINESSES
@@ -49,7 +63,7 @@ def use_businesses(codes) -> None:
 #: **판본은 `--version` 으로 받는다** (P2). 예전에는 여기에 "1.0.0" 이 박혀 있어서,
 #: 1.1.0 을 내려면 이 줄을 고쳐야 했고 고치는 순간 1.0.0 을 재현할 수 없게 됐다.
 #: `main()`/`build()` 이 아래 셋을 판본에 맞게 다시 세운다.
-KIT_VERSION = "1.1.0"
+KIT_VERSION = "1.2.0"
 KIT_ROOT = ROOT / "starter_kits" / KIT_ID / KIT_VERSION
 OVERLAY: kit_defs.KitOverlay = kit_defs.KitOverlay()
 
@@ -332,22 +346,33 @@ def generate_materials(profile: Profile) -> List[Dict[str, Any]]:
         code, name, typ = m["code"], m["name"], m["type"]
         rows.append({"material_id": code, "material_code": code, "material_name": name,
                      "aliases": f"{name}|{code.replace('-', ' ')}", "material_type": typ,
-                     "grade": "DEMO_STANDARD", "base_uom": m["uom"], "valuation_class": typ,
+                     #: ★ 등급은 **사업이 준다** — 1.1.0 까지 실제 품목 12 개가 전부
+                     #:   `DEMO_STANDARD` 였고, 정작 더미 품목에만 `G1~G4` 가 있었다.
+                     "grade": business_defs.grade_of(BUSINESSES, code),
+                     "base_uom": m["uom"], "valuation_class": typ,
                      "benchmark_code": m["benchmark"], "active": True, "_scope": m["scope"]})
     categories = ["원료첨가제", "공정소모품", "포장재", "예비품", "중간재", "완제품"]
+    #: ★ 유형 **안에서** 번갈아 붙인다. 예전에는 `i % len(BUSINESSES)` 였는데,
+    #:   유형도 `i % 6` 으로 정해져 **둘이 맞물렸다** — `WIP` 는 언제나 짝수 i,
+    #:   `FINISHED` 는 언제나 홀수 i 라서 **더미 완제품이 전부 한 사업에** 갔다.
+    #:   그 결과 판매 2,500 건 중 제련이 193 건(7.7%)뿐이었다.
+    per_type: Dict[str, int] = defaultdict(int)
     while len(rows) < profile.materials:
         i = len(rows) + 1
         cat = categories[i % len(categories)]
         typ = "RAW" if i % 6 < 2 else "CONSUMABLE" if i % 6 < 4 else "WIP" if i % 6 == 4 else "FINISHED"
-        #: 더미 품목은 사업들에 번갈아 붙인다. 사업이 하나면 전부 그 사업으로 간다.
-        scope = BUSINESSES[i % len(BUSINESSES)].plant_id
+        scope = BUSINESSES[per_type[typ] % len(BUSINESSES)].plant_id
+        per_type[typ] += 1
         code = f"MAT-{typ[:2]}-{i:04d}"
         rows.append({"material_id": code, "material_code": code, "material_name": f"{cat} {i:03d}",
                      "aliases": f"{cat}{i:03d}|DEMO-{i:03d}", "material_type": typ,
                      "grade": f"G{1+i%4}", "base_uom": "TON" if typ != "CONSUMABLE" else "EA",
                      "valuation_class": typ, "benchmark_code": "", "active": i % 23 != 0,
                      "_scope": scope})
-    return stamp("MDM-01", rows[:profile.materials], kind="REFERENCE")
+    out = rows[:profile.materials]
+    _MATERIAL_SCOPE.clear()
+    _MATERIAL_SCOPE.update({r["material_id"]: r["_scope"] for r in out})
+    return stamp("MDM-01", out, kind="REFERENCE")
 
 
 def generate_suppliers(profile: Profile, materials: Sequence[Mapping[str, Any]], rng: random.Random) -> List[Dict[str, Any]]:
@@ -402,27 +427,35 @@ def generate_bom(profile: Profile, materials: Sequence[Mapping[str, Any]]) -> Li
     # -02 BOM이 생겨 제품 Resolver가 대체판 충돌로 거부한다.
     for pidx in range(min(target, len(product_ids))):
         product = product_ids[pidx % len(product_ids)]
-        lines = recipes.get(product) or [(raw_ids[pidx % len(raw_ids)], 1.05 + (pidx % 5) * 0.03, "INPUT")]
+        #: ★ 더미 제품의 원료도 **그 사업 것**에서 고른다. 예전에는 전체 원료를
+        #:   순환해서 **제련 제품이 소석회(전지소재 원료)로 만들어졌고**, 그 배치가
+        #:   남의 창고에서 출고돼 재고가 어긋났다(3,733 행).
+        _mine = [r for r in raw_ids if scope_of(r) == scope_of(product)] or raw_ids
+        lines = recipes.get(product) or [(_mine[pidx % len(_mine)], 1.05 + (pidx % 5) * 0.03, "INPUT")]
         for line_no, (inp, qty, role) in enumerate(lines, 1):
             rows.append({"bom_id": f"BOM-{product}-{pidx//max(1,len(product_ids))+1:02d}", "line_no": line_no,
                          "output_material_id": product, "input_material_id": inp, "component_role": role,
-                         "quantity_per_output": qty, "input_uom": "TON", "output_uom": "TON",
+                         "quantity_per_output": qty,
+                         "input_uom": business_defs.uom_of(BUSINESSES, inp),
+                         "output_uom": business_defs.uom_of(BUSINESSES, product),
                          "standard_yield": business_defs.yield_of(BUSINESSES, product),
                          "byproduct_material_id": business_defs.byproduct_of(BUSINESSES, product),
                          "effective_from": "2024-01-01", "effective_to": "9999-12-31",
-                         "_scope": business_defs.owner_of(BUSINESSES, product)})
+                         "_scope": scope_of(product)})
     return stamp("MDM-05", rows, kind="REFERENCE")
 
 
 def generate_routing(profile: Profile, materials: Sequence[Mapping[str, Any]]) -> List[Dict[str, Any]]:
     products = ([m["material_id"] for m in materials if m["material_type"] == "FINISHED"]
                 or [BUSINESSES[-1].plant_id])
-    ops = business_defs.routing_ops_of(BUSINESSES)
     rows = []
     for i in range(profile.equipments):
         product = products[i % len(products)]
+        #: ★ 공정은 **그 제품을 만드는 사업**의 것이다 — 1.1.0 까지는 첫 사업 목록을
+        #:   전부에 써서 전기동도 습식 공정(침출·결정화)으로 만들어졌다.
+        ops = business_defs.routing_ops_for(BUSINESSES, product)
         op_seq = (i % len(ops) + 1) * 10
-        scope = business_defs.owner_of(BUSINESSES, product)
+        scope = scope_of(product)
         rows.append({"routing_id": f"ROUTE-{product}", "operation_seq": op_seq,
                      "operation_name": ops[i % len(ops)], "equipment_id": f"EQ-{scope[-2:]}-{i+1:03d}",
                      "equipment_name": f"{ops[i%len(ops)]} 설비 {i+1:02d}", "product_id": product,
@@ -639,14 +672,21 @@ def generate_sales(profile: Profile, customers: Sequence[Mapping[str, Any]], pro
         actual = due + timedelta(days=2 if i%31==0 else rng.randint(-2, 2))
         product = products[i % len(products)]
         qty = round(8 + (i%17)*1.7, 3)
-        price = round((24000 if product == "FG-NISO4" else 9500 if product == "FG-CATHODE" else 32000) * (0.95 + (i%9)*0.012), 2)
+        #: ★ 단가는 사업이 줄 수 있다 — 부산물은 완제품과 **자릿수가 다르다**
+        #:   (황산은 싸고 많이, 금은 비싸고 조금).
+        _base = 24000 if product == "FG-NISO4" else 9500 if product == "FG-CATHODE" else 32000
+        price = round(business_defs.sale_price_of(BUSINESSES, product, _base) * (0.95 + (i%9)*0.012), 2)
         customer = customers[i % len(customers)]
         rows.append({"sales_line_id": f"SO-{i+1:06d}-10", "customer_id": customer["customer_id"],
                      "product_id": product, "order_date": iso(order_date), "due_date": iso(due),
                      "actual_ship_date": iso(actual), "plan_quantity": qty, "order_quantity": qty,
-                     "shipped_quantity": qty, "quantity_uom": "TON", "unit_price": price,
+                     #: ★ 단위도 품목이 정한다 — 1.1.0 까지 전부 `TON` 이라 금을 팔면
+                     #:   톤으로 팔렸다.
+                     "shipped_quantity": qty,
+                     "quantity_uom": business_defs.uom_of(BUSINESSES, product),
+                     "unit_price": price,
                      "currency": customer["currency"], "status": "SHIPPED",
-                     "_scope": business_defs.owner_of(BUSINESSES, product)})
+                     "_scope": scope_of(product)})
     return stamp("SLS-01", rows, kind="ACTUAL")
 
 
@@ -664,7 +704,7 @@ def generate_plans_batches_events(profile: Profile, bom: Sequence[Mapping[str, A
         d = start + timedelta(days=(i*5 + i//11) % span)
         qty = round(10 + (i%19)*2.1, 3)
         requirement = round(sum(float(x["quantity_per_output"]) for x in bom_by_product[product]) * qty, 3)
-        scope = business_defs.owner_of(BUSINESSES, product)
+        scope = scope_of(product)
         plans.append({"plan_line_id": f"MPS-{i+1:07d}", "plan_date": iso(d), "site_id": scope,
                       "product_id": product, "plan_quantity": qty, "quantity_uom": "TON",
                       "priority": 1 + i%3, "material_requirement": requirement,
@@ -718,8 +758,11 @@ def generate_movements_and_snapshots(profile: Profile, logistics: Sequence[Mappi
         #: 그 품목이 속한 사업의 창고로 넣는다. 예전에는 `PLANT1 이면 P1, 아니면 P2`
         #: 로 굳어 있어 **사업이 셋이 되면 전부 두 번째로 갔다.**
         _b = business_defs.by_plant(BUSINESSES, m["scope_node_id"])
-        loc = (_b.fg_location if m["material_type"] in _b.opening_stock_to_fg
-               else _b.raw_location)
+        #: ★ 유형에 맞는 창고로 간다 — 1.1.0 까지는 공장마다 규칙이 달라(제련은
+        #:   공정재고까지 제품창고로) **공정재고 창고가 비어 있었다.**
+        _avail = [l["location_id"] for l in active_locations
+                  if l["tenant_id"] == m["tenant_id"] and l["scope_node_id"] == m["scope_node_id"]]
+        loc = _b.opening_location(m["material_type"], _avail)
         matches = [l for l in active_locations if l["location_id"] == loc and l["tenant_id"] == m["tenant_id"]]
         if len(matches) != 1 or matches[0]["scope_node_id"] != m["scope_node_id"]:
             raise ValueError(f"Opening warehouse unavailable or outside material scope: {loc}")
@@ -768,13 +811,19 @@ def generate_movements_and_snapshots(profile: Profile, logistics: Sequence[Mappi
     i = 0
     while len(movements) < target:
         mat = material_ids[i % len(material_ids)]
-        loc = active_locations[i % len(active_locations)]["location_id"]
+        #: ★ 그 품목이 속한 사업의 창고에서 고른다 — 예전에는 전체 창고를 순환해서
+        #:   **동정광이 전지소재 창고에 조정 입고**됐다(5,047 건).
+        _mine = [l for l in active_locations
+                 if business_defs.by_location(BUSINESSES, l["location_id"]).plant_id == scope_of(mat)]
+        _pool = _mine or active_locations
+        loc = _pool[i % len(_pool)]["location_id"]
         d = start + timedelta(days=(i*7) % max(1,(end-start).days))
         qty = round(0.05 + (i%9)*0.03, 3)
         movements.append({"movement_id": f"MOV-ADJ-{i+1:07d}", "movement_date": iso(d),
                           "movement_type": "CYCLE_COUNT_ADJUSTMENT", "material_id": mat, "lot_id": f"LOT-ADJ-{i+1:07d}",
                           "from_location_id": "ADJUSTMENT", "to_location_id": loc, "quantity": qty,
-                          "quantity_uom": "TON", "reference_type": "CYCLE_COUNT", "reference_id": f"CC-{i+1:07d}",
+                          "quantity_uom": business_defs.uom_of(BUSINESSES, mat),
+                          "reference_type": "CYCLE_COUNT", "reference_id": f"CC-{i+1:07d}",
                           "_scope": business_defs.by_location(BUSINESSES, loc).plant_id})
         i += 1
     movements = sorted(movements, key=lambda x: (x["movement_date"], x["movement_id"]))
@@ -798,14 +847,19 @@ def generate_movements_and_snapshots(profile: Profile, logistics: Sequence[Mappi
                 current[(m["material_id"], loc)] += qty
             idx += 1
         for mat in material_ids:
-            relevant = [l["location_id"] for l in active_locations]
+            #: ★ **그 품목의 사업에 속한 창고만** 센다. 예전에는 품목 × 창고를 전부
+            #:   돌려서 절반이 남의 사업 창고였고(27,756 행), 제련 키트를 뽑아도
+            #:   **황산니켈 재고 행이 따라왔다.**
+            relevant = [l["location_id"] for l in active_locations
+                        if business_defs.by_location(BUSINESSES, l["location_id"]).plant_id == scope_of(mat)]
             for loc in relevant:
                 qty = round(current[(mat, loc)], 3)
                 snapshots.append({"snapshot_id": f"STK-{cutoff:%Y%m%d}-{mat}-{loc}", "snapshot_date": iso(cutoff),
                                   "location_id": loc, "material_id": mat, "lot_id": "ALL",
                                   "unrestricted_quantity": qty, "quality_quantity": 0.0, "blocked_quantity": 0.0,
                                   "safety_stock_quantity": 50.0 if mat.startswith("RM-") else 10.0,
-                                  "quantity_uom": "TON", "_scope": business_defs.by_location(BUSINESSES, loc).plant_id})
+                                  "quantity_uom": business_defs.uom_of(BUSINESSES, mat),
+                                  "_scope": business_defs.by_location(BUSINESSES, loc).plant_id})
         month_cursor = add_months(month_cursor, 1)
     return stamped_movements, stamp("INV-01", snapshots, kind="ACTUAL")
 
@@ -867,7 +921,7 @@ def generate_finance(profile: Profile, contracts: Sequence[Mapping[str, Any]], p
                 fin1.append({"cost_record_id": f"COST-{cursor:%Y%m}-{product}-{component}", "fiscal_period": f"{cursor:%Y-%m}",
                              "product_id": product, "cost_component": component, "standard_unit_cost": round(standard, 2),
                              "actual_unit_cost": round(actual, 2), "variance_amount": round(actual-standard, 2),
-                             "currency": "USD", "quantity_uom": "TON", "_scope": business_defs.owner_of(BUSINESSES, product)})
+                             "currency": "USD", "quantity_uom": "TON", "_scope": scope_of(product)})
         cursor = add_months(cursor, 1)
     fin1s = stamp("FIN-01", fin1, kind="ACTUAL")
 
@@ -987,7 +1041,10 @@ def generate_profile(profile: Profile) -> Dict[str, List[Dict[str, Any]]]:
     datasets["FND-02"] = generate_users(profile)
     datasets["FND-03"] = generate_references(profile, start, end)
     datasets["MDM-01"] = generate_materials(profile)
-    products = [m["material_id"] for m in datasets["MDM-01"] if m["material_type"] == "FINISHED"]
+    #: ★ 완제품 + 사업이 더 판다고 한 것(부산물). 1.1.0 까지는 `FINISHED` 뿐이라
+    #:   **제련인데 황산도 금도 팔지 않았다.**
+    products = business_defs.sellable_of(
+        BUSINESSES, [m["material_id"] for m in datasets["MDM-01"] if m["material_type"] == "FINISHED"])
     datasets["MDM-02"] = generate_suppliers(profile, datasets["MDM-01"], rng)
     datasets["MDM-03"] = generate_customers(profile, products)
     datasets["MDM-04"] = generate_locations(profile)

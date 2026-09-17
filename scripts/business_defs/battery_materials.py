@@ -61,9 +61,26 @@ class BatteryMaterials(BusinessDef):
     yields = {"FG-NISO4": 0.94, "FG-LIOH": 0.94}
     byproducts = {}
 
-    #: 제련과 같은 목록을 쓴다 — 습식 공정이라 실제로 겹치는 면이 있지만,
-    #: 분리하면서 확인하지 않았다. `routing_ops_of()` 가 첫 사업 것을 쓴다.
+    #: 습식 — 녹이고 걸러 결정으로 뽑는다. 1.1.0 까지 제련도 이 목록을 썼다.
     routing_ops = ("원료준비", "침출·용해", "정제", "결정화", "건조·포장")
+
+    # ── 산업의 의미
+
+    #: 전지소재의 등급은 **배터리급이냐 아니냐** 하나로 갈린다. 양극재사 규격을
+    #: 통과하지 못하면 도금용·촉매용으로 훨씬 싸게 나간다.
+    #: ⚠️ MHP 의 Ni 함량은 공개 지식으로 쓴 초안이다 — **도메인 검토 대상**
+    grades = {
+        "RM-MHP": "NI_40PCT",            # 니켈 MHP — Ni 35~40% 가 통상
+        "RM-H2SO4": "TECHNICAL_98PCT",
+        "RM-LIME": "INDUSTRIAL",
+        "WIP-NISO4": "CRUDE_SOLUTION",   # 조황산니켈 — 아직 등급이 없다
+        "FG-NISO4": "BATTERY_GRADE",     # ★ 배터리급
+        "FG-LIOH": "BATTERY_GRADE",
+    }
+
+    #: 부산물이 없다 — 이 공정은 폐수·석고를 내지만 키트에 품목이 없다.
+    #: 있는 그대로 비워 둔다(없는 것을 있다고 하지 않는다).
+    sellable_extra = ()
 
 
 BUSINESS = BatteryMaterials()

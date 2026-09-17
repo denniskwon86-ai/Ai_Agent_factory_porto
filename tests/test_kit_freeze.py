@@ -72,26 +72,32 @@ def test_생성중인_판본은_대장이_없어도_통과시킨다(tmp_path):
     assert ok and problems == []
 
 
-@pytest.mark.parametrize("status", ["VALIDATED_FOR_DEMO", "VALIDATED"])
-def test_확정_판본에_대장이_없으면_실패한다(tmp_path, status):
-    """★ **확정이라면서 지킬 대장이 없으면 내용을 보증하지 못한다.**
+def test_봉인했는데_대장이_없으면_실패한다(tmp_path):
+    """★ **봉인했다면서 지킬 대장이 없으면 내용을 보증하지 못한다.**
 
-    예전에는 여기서도 통과했다. 그 결과 1.1.0 이 `VALIDATED_FOR_DEMO` 인데 대장
-    없이 `frozen: true · fingerprint: PASS` 를 냈고, **파일을 고쳐도 검증 406 건이
-    그대로 통과했다**(2026-09-17 실증). 1.0.0 이 머지로 조용히 바뀐 사고와 같은
-    구조가 1.1.0 에 남아 있었던 것이다.
+    예전에는 여기서도 통과했다. 그 결과 1.1.0 이 대장 없이 `frozen: true ·
+    fingerprint: PASS` 를 냈고, **파일을 고쳐도 검증 406 건이 그대로 통과했다**
+    (2026-09-17 실증). 1.0.0 이 머지로 조용히 바뀐 사고와 같은 구조였다.
     """
-    ok, problems = kf.verify(_kit(tmp_path, status=status))
-    assert not ok, "확정 판본에 대장이 없는데 통과했다"
+    root = _kit(tmp_path)
+    open(os.path.join(root, kf.FROZEN_MARK), "w").close()
+    ok, problems = kf.verify(root)
+    assert not ok, "봉인 표식이 있는데 대장 없이 통과했다"
     assert "지문 대장" in problems[0]
 
 
-def test_표식만_있고_대장이_없어도_실패한다(tmp_path):
-    """`.frozen` 을 손으로 놓고 대장을 안 만든 경우."""
-    root = _kit(tmp_path)
-    open(os.path.join(root, kf.FROZEN_MARK), "w").close()
-    ok, _ = kf.verify(root)
-    assert not ok
+@pytest.mark.parametrize("status", ["VALIDATED_FOR_DEMO", "VALIDATED"])
+def test_검증만_통과한_판본은_대장이_없어도_된다(tmp_path, status):
+    """★ **「검증 통과」와 「봉인」은 다르다.**
+
+    `is_frozen()` 은 manifest 가 `VALIDATED_*` 이기만 해도 참이다. 그것까지 대장을
+    요구하면 **검증을 두 번 돌리는 것만으로 실패한다** — 첫 번째가 manifest 를
+    `VALIDATED_FOR_DEMO` 로 바꾸기 때문이다. 실제로 그렇게 만들었다가 되돌렸다.
+    """
+    root = _kit(tmp_path, status=status)
+    assert kf.is_frozen(root), "manifest 상태만으로도 guard 는 막아야 한다"
+    ok, problems = kf.verify(root)
+    assert ok, f"봉인 전인데 대조에서 막혔다: {problems}"
 
 
 def test_내용이_바뀌면_잡는다(tmp_path):

@@ -24,7 +24,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from core.data_preparation import kit_freeze  # noqa: E402
 KIT_ID = "KIT-MFG-NONFERROUS-PROCUREMENT"
-KIT_VERSION = "1.1.0"
+KIT_VERSION = "1.2.0"
 KIT_ROOT = ROOT / "starter_kits" / KIT_ID / KIT_VERSION
 COMMON = {"record_id", "tenant_id", "scope_node_id", "data_class", "business_data_kind",
           "data_origin", "quality_status", "certification_status", "as_of_date", "lineage_id"}
@@ -81,6 +81,21 @@ def validate_profile(profile: str, dataset_ids: Sequence[str], v: Validation) ->
         v.check(f"{profile}:{ds}:scope필수", all(r.get("scope_node_id") for r in rows))
 
     # Organization cycle and parent integrity.
+    #: ★ **품목의 사업 범위가 데이터셋마다 같은가.**
+    #:
+    #: ⚠️ 검사 406 건이 이것을 못 잡았다. 같은 완제품이 `MDM-01` 에서는 제련,
+    #:   `SLS-01` 에서는 전지소재로 적힌 채 **1,089 행**이 통과했다(2026-09-17).
+    #:   품목 마스터가 정본이고, 그 품목을 쓰는 데이터셋이 따라야 한다.
+    _scope_of = {r["material_id"]: r["scope_node_id"] for r in data["MDM-01"]}
+    for ds, col in (("SLS-01", "product_id"), ("MDM-05", "output_material_id"),
+                    ("MDM-06", "product_id"), ("MFG-02", "output_material_id"),
+                    ("INV-01", "material_id"), ("INV-02", "material_id")):
+        rows = data.get(ds) or []
+        bad = [r[col] for r in rows
+               if r.get(col) in _scope_of and _scope_of[r[col]] != r.get("scope_node_id")]
+        v.check(f"{profile}:{ds}:품목범위가_마스터와_같다", not bad,
+                f"어긋남 {len(bad)}행: {sorted(set(bad))[:5]}")
+
     org = data["FND-01"]
     org_ids = {r["node_id"] for r in org}
     parents = {r["node_id"]: r.get("parent_id", "") for r in org}
