@@ -207,28 +207,74 @@ def test_gate_b_other_org_resource_returns_404():
     assert r.status_code == 404
 
 
-def test_gate_b_denial_is_written_to_the_audit_log():
+@pytest.mark.parametrize("prior_events", [0, 12, 120])
+def test_gate_b_denial_is_written_to_the_audit_log(tmp_path, monkeypatch, prior_events):
     """★★ 관문 B-2: 은폐는 외부용이다 — **내부에는 반드시 남는다.**
 
-    ⚠️ 거부와 기록이 **같은 순간**에 일어나는지를 본다. 처음에는 이 검증을 별도 테스트로 뒀다가
-      앞선 테스트가 실제 운영 감사로그에 남긴 기록을 보고 통과하는 일이 있었다 — 격리(conftest)와
-      함께, 한 테스트 안에서 '거부시키고 그 기록을 확인'하도록 합쳤다."""
+    ⚠️ 거부와 기록이 **같은 순간**에 일어나는지를 본다.
+
+    ## [FIX1 · 보완2 · 2026-09-15] 이 시험 «자신» 이 틀려 있었다
+
+    종전에는 **건수**를 비교했다 — `before = len(recent(limit=100))` 로 세고
+    `events = recent(limit=10)` 으로 다시 읽어 `len(events) > before` 를 단언했다.
+
+    ★★★ 두 창의 크기가 달라서, **감사 사건이 10건을 넘는 순간 이 단언은 성립할 수
+      없다.** `events` 는 최대 10인데 `before` 는 최대 100이다. 단독 실행에서는 통과하고
+      합동 실행에서는 실패하는 **순서 의존**이었다.
+
+    ⚠️ 그리고 **두 limit 을 같게 맞추는 것만으로는 부족하다.** 창이 가득 차면 새 사건이
+      생겨도 길이는 늘지 않는다 — 건수로 「새로 남았는가」를 묻는 방식 자체가 틀렸다.
+
+    그래서 셋을 바꾼다.
+
+        ① 이 시험 «자신» 의 감사 저장소를 쓴다 — 격리 러너에서는 conftest 격리가
+           걸리지 않을 수 있다(`repository_conftest_loaded: false` 로 실측됨).
+           ⚠️ 운영 로그를 지우거나 비우지 «않는다». 다른 파일을 볼 뿐이다.
+        ② 창을 일부러 **가득 채운다**(0·12·120). 옛 방식이 왜 틀렸는지를 시험이 재현한다.
+        ③ 건수가 아니라 **이번 요청의 고유 식별자**로 찾는다. 과거 사건으로는 절대
+           통과할 수 없고, 기록 호출이 사라지면 반드시 실패한다."""
+    import uuid
+
     from fastapi.testclient import TestClient
     import main
 
     from core.enterprise_context import audit
 
-    before = len(audit.recent(limit=100))
-    c = TestClient(main.app)
-    c.post("/api/v1/mcp/resolve",
-           json={"master_code": "MC-X", "system_id": "mes-smelting",
-                 "scope_node_id": "BATTERY"})
+    monkeypatch.setattr(audit, "_LOG_PATH",
+                        str(tmp_path / "access_audit.jsonl"), raising=False)
+    for index in range(prior_events):
+        audit.denied_scope("mcp_resource", f"PRIOR-{index}@mes-smelting",
+                           actor="prior@test.invalid")
+    assert len(audit.recent(limit=1000)) == prior_events, "사전 채움이 실제로 쌓이지 않았다"
 
-    events = audit.recent(limit=10)
-    assert len(events) > before, "거부는 했는데 감사 기록이 남지 않았다(조용한 차단)"
-    e = events[0]
-    assert e["event"] == audit.ACCESS_DENIED_SCOPE_MISMATCH
-    assert e["resource_id"], "실제 대상 식별자가 비어 있다 — 은폐는 응답에만 적용된다"
+    #: ★ **요청 «직전» 에 표식을 하나 남긴다.** 이 요청이 남긴 것과 그 이전 것을 가르는
+    #:   경계다 — 건수를 세지 않고 «이후에 추가된 것» 만 본다.
+    #: ⚠️ 대상 식별자로는 이 요청을 특정할 수 없다. 실제 기록은 `crosswalk` 에서 나오고
+    #:   `resource_id` 가 **system_id** 다(`master_code` 는 들어가지 않는다 — 실측).
+    sentinel = f"SENTINEL-{uuid.uuid4().hex[:12]}"
+    audit.denied_scope("mcp_resource", sentinel, actor="sentinel@test.invalid")
+
+    c = TestClient(main.app)
+    r = c.post("/api/v1/mcp/resolve",
+               json={"master_code": "MC-X", "system_id": "mes-smelting",
+                     "scope_node_id": "BATTERY"})
+    assert r.status_code == 404, "은폐는 응답에만 적용된다 — 404 여야 한다"
+
+    window, newer = audit.recent(limit=prior_events + 50), []
+    for event in window:                      # 최신 우선
+        if event.get("resource_id") == sentinel:
+            break
+        newer.append(event)
+    else:
+        pytest.fail("표식을 찾지 못했다 — 창이 좁아 이 검사가 의미를 잃었다")
+
+    mine = [e for e in newer
+            if e.get("event") == audit.ACCESS_DENIED_SCOPE_MISMATCH
+            and e.get("resource_id") == "mes-smelting"
+            and e.get("requested_scope") == "BATTERY"]
+    assert mine, "거부는 했는데 «이번 요청이» 남긴 감사 기록이 없다(조용한 차단)"
+    assert mine[0]["outcome"] == "denied"
+    assert mine[0]["resource_id"], "실제 대상 식별자가 비어 있다 — 은폐는 응답에만 적용된다"
 
 
 def test_gate_b_mcp_does_not_trust_client_supplied_scope():

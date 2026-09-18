@@ -9,7 +9,8 @@ import { createHash } from 'node:crypto';
 import ts from 'typescript';
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-const files = ['../src/factory/studioKitAppEntry.ts', '../src/factory/StudioKitAppEntryGate.tsx', './check-kit-app-entry.mjs'];
+const files = ['../src/factory/studioKitAppEntry.ts', '../src/factory/StudioKitAppEntryGate.tsx',
+  '../src/factory/studioEntryFlow.ts', './check-kit-app-entry.mjs'];
 const hashes = () => Object.fromEntries(files.map(f => [f, createHash('sha256').update(fs.readFileSync(new URL(f, import.meta.url))).digest('hex')]));
 const before = hashes();
 function load(file, deps = {}) {
@@ -30,7 +31,10 @@ let identity, calls, responder;
 const api = { getEnterpriseContext: () => identity, apiFetch: async (url, init) => {
   calls.push({ url, init }); return responder(url, init);
 } };
-const module = load(files[0], { '../lib/api': api, './studioInputMemory': { studioIdentityKey: () => JSON.stringify(identity) } });
+const memory = { studioIdentityKey: () => JSON.stringify(identity) };
+// [DRAFT-ENTRY-01] flow 공통부는 «실제 모듈»을 싣는다 — 대역이면 수명 검사가 의미를 잃는다.
+const flow_ = load('../src/factory/studioEntryFlow.ts', { './studioInputMemory': memory });
+const module = load(files[0], { '../lib/api': api, './studioInputMemory': memory, './studioEntryFlow': flow_ });
 const ui = load(files[1], { './studioKitAppEntry': module });
 const INSTANCE = 'ki_6b06ffb50a994a', APP = 'APP-03';
 const metadata = () => ({ instance_id: INSTANCE, app_id: APP, app_label: '재고·생산 영향 분석',

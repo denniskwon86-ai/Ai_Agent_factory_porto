@@ -33,7 +33,11 @@ def data(response):
     assert response.status_code == 200, response.text
     assert set(response.json()) == {"status", "data"}
     value = response.json()["data"]
-    assert set(value) == {"project_id", "project_name", "runtime_document_version", "ownership", "viewing_context"}
+    #: ⚠️ 정확히 이 집합이다. 느슨하게 풀지 않는다 — 이 단언이 「응답에 뭐가 더
+    #:   따라 나오지 않는가」를 지키는 유일한 통제다.
+    #: ★ [MEGA-ENTRY-01] 소속 두 칸이 계약에 «의도적으로» 늘었다(설계안 §10.3).
+    assert set(value) == {"project_id", "project_name", "runtime_document_version",
+                          "ownership", "viewing_context", "is_mega_project", "child"}
     assert set(value["ownership"]) == {"tenant_id", "enterprise_scope_id", "entity_mode"}
     assert set(value["viewing_context"]) == {"tenant_id", "scope_node_id", "entity_mode"}
     return value
@@ -48,6 +52,7 @@ def test_legacy_exact_read_dto_and_missing_version_falls_back_to_1(api, version_
     response = get(api, org.VIEWER_A)
     value = data(response)
     assert value == dict(project_id=PROJECT, project_name="합성 구매 프로젝트", runtime_document_version="1.0",
+        is_mega_project=False, child=None,
         ownership=api.boundary, viewing_context=dict(tenant_id="tenant_default",
             scope_node_id=org.NODES[org.DEPT_A], entity_mode="REAL"))
     assert "private_note" not in response.text and "clarification_questions" not in response.text

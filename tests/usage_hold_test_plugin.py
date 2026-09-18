@@ -3,6 +3,17 @@ import json
 import pytest
 
 
+def pytest_configure(config):
+    #: ⚠️ 격리 러너는 `--noconftest` 로 돌고 `tests/plugin_test_auth.py` 도 안 읽는다.
+    #:   그 파일이 등록하는 표식을 여기서도 «같은 뜻으로» 등록해 둔다 — 안 하면
+    #:   「Unknown mark」 경고가 남고, 경고가 쌓이면 진짜 경고를 못 본다.
+    #: ★ 표식의 «동작» 은 저쪽 플러그인에 있다. 여기서는 이름만 안다 — 격리 러너에는
+    #:   주입 자체가 없으므로 이 파일의 시험은 언제나 실제 인증 경로를 쓴다.
+    config.addinivalue_line(
+        "markers",
+        "real_auth: principal 주입 없이 **실제 세션**으로 인증한다(인증·권한 경로 검증).")
+
+
 @pytest.fixture
 def enforced_org(tmp_path, monkeypatch):
     from core import scope_policy

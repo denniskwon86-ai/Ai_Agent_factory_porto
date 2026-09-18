@@ -148,3 +148,173 @@ def test_unauthenticated_caller_is_rejected(kitapi):
     response = kitapi.client.get(url(kitapi.instance_id, app_id))
     assert response.status_code in (401, 403), response.text
     assert "data" not in response.text
+
+
+@pytest.mark.parametrize("actor", [org.MANAGER_ROOT, org.ADMIN])
+def test_sibling_selection_is_hidden_like_v2_list(kitapi, actor):
+    """두 조직을 읽더라도 B 선택으로 A의 v2 인스턴스를 열 수 없다."""
+    app_id = apps_of(kitapi)[0]
+    selected = org.NODES[org.DEPT_B]
+    listed = kitapi.client.get(
+        f"/api/v1/data-preparation/instances/{kitapi.instance_id}/apps",
+        headers=headers(actor, selected))
+    assert listed.status_code == 404, listed.text
+    entry = get(kitapi, app_id, actor=actor, scope=selected)
+    assert entry.status_code == 404, entry.text
+    assert entry.json()["detail"] == HIDDEN
+
+
+def test_v2_missing_explicit_context_matches_list(kitapi):
+    auth = {"X-Factory-User": org.MANAGER_ROOT}
+    listed = kitapi.client.get(
+        f"/api/v1/data-preparation/instances/{kitapi.instance_id}/apps", headers=auth)
+    assert listed.status_code == 422, listed.text
+    entry = kitapi.client.get(url(kitapi.instance_id, "APP-01"), headers=auth)
+    assert entry.status_code == 422, entry.text
+
+
+def test_v2_read_only_viewer_can_enter_without_run_permission(kitapi):
+    listed = apps_of(kitapi, org.VIEWER_A)
+    assert listed
+    assert get(kitapi, listed[0], actor=org.VIEWER_A).status_code == 200
+
+
+@pytest.fixture
+def legacy_id(kitapi):
+    from core import demo_vertical_slice as dv
+    store = kitapi.env["store"]
+    dv.register_kit(store)
+    row = store.create_instance(
+        kit_id=dv.KIT_ID, version=dv.KIT_VERSION, kit_fingerprint=dv.kit_fingerprint(store),
+        tenant_id=kitapi.env["boundary"].tenant_id, scope_node_id=org.NODES[org.DEPT_A],
+        entity_mode="REAL", label="격리 legacy 진입 시험", created_by=org.MEMBER_A)
+    return row["instance_id"]
+
+
+@pytest.mark.parametrize("actor", [org.VIEWER_A, org.EXEC])
+def test_legacy_without_run_permission_hides_existence(kitapi, legacy_id, actor):
+    present = get(kitapi, "APP-01", instance_id=legacy_id, actor=actor)
+    absent = get(kitapi, "APP-01", instance_id="ki_missing", actor=actor)
+    assert present.status_code == absent.status_code == 404, present.text
+    assert present.json()["detail"] == absent.json()["detail"] == HIDDEN
+
+
+def test_legacy_allowed_entry_still_matches_list(kitapi, legacy_id):
+    listed = kitapi.client.get(
+        f"/api/v1/data-preparation/instances/{legacy_id}/apps",
+        headers=headers(org.MEMBER_A))
+    assert listed.status_code == 200, listed.text
+    assert any(row["app_id"] == "APP-01" for row in listed.json()["data"]["apps"])
+    entry = get(kitapi, "APP-01", instance_id=legacy_id, actor=org.MEMBER_A)
+    assert entry.status_code == 200, entry.text
+
+
+def test_legacy_unrestricted_list_policy_is_not_narrowed(kitapi, legacy_id):
+    selected = org.NODES[org.DEPT_B]
+    listed = kitapi.client.get(
+        f"/api/v1/data-preparation/instances/{legacy_id}/apps", headers=headers(org.ADMIN, selected))
+    assert listed.status_code == 200, listed.text
+    entry = get(kitapi, "APP-01", instance_id=legacy_id, actor=org.ADMIN, scope=selected)
+    assert entry.status_code == 200, entry.text
+
+
+@pytest.mark.parametrize("legacy", [False, True])
+def test_revocation_during_lookup_is_hidden_before_response(kitapi, legacy_id, monkeypatch, legacy):
+    """프로필을 읽는 동안 다른 연결에서 회수해도 캐시된 Principal로 응답하지 않는다."""
+    from api.routes import data_preparation_control as dp
+    from core.org_directory import OrgDirectory
+    instance_id = legacy_id if legacy else kitapi.instance_id
+    assert get(kitapi, "APP-01", instance_id=instance_id, actor=org.MEMBER_A).status_code == 200
+    original = dp._kit_profile_or_503
+
+    def revoke(inst):
+        profile = original(inst)
+        other = OrgDirectory(str(kitapi.env["paths"]["org"]))
+        assert other.delete_user(org.MEMBER_A, actor=org.ADMIN)
+        return profile
+
+    monkeypatch.setattr(dp, "_kit_profile_or_503", revoke)
+    entry = get(kitapi, "APP-01", instance_id=instance_id, actor=org.MEMBER_A)
+    assert entry.status_code == 404, entry.text
+    assert entry.json()["detail"] == HIDDEN
+
+
+@pytest.mark.parametrize("during_read", [False, True])
+def test_selected_scope_revoked_with_target_rights_preserved(kitapi, legacy_id, monkeypatch, during_read):
+    """대상 A 권한은 남아도 선택 B 권한이 회수되면 캐시 문맥으로 응답하지 않는다."""
+    from api.routes import data_preparation_control as dp
+    from core.org_directory import OrgDirectory
+    directory = kitapi.env["directory"]
+    directory.set_user_roles(org.MEMBER_A, {org.DEPT_A: "member", org.DEPT_B: "member"}, actor=org.ADMIN)
+    cached = directory.resolve_scope(org.MEMBER_A)
+    selected = org.NODES[org.DEPT_B]
+    assert selected in cached.readable_scope_nodes
+    assert get(kitapi, "APP-01", instance_id=legacy_id, actor=org.MEMBER_A, scope=selected).status_code == 200
+
+    def revoke():
+        other = OrgDirectory(str(kitapi.env["paths"]["org"]))
+        other.set_user_roles(org.MEMBER_A, {org.DEPT_A: "member"}, actor=org.ADMIN)
+        assert directory.resolve_scope(org.MEMBER_A) is cached
+        fresh = directory.resolve_scope(org.MEMBER_A, fresh=True)
+        assert org.NODES[org.DEPT_A] in fresh.readable_scope_nodes
+        assert selected not in fresh.readable_scope_nodes
+
+    if during_read:
+        original = dp._kit_profile_or_503
+        def read_and_revoke(inst):
+            profile = original(inst)
+            revoke()
+            return profile
+        monkeypatch.setattr(dp, "_kit_profile_or_503", read_and_revoke)
+    else:
+        revoke()
+    entry = get(kitapi, "APP-01", instance_id=legacy_id, actor=org.MEMBER_A, scope=selected)
+    assert entry.status_code == 404, entry.text
+    assert entry.json()["detail"] == HIDDEN
+
+
+def test_authority_failure_at_recheck_is_503_without_metadata(kitapi, monkeypatch):
+    from api.routes import data_preparation_control as dp
+    from core.org_directory import OrgDirectory
+    directory = kitapi.env["directory"]
+    original = dp._kit_profile_or_503
+    resolve = OrgDirectory.resolve_scope
+    profile_read = False
+
+    def observe(inst):
+        nonlocal profile_read
+        profile = original(inst)
+        profile_read = True
+        return profile
+
+    def unavailable(self, *args, **kwargs):
+        if profile_read and kwargs.get("fresh"):
+            raise OSError("SYNTHETIC_PRIVATE_FAILURE")
+        return resolve(self, *args, **kwargs)
+
+    monkeypatch.setattr(dp, "_kit_profile_or_503", observe)
+    # singleton 메서드를 바꾸면 복구된 bound method가 copy.copy의 fresh를 오염시킨다.
+    assert "resolve_scope" not in directory.__dict__
+    with monkeypatch.context() as patch:
+        patch.setattr(OrgDirectory, "resolve_scope", unavailable)
+        entry = get(kitapi, "APP-01")
+    assert OrgDirectory.resolve_scope is resolve
+    assert "resolve_scope" not in directory.__dict__
+    assert entry.status_code == 503, entry.text
+    assert "data" not in entry.json()
+    assert "SYNTHETIC_PRIVATE_FAILURE" not in entry.text
+
+
+def test_entry_does_not_compute_readiness_or_contract_and_preserves_data(kitapi, monkeypatch):
+    from api.routes import data_preparation_control as dp
+    from core import kit_app_contract as kac
+    before = _state(kitapi.env)
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("진입 확인은 준비도/계약을 평가하지 않는다")
+
+    monkeypatch.setattr(dp, "_app_readiness", forbidden)
+    monkeypatch.setattr(kac, "read_v2", forbidden)
+    entry = get(kitapi, "APP-01", actor=org.VIEWER_A)
+    assert entry.status_code == 200, entry.text
+    assert _state(kitapi.env) == before

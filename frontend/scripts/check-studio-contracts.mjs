@@ -61,7 +61,10 @@ function resetMemory() { identity = { ...syntheticIdentity }; memory.studioInput
 // 실행 영수증도 실제 SHA-256·메모리를 쓴다. HTTP 대역 외에 지속 잠금을 우회하는 대역은 두지 않는다.
 if (!globalThis.crypto?.subtle) Object.defineProperty(globalThis, 'crypto', { value: webcrypto, configurable: true });
 const executionApi = load('../src/lib/studioExecutionApi.ts', { './api': api, '../factory/studioInputMemory': memory });
-const actions = load('../src/factory/sprintActions.ts', { '../lib/api': api, '../lib/studioExecutionApi': executionApi });
+//: ⚠️ 내려받기가 신원(문맥·사용자)을 보게 되면서 `studioInputMemory` 를 쓴다 —
+//:   **실제 모듈**을 준다(위 `memory`). 대역으로 바꾸면 늦은 응답 차단을 못 본다.
+const actions = load('../src/factory/sprintActions.ts', { '../lib/api': api,
+  '../lib/studioExecutionApi': executionApi, './studioInputMemory': memory });
 const factory = load('../src/store/useFactoryStore.ts', { '../lib/api': api, '../factory/sprintActions': actions,
   '../lib/studioExecutionApi': executionApi });
 const draftApi = load('../src/lib/studioInputDraftApi.ts', { './api': api, '../factory/studioInputMemory': memory });
@@ -387,12 +390,20 @@ await test('B6 STATIC 진입 확인 네 대상이 App 에 배선돼 있다', () 
 });
 await test('B6 STATIC 회사·사용자 전환이 열린 Studio 를 다시 확인시킨다', () => {
   const app = fs.readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8');
-  assert.match(app, /const revalidateOpenProject = useCallback/);
+  //: ⚠️ [2026-09-18] 이름이 `revalidateOpenProject` → `revalidateOpenEntry` 로 바뀌었다.
+  //:   `project` 하나만 다시 확인하던 것을 **여섯 대상 전부**로 넓혔기 때문이다(결정 ②).
+  //:   단언의 뜻(전환 시 열린 것을 다시 확인한다)은 그대로다 — 이름만 사실에 맞췄다.
+  //:   ★ 실제 «무엇을» 다시 확인하는지는 `check-project-entry.mjs` 가 뽑아서 실행해 본다.
+  assert.match(app, /const revalidateOpenEntry = useCallback/);
   // 두 전환 이벤트 **모두** 에 붙어 있어야 한다. 한쪽만 붙이면 그 경로로 옛 화면이 남는다.
+  //: ⚠️ 한 이벤트에 구독이 «여럿» 일 수 있다(예: 릴리스 목적지 정리). 그래서 **첫 등장**을
+  //:   보면 안 된다 — 다른 구독이 앞에 오면 있는 통제를 없다고 답한다. 모든 등장을 훑어
+  //:   그중 하나가 재확인 핸들러인지 본다.
   for (const event of ['factory:acting-user-changed', 'factory:enterprise-context-changed']) {
-    const at = app.indexOf(event);
-    assert.ok(at > 0, event + ' 구독이 없다');
-    assert.ok(app.slice(Math.max(0, at - 700), at).includes('revalidateOpenProject()'),
+    const spots = [];
+    for (let at = app.indexOf(event); at > 0; at = app.indexOf(event, at + 1)) spots.push(at);
+    assert.ok(spots.length > 0, event + ' 구독이 없다');
+    assert.ok(spots.some((at) => app.slice(Math.max(0, at - 700), at).includes('revalidateOpenEntry()')),
       event + ' 핸들러가 재확인을 부르지 않는다');
   }
 });
