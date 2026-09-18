@@ -424,3 +424,233 @@ tsc 0 · build PASS · B5 계약 **153** · project-entry **26** · studio-locat
 
 ★ 느슨한 시험을 조이지 않았다면 이 결함은 그대로 남았다.
 
+
+---
+
+## 10. `mega` 진입 계약 — 변경 전 확정 (2026-09-15, MEGA-ENTRY-01)
+
+지시서 §3-2 에 따라 **코드를 고치기 전에** 적는다. 새 엔드포인트를 만들지 않고
+§3.1 선택지 A(기존 `entry-metadata` 호환 확장)를 따른다.
+
+### 10.1 권위 저장소 — 실측
+
+메가 소속의 정본은 **프로젝트 작업공간의 `latest_state.json`** 이다.
+
+```
+부모(mega)  is_mega_project: true   parent_project_id: ""   sub_projects_map: {domain: child_id}
+자식        is_mega_project: false  parent_project_id: <mega_id>
+```
+
+쓰는 곳은 `factory_control.create_mega_project`(1168~1189), 읽는 곳은 목록
+엔드포인트(863~879)와 `mega/plan`(1264). 프런트는 `currentProject.is_mega_project`
+(`App.tsx:565`)와 `sub_projects_map`(`MegaBoardroomPanel`)을 본다.
+
+⚠️⚠️ **관계의 출처가 둘이다.** 부모의 `sub_projects_map` 과 자식의 `parent_project_id`
+가 서로 다른 파일에 있고 **어긋날 수 있다.** 한쪽만 보면 조용히 뚫린다 —
+자식이 자기 것이 아닌 메가를 가리키거나, 부모가 자기 것이 아닌 자식을 열거한다.
+**둘 다 일치할 때만 관계로 인정한다.**
+
+★ `entry-metadata` 는 지금 `project_meta.json` 만 읽는다. 소속은 **다른 파일**이므로
+  읽는 파일이 하나 는다 — `recheck` 도 그 파일을 같이 봐야 한다(§2.1-7).
+
+### 10.2 요청
+
+```
+GET /api/v1/factory/{project_id}/entry-metadata               부모 단독
+GET /api/v1/factory/{project_id}/entry-metadata?child=<ID>    부모 + 선택 자식
+```
+
+★ **하나의 확인 응답**이다(Codex 검토 권고 1). 프런트가 두 번 물어 관계를 추론하지 않는다.
+
+### 10.3 응답 — 기존 계약에 두 칸만 더한다
+
+```
+{ "status": "success", "data": {
+    ...기존 그대로(project_id · project_name · runtime_document_version ·
+                   ownership · viewing_context)...,
+    "is_mega_project": true|false,        ← 항상 있다
+    "child": null | {                     ← ?child= 를 준 경우에만 객체
+        "project_id", "project_name", "runtime_document_version",
+        "ownership", "viewing_context" } } }
+```
+
+기존 소비자는 모르는 칸을 복사하지 않으므로(`studioProjectEntry.ts` 가 화이트리스트로
+읽는다) **호환 확장**이다.
+
+### 10.4 오류 계약 — 기존 정책을 그대로 쓴다
+
+| 상황 | 응답 |
+|---|---|
+| id 형식 위반(부모·자식 공통) | **400** |
+| 미로그인 | **401** |
+| 없는 부모 / 안 보이는 부모 / 삭제된 부모 | **404** 같은 문구 |
+| `?child=` 인데 **부모가 메가가 아님** | **404** 같은 문구 |
+| 없는 자식 / 안 보이는 자식 / 삭제된 자식 | **404** 같은 문구 |
+| **관계 불일치**(둘 중 하나라도 어긋남) | **404** 같은 문구 |
+| 다른 조직·권한 부족 | **404** 같은 문구 |
+| 확인 중 문맥·메타·소속 변경 | **503** `PROJECT_ENTRY_UNAVAILABLE` |
+| 권한 판독 실패·409·5xx | **503** `PROJECT_ENTRY_UNAVAILABLE` |
+
+⚠️ **어느 단계에서 막혔는지 말하지 않는다.** 「부모는 있는데 자식이 없다」를 구분해
+  주면 존재 여부가 응답으로 샌다(§2.3 첫 줄).
+
+### 10.5 ★ 소속을 못 읽을 때 — 방향이 중요하다
+
+`latest_state.json` 이 **없거나·손상·심볼릭 링크**면 소속 판독기는 `None` 을 돌려주고
+`is_mega_project` 는 **false** 가 된다.
+
+> ⚠️ **실측으로 한 칸 고친다(2026-09-15).** 「손상이면 200 + false」를 예상했는데,
+> 실제로는 **기존 인증 경로가 먼저 503** 을 낸다 — `studio_project_context` 가 같은
+> 파일을 읽기 때문이고 **내 변경 이전부터 그렇다**. 더 닫힌 쪽이라 그대로 둔다.
+> 아래 두 줄이 지키려던 것은 **「파일이 아예 없는」 레거시 프로젝트**이고, 그건
+> 그대로 200 + false 로 들어간다(`test_a_project_without_any_state_file_still_enters`). 두 가지를 동시에 만족하기 때문이다.
+
+- **기존 `project` 진입을 깨지 않는다.** 레거시 프로젝트엔 그 파일이 아예 없다.
+  여기서 503 을 내면 지금 되던 진입이 죽는다.
+- **메가 진입에는 fail-closed 다.** false 면 메가로 열리지 않는다.
+
+그리고 `?child=` 가 온 경우에는 **부모·자식 양쪽 소속을 다 읽어야** 하고, 하나라도
+못 읽으면 **404** 다. 관계를 주장하는 요청은 관계를 증명해야 한다.
+
+### 10.6 지키는 불변식 (§2.3 그대로)
+
+- 조회가 **자원을 만들지 않는다** — 작업공간·상태 파일·행 생성 금지.
+- **상태·계획 원문·체크포인트를 주지 않는다** — `sub_projects_map` 전체도 주지 않는다.
+  「이 자식이 이 부모의 것인가」에만 답한다.
+- **조회 가능 ≠ 실행·게시 승인.** 확인 전에 프로젝트 선택·실행을 시작하지 않는다.
+- 권한을 넓히지 않는다 — 판정은 전부 기존 `_authorized`·`resolve_scope(fresh=True)` 다.
+
+---
+
+## 11. 【FIX1 · 2026-09-15】 판정 순서와 **실제 보장 범위**
+
+Codex 핵심 검토(`docs/handoff/CODEX_MEGA_ENTRY_REVIEW_2026-09-15.md`) 반영분.
+
+### 11.1 순서 — 숨겨야 할 대상은 «읽기 전에» 닫는다
+
+503 을 404 로 **접지 않는다.** 대신 순서를 고쳤다.
+
+```
+① 부모 확인(_authorized · 문맥 · 메타)
+② 부모 소속 판독 → is_mega_project
+③ ★ 부모 «사실만으로» 끝나는 거절      ← 여기서 닫으면 자식을 «아예 안 읽는다»
+      · 부모가 메가가 아니다
+      · 부모 목록에 그 자식이 없다
+      · 자기 자신을 자식으로 요청했다
+④ 자식 확인(_authorized · 메타 · 소속)
+⑤ 자식이 부모를 가리키는가
+```
+
+⚠️ ③을 ④ 뒤에 두면, 관계 밖 자식의 **판독이 실패할 때 503 이 나간다.** 그러면
+「없는 자식」과 「관계 밖이지만 존재하는 자식」이 구분된다 — 존재가 응답으로 새는 것이다.
+
+### 11.2 ★ 보장 범위 — 「판독 장애 = 503」이 **아니다**
+
+실측으로 확정했다. 어느 파일이 깨졌느냐에 따라 다르다.
+
+| 깨진 것 | 결과 | 누가 정하나 |
+|---|---|---|
+| `project_meta.json`(소속) | **404** | 기존 PDP 계층이 «없는 것» 으로 은폐 |
+| `latest_state.json`(상태) | **503** | `studio_project_context` 판독 실패 |
+| 상태 파일이 **아예 없음** | **200**, `is_mega_project=false` | 레거시 프로젝트 보존 |
+
+★ `membership()` 의 `None` 은 **이 표와 충돌하지 않는다.** 그 함수는 어떤 경우에도
+  예외를 던지지 않고 「소속을 모른다」만 돌려준다 — 위의 404·503 은 **더 앞 계층**이
+  내는 것이고, `membership()` 이 부르기 전에 이미 요청이 끝나 있다.
+  `membership()` 이 실제로 결과를 정하는 경우는 **상태 파일이 없는 레거시**뿐이다.
+
+⚠️ 즉 §10.5 의 「없거나·손상·심볼릭 링크면 false」는 **`membership()` 함수의 계약**이지
+  **엔드포인트의 계약이 아니다.** 손상은 그 함수에 닿기 전에 막힌다.
+
+### 11.3 프런트 — 메가 요청은 «명시 true» 일 때만 진행한다
+
+```
+App(요청 종류 보존) → Gate(requireMega) → flow → reader
+```
+
+⚠️⚠️ 종전에는 서버가 `is_mega_project` 를 정확히 답했는데 **아무도 그 사실을 쓰지
+  않았다.** 설계안에 「Gate 가 거절한다」고 적고 구현하지 않은 것이다 — 그래서 메가
+  링크로 일반 프로젝트가 열렸다. **적은 것과 만든 것이 다르면 적은 쪽은 통제가 아니다.**
+
+- 일반 `project` 요청은 `false` 도 정상이다.
+- `mega` 요청은 **자식 유무와 무관하게** 명시 `true` 일 때만 진행한다(`ENTRY_NOT_MEGA`).
+- 자식이 딸려 왔는데 `is_mega_project !== true` 면 **계약 위반**(서버가 옳다면 불가능).
+- `requireMega`·`childId` 는 **질문의 일부**라 바뀌면 이전 flow·응답을 버린다.
+
+---
+
+## 12. 【DRAFT-ENTRY-01 · 2026-09-15】 초안 진입 — **경계를 받지 않고 «찾는다»**
+
+§3.3 의 **선택지 A**(전용 진입 엔드포인트)를 택했다. Codex 검토 권고 3 과 같다.
+
+### 12.1 왜 A 였나 — 조사로 확정했다
+
+```
+advisor_v2_drafts:  draft_id TEXT PRIMARY KEY, boundary_json, owner_actor, head_revision
+```
+
+★★★ `draft_id` 가 **PRIMARY KEY** 다. 즉 초안이 **자기 경계를 들고 있다.** §3.3 이
+걱정한 「프런트가 `context_root_id` 를 어디선가 만들어 넣는」 문제가 **없어도 된다** —
+서버가 id 로 찾아 소유 문맥을 읽고 선택 문맥과 대조하면 `project` 와 같은 모양이 된다.
+
+⚠️ 기존 `GET /drafts/{id}?context_root_id=…` 는 **그대로 둔다.** 그 경로는 «이미 그
+문맥에서 일하는» 화면이 쓰는 것이라 맞는 방식이다(`studioRequirementDraft.ts:223`).
+문제는 **URL 로 들어온 초안**이고, 그때는 프런트가 문맥을 모른다.
+
+### 12.2 계약
+
+```
+GET /api/v1/advisor/drafts/{draft_id}/entry-metadata?kind=<종류>&revision=<N>
+
+{ "status":"success", "data": {
+    "draft_id", "draft_kind", "revision",
+    "ownership":       { tenant_id, context_root_id, entity_mode, scope_node_id },
+    "viewing_context": { tenant_id, scope_node_id, entity_mode } } }
+```
+
+### 12.3 판정 순서 — 순서가 곧 규칙이다
+
+```
+① 종류·판본 형식        지원 종류인가 · 판본이 1 이상인가
+② 선택 문맥 확정        explicit_context 가 헤더를 조직 정본에 대조한다
+③ 소유 문맥 판독        초안이 들고 있는 경계 4키를 «찾는다». 받지 않는다
+④ 권한·문맥 대조        기존 _authorize — 테넌트·모드·범위 사슬·사람 권한
+⑤ 판본 존재            제품 경로(revisions.get)로 확인하고 **내용은 버린다**
+```
+
+⚠️ ④를 **다시 만들지 않았다.** 그 함수가 이미 「선택 문맥이 이 초안의 사슬 안에 있는가」
+까지 본다. 서버 **권한 정책 변경 0건**이다.
+
+### 12.4 ⚠️⚠️ `consultation` — 조용히 열지 않는다
+
+종류 둘이 **서로 다른 저장소**에 살고, 결정적 비대칭이 있다.
+
+| 종류 | 저장소 | 판본 |
+|---|---|---|
+| `blueprint` | `advisor_v2_drafts` | `advisor_v2_revisions.revision` — **있다** |
+| `consultation` | `consultations` | **없다** |
+
+그런데 `studioLocation` 은 **두 종류 모두에 `revision` 을 필수**로 받는다. 상담의 `N` 은
+**확인할 대상이 없다.** 그냥 버리면 kit_app `releaseId` 와 **같은 결함**이 된다
+(Codex 권고 2: 「조용히 버리는 현재 상태를 완료로 보지 않는다」).
+
+그래서 서버가 **말한다** — `STUDIO_DRAFT_KIND_UNSUPPORTED`(422). 프런트도 이것을
+「없다」와 **다른 문구**로 보여 준다. 사용자가 사라진 초안을 찾아다니지 않게.
+
+★ **결정 요청**: ⒜ `consultation` 지원 전으로 두고 URL 문법에서 판본을 뺀다(권장) /
+⒝ `revision` 을 `consultation_turns.turn_no` 에 결속한다(제품 의미를 새로 정하는 일).
+
+### 12.5 flow 공통부를 뽑았다 (`studioEntryFlow.ts`)
+
+`project` 와 `kit_app` 의 flow 본체가 **글자까지 같았다.** 셋째를 붙이는 순간이 뽑을
+자리다(Codex 권고 4: 「mega/draft 추가 시 «확인된» flow 공통부분만 추출」).
+
+⚠️ **오류 코드·메시지는 뽑지 않았다.** 공통인 것은 «수명» 뿐이다 — 세대·중단·신원·구독.
+합치면 「무엇을 못 열었는지」가 한 문장으로 뭉개진다. 기존 43·14건이 그대로 통과해
+추출이 동작을 바꾸지 않았음을 증명한다.
+
+### 12.6 남은 연결 — **여기까지가 이번 범위다**
+
+확인된 초안을 «여는 화면»은 아직 없다. 기존 `BuildStartDialog` 는 자기 상태에서
+`requirementDraft` 를 만들지, **밖에서 받은 초안을 싣는 자리가 없다.** 없는 화면을
+지어내지 않고 인계한다 — 진입 확인은 「볼 수 있는가」이고, 그 답은 나왔다.

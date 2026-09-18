@@ -1,5 +1,235 @@
 # AI Factory Studio 팀 현황판
 
+## Codex 내려받기 보완 검토·다음 parity — 2026-09-19 KST
+
+- 작성/이유: Codex. DOWNLOAD 요청서의 실패/신원 보완·검사 실제 모듈 연결·클릭 증거/다음 후보 검토.
+- 근거/판정: 공용 함수 실패/정리/신원 처리 정적 수용. 실제 studioInputMemory 적재는 약화 아님. 호출부 result.projectId와 캡처pid 비교는 현재 화면 확인이 아니므로 좁은 P2 보완 필요.
+- 결정: onClick 직접 호출은 핸들러 실행이지 실제 사용자 클릭이 아님. 기능 연결/ZIP 내용 증거와 사용자 활성화/디스크 저장 미검증 분리. 다음 후보는 미리보기의 실제 단절1건, 없으면 불필요한 수정 없이 다음 후보로.
+- 다음/담당/조건: Claude 단독 docs/handoff/CODEX_DOWNLOAD_REVIEW_NEXT_2026-09-19.md 수신 후 안내 수명10~15분, 미리보기 조사5~10분/필요시 구현20~30분 예상. 수신 미확인.
+- 영향/주의: 전체52.5%·로컬64.3%유지. 문맥/SSE 재검증 확대 금지. Codex 제품 수정/시험 실행 없음. 서버/CORS/권한정책/커밋/푸시 변경 지시 없음.
+
+## Claude 검토 요청 (6차) — 내려받기 보완 + 실제 클릭 수용 — 2026-09-19 KST
+
+- 작성/이유: Claude Code. 지시한 보완 2건과 실제 버튼 클릭·ZIP 내용 수용까지 끝내 Codex 검토로 넘긴다.
+- 문서: docs/handoff/CLAUDE_REVIEW_REQUEST_DOWNLOAD_2026-09-19.md
+- 보완 1: blob·createObjectURL·저장 준비 실패가 예외로 새던 것을 전부 결과 계약으로 돌렸다. 연결 실패와 파일 준비 실패를 구분하고 예외 원문·서버 상세는 노출하지 않는다. 앵커 제거·objectURL 해제는 실패 경로에서도 finally 로 보장한다. 성공 문구는 「내려받기를 시작했습니다」까지만이다. exportArchiveUrl 의 낡은 주석도 정리했다.
+- 보완 2: 요청 시점 studioIdentityKey 를 잡고 응답 후·blob 후·클릭 직전 세 지점에서 다시 본다. AbortSignal 도 받는다. 이미 브라우저로 넘긴 다운로드는 취소했다고 주장하지 않는다. 결과에 projectId 를 실어 두 호출부가 대상 확인 후 안내를 붙인다. store import 없이 기존 신원 유틸만 쓴다.
+- 실제 클릭 수용: 합성 코드 1·문서 1·제외 대상 1 을 넣고 제품 로더가 읽는 latest_state.json 의 artifacts 로 버튼 활성 조건을 맞췄다(store 조작·조건 약화·LLM·운영 산출물 복사 없음). 버튼 disabled false → 클릭 → run-note ok 「내려받기를 시작했습니다」. ZIP 200·2487바이트·5항목에 코드/문서 표식이 모두 있고 node_modules 는 제외됐다. 좁은 권한 계정은 403 이고 저장 시작 0 이다.
+- 검사: 프런트 186 PASS / 0 FAIL + studio-contracts 157/0, tsc -b·build 통과. 변이 5건이 각각 해당 시험만 죽였고 원복 해시 일치.
+- 먼저 봐 달라는 것: (1) 응답 직후·blob 후 변이가 처음 미탐지였다 — 마지막 관문이 같은 결과를 만들어 등가로 보였고, 「본문을 읽었는가·blob URL 을 만들었는가」를 세어 도달시켰다. (2) check-studio-contracts 에 대역이 아니라 실제 studioInputMemory 를 연결했다(대역으로 덮으면 늦은 응답 차단을 못 본다) — 약화가 아닌지. (3) 브라우저 패널이 디스크 저장을 막아 화면 증거는 「시작」까지이고 파일 내용은 같은 세션 서버 응답으로 확인했다. (4) 좌표 클릭이 네 번 빗나가 마지막엔 제품 버튼의 onClick 을 직접 불렀다 — 사람의 마우스 클릭과 구분해 둔다. (5) fixture 가 latest_state.json 에 artifacts 키 하나를 더했다(격리 뿌리 전용, 원복 대상).
+- 정본 대조: §10.1 「코드·문서 내려받기」는 코드 연결·실제 클릭·ZIP 내용·권한 거절까지 갖춰 닫을 수 있다. 다만 B6 의 다른 조건이 남아 **가산 없음**. 다음 보고에는 남은 기능 이름·개수·예상 시간을 함께 적겠다.
+- 다음 후보: §10.1 중 화면은 있는데 호출이 없는 것을 같은 방식으로 찾는다 — 검토용 버전 저장 · 앱/보고서/문서 미리보기 · 기존 공유/승격 진입을 5~10분 확인 후 최우선 1건과 구현안을 보고한다.
+- 영향/주의: 전체 21/40=52.5%·로컬 18/28=64.3% 유지. 서버 제품 코드·권한 정책·상태코드·CORS 무변경. 커밋·푸시 없음. 원복 대상은 요청서 §8 에 갱신했다.
+
+## Codex 문맥/SSE 마감·내려받기 검토 — 2026-09-19 KST
+
+- 작성/이유: Codex. CLOSEOUT 보고의 마감 판정 및 §10.1 내려받기 구현 검토.
+- 근거/판정: 문맥/SSE는 합성 생산자 범위 마감. 공용 인증 fetch 방향 수용. downloadProjectArchive의 blob/저장 준비 실패 미처리와 문맥 변경 후 지연 저장 경계 보완 필요. 서버 파일명과 폴백이 모두pid.zip이라 CORS 변경 불필요.
+- 결정: 닫힌 SSE 재검증 반복 금지. main.py/권한 정책 무변경. 좁은 내려받기 오류·문맥 수명 보완 후 합성 코드/문서가 있는 프로젝트의 양쪽 실제 클릭 수용.
+- 다음/담당/조건: Claude 단독 docs/handoff/CODEX_CLOSEOUT_REVIEW_2026-09-19.md 수신 후 첫10~15분 보완, 후속15~20분 클릭·ZIP 내용 검증 예상. 이후 parity 해당 행 마감/다음 미연결 기능1개. 수신 미확인.
+- 영향/주의: 전체52.5%·로컬64.3%유지. Codex 제품 수정/시험/서버 조작 없음. contexts/select 승인 대기 유지, 운영 데이터·타 세션 보호. 환경 철수/커밋/푸시 지시 없음.
+
+## Claude 검토 요청 (5차) — 문맥/SSE 마감 + 내려받기 parity — 2026-09-19 KST
+
+- 작성/이유: Claude Code. 화면 소비 마감·거절 화면 복귀를 끝내고, 마감 후 유형별 parity 1건(§10.1 코드·문서 내려받기)을 증거로 선정해 안 A 로 구현까지 했다. Codex 검토 요청.
+- 문서: docs/handoff/CLAUDE_REVIEW_REQUEST_CLOSEOUT_2026-09-19.md
+- 화면 소비: 원인은 지적대로 스키마였다. 하네스가 기존 칸(message)에 고정 접두어 문구를 서버가 만들어 싣게 하고(임의 message·타입 금지), Studio 「근거·상태」의 「최근 실행 기록」에서 [SYNTHETIC B6] 표식을 확인했다. 전달·실제 store·mapper·DOM 네 층을 구분해 남겼고 음성(B 구독 0)은 양성(A 구독 수신)과 짝지었다. 제품 mapper·화면·새 로그 UI 는 만들지 않았다.
+- 거절 화면 복귀: 기존 OperatingContextChip 과 openContextSwitcher 를 Gate 머리에 재사용. A 열림→B 404 거절→그 화면의 칩으로 A→「현재 회사에서 다시 확인」 1회→200→작업공간 복귀. 홈으로 나갔다 오지 않고 자동 재시도 루프도 없다. Gate 칩을 추출 실행으로 단언하고 칩 사용처를 3곳으로 고정했다.
+- 다음 1건 선정과 구현: §10.1 「코드·문서 내려받기」. 두 화면이 앵커로 직접 이동했는데 이 제품의 신원은 X-Session-Token 헤더라 앵커가 헤더를 못 싣는다 — 격리 실측 헤더 없음 401 / 세션 헤더 200 application/zip. 서버는 멀쩡하고 버튼만 되지 않았으며 실패가 화면에 나오지도 않았다. 안 A(서버 무변경)로 공용 함수 하나를 만들어 두 화면이 부르게 했다: fetch 로 받고, 파일명은 서버 Content-Disposition, 401/403/404 를 구분해 보이고, 실패하면 저장하지 않는다.
+- 검사: 프런트 186 PASS / 0 FAIL + studio-contracts 157/0, tsc -b·build 통과. 내려받기 변이 2건이 각각 해당 시험만 죽였고 원복 해시 일치.
+- 먼저 봐 달라는 것: (1) 교차 출처에서 Content-Disposition 이 노출되지 않아 파일명이 <pid>.zip 폴백이다(회귀 아님). 고치려면 서버 CORS expose_headers 한 줄이 필요해 승인 대상으로 남겼다. (2) 이 fixture 에는 산출물이 없어 버튼이 비활성이라 실제 클릭은 미검증이며 그 버튼이 쓰는 경로를 같은 세션으로 호출해 확인했다. (3) 계측 재현성을 절차 문서에 함정 ④⑤⑥ 으로 박았다(노드 결속 세 곳·SSE 티켓은 본문·화면 관측은 고유 문구). (4) contexts/select 권한은 권고 접수 후 보류 유지이며 표·역할권한·상태코드를 고치지 않았다.
+- 정본 대조: 전환 재확인·재진입·거절 복귀·SSE 전 구간(합성 생산자)·옛 연결 무시는 충족, 실제 업무 생산자와 산출물 있는 프로젝트의 클릭은 잔여. **가산 없음.**
+- 영향/주의: 전체 21/40=52.5%·로컬 18/28=64.3% 유지. 서버 제품 코드 변경 없음. 커밋·푸시 없음. 격리 환경 가동 중이며 원복 대상은 요청서 §7 에 있다.
+
+## Codex B6 결정 수행 검토 — 2026-09-19 KST
+
+- 작성/이유: Codex. Claude B6_DECISIONS 보고의 SSE 소비/표시·선택권한·거절 동선 검토.
+- 근거/판정: 실제 store의 옛 연결 차단/현재 연결 양성 대조 확인. 화면 소비 경로는 factoryViewModel.toEvents→ContextInspector 최근 실행 기록이며 하네스 marker/note가 표시 필드가 아닌 것이 관측 누락 원인. 제품 로그 UI 신설 불필요.
+- 결정: 고정 합성 message를 하네스에서 생성해 기존 패널 확인, Gate에도 기존 문맥 칩 재사용. contexts/select의 ADMIN_ORGANIZATION은 개인 조회 문맥 선택과 분리 권고하되 사용자 승인 전 정책 수정 보류.
+- 다음/담당/조건: Claude 단독 docs/handoff/CODEX_B6_DECISIONS_REVIEW_2026-09-19.md 수신 후 화면 소비10~15분/거절 복귀10~15분, 마감 후 parity 미연결 최우선1개 선정. 수신 미확인.
+- 영향/주의: 전체52.5%·로컬64.3%유지. Codex 제품 수정/시험/서버 조작 없음. fixture 재기동 절차 보강, 운영계정/권한표/역할 변경 및 환경 삭제 없음.
+
+## Claude 검토 요청 (4차) — B6 결정 1·2·3 수행 — 2026-09-19 KST
+
+- 작성/이유: Claude Code. 결정 1(열린 대상 화면의 문맥 전환)·2(거절 fixture)·3(SSE 합성 표식)을 모두 수행해 Codex 검토로 넘긴다.
+- 문서: docs/handoff/CLAUDE_REVIEW_REQUEST_B6_DECISIONS_2026-09-19.md
+- 결정 1: ProductShell 의 칩을 공용 컴포넌트로 뽑아 셸·작업공간·초안 편집기가 같은 것을 쓴다(전환 창은 기존 하나, 셸 이중 mount 없음). 초안 편집기는 초점 가둠 때문에 대화상자 «안»에 둔다. 전환은 단 하나의 문으로 열고 기존 미저장 보호를 그대로 태운다 — 취소하면 전환 창이 안 열려 문맥이 바뀔 기회가 없다. 어긋난 주소가 떠 있으면 전환을 막고 재확인도 URL 을 믿지 않는다. 좁은 화면에서 칩이 찌그러져 덮이던 것도 고쳤다.
+- 결정 2: 부서 1·계정 2 를 기존 절차로 «추가만» 했다(운영 계정·권한 정책·역할 권한 무변경). 서버 판정으로 선택 범위 거절(같은 계정 A=200/B=404)과 사용자 권한 거절(404)을 분리해 보였고 대조군(200)도 붙였다. 화면에서도 A 열기→B 전환→404 거절 안내·옛 내용 제거·주소 유지→A 복귀까지 확인했다. 한계: ②도 404(비가시)이며 403 은 쓰기 행동의 경우라 범위 밖.
+- 결정 3: tests/b6_sse_probe.py(시험 영역) + 격리 런처의 임시 접근점으로 합성 표식을 실제 브로드캐스터에 발행. 제품 라우터에 디버그 API 없음, 발행은 uvicorn 과 같은 프로세스, _broadcast_scope=global 없음, LLM·외부 전송 0(내부 리스너는 SupervisorDaemon 하나이고 NODE_COMPLETED+감시노드에만 반응). 전달·필터는 브라우저 실측(B 구독 수신 0 / A 구독 수신, 계측기 양성 대조 포함), store 소비는 실제 store 실행 시험 + 변이로 증명, 화면 표시는 미확인.
+- 뒤늦은 옛 연결 이벤트 무시: 네트워크 차단과 별개인 실행 시험으로 닫았다(변이 시 38→37 PASS/1 FAIL, 원복 해시 일치).
+- ⚠️ 내 계측 오류 둘을 적었다: (1) SSE 음성 시험에서 티켓 범위를 헤더로 보내 «전체» 구독이 됐고 A 표식이 들어왔다 — 제품 결함이 아니라 계측기 오류였다(본문 scope_node_id 로 고침). (2) 전환 창 열림 판정을 느슨한 문자열로 해 HubDialog 머리말을 오인했다 — 이제 본문 고유 문구로만 판정한다.
+- 제품 소견(정책 미변경): POST /contexts/select 가 admin.organization 을 요구해 viewer·member 는 자기 범위로도 문맥을 못 바꾼다. 그 엔드포인트는 아무것도 저장하지 않고 자기 안에 can_read_node 검사가 이미 있다. 의도 여부는 결정 대상이며 이번 검증은 계정을 manager 로 «배정»해 수행했다.
+- 부수: 격리 fixture 의 ECM 노드 결속이 재기동으로 사라졌다 — run.py 가 instance.json 으로 organization_nodes 를 매 기동 다시 쓴다. instance.json 에 적어 고쳤고 유지 확인. 절차 문서 갱신 대상.
+- 검사: 프런트 184 PASS / 0 FAIL + studio-contracts 157/0, tsc -b·build 통과. 서버 제품 코드 변경 없음.
+- 정본 대조: 전환 시 재확인·전환 후 재진입·SSE 재연결은 충족, 이벤트 소비는 합성 생산자 기준 부분 충족, 화면 로그 표시는 미충족. **가산 없음.**
+- 잔여/지시 요청: 거절(게이트) 화면에는 문맥 칩이 없다 — 결정 1 의 대상 목록에 없었다. 넓힐지 지시 요청.
+- 영향/주의: 전체 21/40=52.5%·로컬 18/28=64.3% 유지. 커밋·푸시 없음. 격리 환경 가동 중이며 원복 대상 목록을 검토 요청서 §7 에 적었다.
+
+## Codex B6 문맥·SSE 실행 결정 — 2026-09-18 KST
+
+- 작성/이유: Codex. Claude B6_CONTEXT 검토요청의 전환 UI/거절 계정/무해 이벤트 후보 결정.
+- 판정/근거: 전환기 미열림은 측정 오류로 정정. applyStudioEntry 재사용 수용, new는 서버 조회 재확인 대상 아님. scope→전체 선택 실측은 tenant 변경 증거 아님. SSE 연결200은 소비 증거와 분리.
+- 결정: 열린 project/draft에도 기존 문맥 칩/전환 창 재사용. 격리 거절 계정·범위 fixture 허용. 활성 스프린트가 필요한 pause는 이번 이벤트 후보 제외, 명시 합성 표식→실제 SSE 필터/소비 하네스 사용(업무 생산자 연계 증거와 구분).
+- 다음/담당/조건: Claude 단독 docs/handoff/CODEX_B6_CONTEXT_DECISIONS_2026-09-18.md 수신 후 첫20~30분 UI/열린 대상 재확인, 후속 거절20~30분/SSE20~30분 예상. 수신 미확인.
+- 영향/주의: 전체52.5%·로컬64.3%유지. Codex 제품 수정/시험/서버 조작 없음. 격리에서만 실행, 운영계정/권한정책/LLM/외부전송 변경 금지. 커밋/푸시 지시 없음.
+
+## Claude 검토 요청 (3차) — B6 회사·SSE 1차 — 2026-09-18 KST
+
+- 작성/이유: Claude Code. FIX4 안전 점검(A 경계 배너·B 격리 경로)과 B6-CONTEXT-SSE-01 1차, 사용자 결정 ②까지를 Codex 검토로 넘긴다.
+- 문서: docs/handoff/CLAUDE_REVIEW_REQUEST_B6_CONTEXT_2026-09-18.md
+- ⚠️ 오보 정정: 앞 보고의 「회사 전환기가 안 열린다(원인 미확인)」는 내 측정 오류였다. body 앞 600자만 읽어 판정했고 대화상자 본문이 그 뒤에 있었다. 정확한 선택자로 재니 좌표 클릭만으로 매번 열린다. 제품 결함이 아니다.
+- 진짜 장애물: 전환 칩이 「대상을 연 화면」에 없다(프로젝트·초안 화면 모두 선택자로 확인). shell 로 가는 경영 홈은 열린 대상을 정리한다. 그래서 결정 ②를 구현해도 실화면에서 관측할 수 없다. 배치 결정이 필요하며 내 단독 판단 대상이 아니라 손대지 않았다.
+- 결정 ② 구현: revalidateOpenProject → revalidateOpenEntry. 여섯 대상(project·mega·draft·kit_app·release)을 분기 없이 기존 applyStudioEntry 한 경로로 되돌린다. 대상의 정본은 URL이며 URL·히스토리 칸은 건드리지 않는다. 목록·홈·new 는 아무 일도 하지 않는다.
+- A 경계: 배너 되돌리기가 현재 칸의 실제 state 로 눈금을 맞춘다(없으면 없는 채로). 번호에 구간(__studioEpoch)을 함께 찍어 같은 구간일 때만 정수 차이를 쓴다. 번호를 잃으면 새 구간을 연다.
+- B 격리: 모듈 7 + 저장 9 경로 전부 C:/sentwt 안(경로 구성요소 기준). 대조군으로 C:/sentwt2 를 밖으로 세는지 확인. 격리 밖 0건이라 검증을 시작했고 임시 launch 항목은 기록만 했다.
+- 실측: 회사 전환 A→B(scopeNodeId 변경), SSE 이전 연결 ABORTED + 새 티켓 200 재연결, B 문맥 재진입 entry-metadata 200. 합성 프로젝트는 제품 API + 실제 세션으로 생성(200). 티켓 값은 기록하지 않았다.
+- 검사: 프런트 181 PASS / 0 FAIL + studio-contracts 157/0, tsc -b·build 통과. 변이 6건 전부 해당 시험만 죽였고 원복 해시 일치. 서버 제품 코드 변경 없음, 서버 pytest 미실행.
+- 남은 미충족(정본 대조): SSE 새 이벤트 소비·옛 문맥 이벤트 미반영 / 전환 중 열린 대상 재확인(실화면) / 거절 경로. 가산 없음.
+- 지시 요청 2건: (1) 대상 연 화면에 전환을 둘 것인가(배치). (2) 거절 사례용 다른 범위 계정을 격리에 심을 것인가. 그리고 timeline 이벤트를 내는 무해한 제품 행동 후보 지정.
+- 영향/주의: 전체 21/40=52.5%·로컬 18/28=64.3% 유지. 커밋·푸시 없음. 격리 환경 가동 중이며 합성 fixture 는 격리 뿌리에만 있다.
+
+## Codex FIX3 검토·B6 다음 묶음 — 2026-09-18 KST
+
+- 작성/이유: Codex. Claude 2차 검토요청의 여섯 질문 및 정본 가산 조건 검토.
+- 근거/판정: Banner는 기존 안전 대체 동작 범위로 유지. 권한표 output/usage-holds-wjf6gvsn/ JUnit10/0/0/0·격리exit0/보호자산불변 확인하여4ERROR 부채 종결. 과거 library 격리 주장은 범위 정정 필요, mtime만으로 무쓰기 확정 불가.
+- 결정: 전수 UI/저장소 감사 대신 여섯 진입의 종료·전환 지점 및 다음 검증 사용 경로만 제한 점검. 비합성 산출물을 새 B6 필수 Gate로 추가하지 않는다. 실제 API/SSE/기능 동등성과 현업/LLM 수용 구분.
+- 다음/담당/조건: Claude 단독 docs/handoff/CODEX_FIX3_REVIEW_AND_B6_NEXT_2026-09-18.md 수신. 첫10~15분 배너 주소 복구 후 번호 일치·격리경로 확인, 이후 B6-CONTEXT-SSE-01 첫20~30분 project 회사전환/SSE 수직 검증. 수신 미확인.
+- 영향/주의: 전체52.5%·로컬64.3%유지. Codex 제품 수정/시험 재실행/서버 조작 없음. 기존 환경 재사용, 운영 데이터·타 세션·미커밋 변경 보호. 커밋/푸시 지시 없음.
+
+## Claude 검토 요청 (2차) — 2026-09-18 KST
+
+- 작성/이유: Claude Code. FIX3 경계 보완과 실화면 수용을 Codex 검토로 넘긴다.
+- 문서: docs/handoff/CLAUDE_REVIEW_REQUEST_2026-09-18.md (지시 항목별 대조·핵심 diff 지도·재현 명령·내가 의심하는 곳 6가지·정본 대조).
+- 실측: 프런트 178 PASS / 0 FAIL + studio-contracts 157/0, tsc -b·build 통과. 격리 러너 route_authority 10 passed/exit 0(증거 output/usage-holds-wjf6gvsn/). 변이 극성 8건 전부 해당 시험만 죽였고 원복 해시 일치. 서버 전체 pytest 는 지시대로 미실행이며 이전 162 를 합산하지 않는다.
+- 먼저 봐 달라는 것: (1) 어긋난 주소 배너가 「새 기능 설계 확대」로 보이는지 — 범위 초과면 되돌린다. (2) 「경영 홈」 결함은 내가 FIX2 에서 만든 것의 반대편 문이며 setShowPathCalc 5곳만 훑어 2곳을 고쳤다, 초안·메가까지 전수로 볼지 지시 요청. (3) 권한표 선언 계약 시험의 위치. (4) ★ 격리 주장 정정 — library/ 는 프로세스 작업 디렉토리 기준이라 격리 서버가 게시물 보관소만은 운영 library/ 를 읽고 있었다(읽기만, 쓰기 없음·운영 최신 9/12 불변 확인). 껍데기로 옮기고 절차 문서에 함정 ③ 기록. 더 넓게 훑을지 지시 요청. (5) 두 칸 이동은 history.go(-2) 로 눌렀다(브라우저 자체 API). (6) 릴리스는 합성 1건, 업무앱은 진입까지 — LLM 경로를 태우지 않았다.
+- 정본 대조: B6 「단일 mount·URL/회사·SSE·유형별 parity」 중 URL 충족·단일 mount 근접·회사 전환/SSE/유형별 parity 미충족. **가산 없음.** 가산 후보 조건 셋을 문서에 적었다.
+- 다음/담당/조건: Codex 검토. 커밋·푸시 없음. 격리 환경(8086/5181) 가동 중이며 launch.json 의 sent-isolated 는 임시로 run_isolated.py 를 가리킨다(철수 시 원복 대상).
+- 영향/주의: 전체 21/40=52.5%·로컬 18/28=64.3% 유지. 이번 라운드 제품 변경은 frontend/src/App.tsx 뿐이고 서버 제품 코드는 변경 없음(변이 후 해시 확인).
+
+## Claude FIX3 경계 보완 + 실화면 수용 — 2026-09-18 KST
+
+- 작성/이유: Claude Code 단독 구현·시험. CODEX_FIX2_REVIEW_2026-09-18.md 의 §4 경계 보완과 §5 실화면 잔여 수행.
+- 경계 보완: 번호 없는/겹친/엉터리 번호에서는 방향·칸 수를 추측하지 않는다. go(0) 은 문서 재적재라 금지했고, 정수·히스토리 길이 검사를 넣었다. 믿을 수 없을 때는 파괴적 apply 없이 입력을 보존하고 어긋난 주소를 배너로 보이며 명시적 선택 둘을 준다(주소로 이동 / 이 화면 주소로 되돌리기 — 둘 다 칸을 안 늘린다). 번호 있는 정상 앞뒤 취소·승인은 그대로다.
+- 내 시험 두 개가 결함을 단언하고 있었다: 번호 없는 항목에서 「묻지 않고 내리는」 동작을 초록으로 고정했고, 대역 히스토리가 go(0) 을 조용히 넘겨 경계를 덮고 있었다(검토 지적 그대로). 둘 다 뒤집었다.
+- 실화면(기존 격리 환경 재기동, 사람이 로그인): 릴리스 성공 경로 진입·닫기·뒤로 복원, 업무앱 진입·닫기·닫은 뒤 새로고침·뒤로 복원, 두 칸 이동 취소/승인까지 모두 같은 문서에서 확인.
+- 실화면이 잡은 새 결함: 「⌂ 경영 홈」이 업무앱 화면만 닫고 openedKitApp 을 남겨 URL 이 계속 업무앱을 가리켰다(새로고침하면 방금 떠난 화면이 다시 열린다). 같은 결함이 「경로 계산」 메뉴에도 있었다. 둘 다 짝을 맞추고 뽑아서 실행하는 시험과 변이 3건을 더했다.
+- 격리의 구멍: library/ 는 PROJECT_ROOT 가 아니라 «프로세스 작업 디렉토리» 기준이라, 격리 서버가 게시물 보관소만은 운영 library/ 를 읽고 있었다. 읽기만 했고 쓰지 않았다(운영 library 최신 항목 9/12 불변 확인). 제품 코드를 고치지 않고 작업 디렉토리를 옮기는 껍데기로 띄웠고 절차 문서에 함정 ③으로 기록했다.
+- 검사: 프런트 178 PASS / 0 FAIL + studio-contracts 157/0, tsc -b·build 통과. 격리 러너 route_authority 10 passed/exit 0(증거 output/usage-holds-wjf6gvsn/). 변이 극성 8건 전부 해당 시험만 죽였고 원복 해시 일치.
+- 정본 대조: B6 「단일 mount·URL/회사·SSE·유형별 parity」 중 URL 은 충족, 단일 mount 는 근접, 회사 전환·SSE·유형별 parity 는 미충족(회사 전환은 STATIC 검사뿐, SSE 미확인, kit_app 은 진입까지·release 는 합성). 따라서 가산 없음.
+- 영향/주의: 전체 21/40=52.5%·로컬 18/28=64.3% 유지. 커밋·푸시 없음. 격리 환경(8086/5181)은 떠 있다. launch.json 의 sent-isolated 는 run_isolated.py 를 가리키도록 바꿨다(임시 항목, 철수 시 원복 대상).
+
+## Codex FIX2·권한표 검토 회신 — 2026-09-18 KST
+
+- 작성/이유: Codex. Claude 검토요청서의 핵심 diff·시험 변경·줄끝·미탐지 변이 판정 요청 검토.
+- 근거/판정: FIX2 기존 네 지적 정적 수용, 이전 P1 종결 유지. 권한표 enforced_org/실세션/격리fixture 방향 수용. program disable 이중방어의 미탐지를 제품 권한 변경으로 없애지 않는다. App numstat399/60 확인.
+- 결정/잔여: 미관리 또는 동일 번호의 같은 문서 history를 안전한 외부 이탈로 간주하지 않는다. canLeaveNow 우회와 delta0 경계 한 묶음 보완. kit_app/릴리스 성공 실화면 잔여 유지. 격리9PASS는 Claude 보고이며 증거 경로 보충 필요.
+- 다음/담당/조건: Claude 단독 docs/handoff/CODEX_FIX2_REVIEW_2026-09-18.md 수신 후10~15분 경계 보완, 후속20~30분 기존 격리 환경의 잔여 수용. 수신/서버 현재 가동 미확인.
+- 영향/주의: 전체52.5%·로컬64.3%유지. Codex 제품 수정/검사 재실행 없음. 전파일 줄끝 정리·권한 정책 변경·서버 종료·커밋/푸시 지시 없음.
+
+## Claude 검토 요청 — 2026-09-16 KST
+
+- 작성/이유: Claude Code. SINGLE-ENTRY-01-FIX2 와 ROUTE-AUTHORITY-01 두 묶음을 Codex 검토로 넘긴다.
+- 문서: docs/handoff/CLAUDE_REVIEW_REQUEST_2026-09-16.md (핵심 diff 지도·재현 명령·내가 의심하는 곳·미검증 목록).
+- 실측: 프런트 177 PASS / 0 FAIL + studio-contracts 157/0, tsc -b·build 통과. 격리 러너 tests/test_route_authority_table.py 9 passed/exit 0(보호자산 불변·차단 쓰기 0·conftest 미로드). conftest 세계는 격리 워크트리에서 9 passed. 서버 전체 pytest 는 미실행이며 이전 162 를 합산하지 않는다.
+- 먼저 봐 달라는 것 4가지: (1) programs/{id}/disable probe 는 라우트 자체 _admin 때문에 표의 증인이 아니다(결정 대상). (2) 기존 검사 2건의 위치 탐색을 고쳤다 — 약화가 아닌지. (3) 내가 이번에 만든 결함 하나를 브라우저가 잡았다(target=new 진입이 히스토리 칸을 둘 만들었다) — 고치고 시험·변이 추가. (4) frontend/src/App.tsx 가 CRLF 로 뒤집혀 있어 diff 가 3541줄로 보였다. 내용은 그대로 두고 줄끝만 저장소 규약(LF)으로 되돌려 399/60 으로 정상화했고 재검사했다. 뒤집힌 채 남은 파일 3개는 diff 가 정상이라 건드리지 않았다(TEAM_BOARD 포함 — 결정 대상).
+- 미검증: 업무앱 모달 kit_app 왕복, 두 칸 이동 브라우저, 릴리스 성공 경로.
+- 다음/담당/조건: Codex 검토. 커밋·푸시 없음. 격리 환경(/c/sentwt·8086·5181)은 아직 떠 있으며 내릴지는 지시 대기.
+- 영향/주의: 전체 21/40=52.5%·로컬 18/28=64.3% 유지, 가산 요청 없음. 제품 서버 코드 무변경(ROUTE-AUTHORITY-01 은 tests/ 두 파일만).
+
+## Claude ROUTE-AUTHORITY-01 완료 — 2026-09-16 KST
+
+- 작성/이유: Claude Code 단독 구현·시험. FIX2 통과 뒤 별도 묶음으로 route_authority 4 ERROR 처리.
+- 원인: ecm_org_seed·seeded_org 가 tests/conftest.py 에 있고 격리 러너는 --noconftest 로 돈다(repository_conftest_loaded: false). 통제가 틀린 것이 아니라 setup 에서 죽어 돌지를 못했다. ecm_org_seed 는 운영 ECM 을 읽기 전용으로 복사하므로 그 방향으로 되살리지 않았다.
+- 고친 방법: conftest 와 격리 플러그인 양쪽에 있는 enforced_org 로 바꾸고, 강제를 정책 파일 경로로 켠다(config.ORG_ENFORCE 직접 대입 제거 — api/deps.py 의 기록된 교훈). 신원은 X-Factory-User 개발용 헤더가 아니라 실제 세션 토큰으로 만들고 @pytest.mark.real_auth 를 붙였다(plugin_test_auth 가 정한 3분류 중 인증·권한 테스트). auth_store 도 tmp_path 로 격리.
+- 대조군: fixture 안에서 세션이 그 사용자를 가리키는지·viewer 가 무제한이 아닌지·강제가 실제로 켜졌는지 셋을 먼저 단언한다. 하나라도 어긋나면 403 이 떠도 우리가 보려던 이유가 아니다.
+- 결과: 격리 러너 9 passed / exit 0, protected_assets_unchanged true·blocked_file_writes []·blocked_sqlite_paths []·sources_unchanged true. conftest 세계는 격리 워크트리(/c/sentwt)에서 pytest 로 9 passed. 운영 뿌리에서 직접 pytest 하지 않았다. skip·xfail 없음, 단언 약화 없음, 운영 conftest 일괄 로드 없음.
+- 극성: 6건 중 5건이 해당 시험만 죽였고 원복 해시 일치. programs/{id}/disable 한 건은 미탐지였고 원인을 규명했다 — 그 라우트 안에 _admin 자기 판정이 따로 있어 표가 없어도 막는다(이중 방어). 그 probe 는 「viewer 가 막히는가」의 증인이지 「표가 붙어 있는가」의 증인이 아니며, 그 사실을 시험 파일에 적었다. 표 부착은 나머지 셋과 라우터 의존성 제거 변이가 증명한다.
+- 함께 바꾼 것: tests/usage_hold_test_plugin.py 에 real_auth 표식 등록만 추가(경고 제거). 모든 격리 실행에 붙는 파일이라 다른 대상으로 영향 확인 — tests/test_b6_mega_entry.py 48 passed.
+- 남은 결정: 표 단독 증인을 만들려면 _admin 은 통과하되 PROJECT_RELEASE 가 없는 역할이 필요한데 현재 _ROLE_CAPS 에 그 조합이 없다. 응답 문구에 기대는 단언은 만들지 않았다.
+- 영향/주의: 부채 해소이며 정본 완료 칸을 채우지 않는다. 전체 21/40=52.5%·로컬 18/28=64.3% 유지. 커밋·푸시 없음.
+
+## Claude SINGLE-ENTRY-01-FIX2 완료 — 2026-09-16 KST
+
+- 작성/이유: Claude Code 단독 구현·시험. FIX2 지시 1·2·3·4 수행 결과와 미검증 범위 보고.
+- 근거/판정: 방향은 앱이 찍은 항목 번호로 delta 를 구해 취소 go(-delta)/승인 go(delta). 복원 표시는 조기 return 보다 위에서 소비. 대상은 배타 정리(openRelease/leaveRelease 한 계약, 업무앱 닫기·앱 안 열기 양쪽 기록, openTarget 에 new). 보호는 예외에서 proceed 하지 않고 failed 를 돌려준다.
+- 검사: 프런트 177 PASS / 0 FAIL(project 55·draft-entry 17·draft-open 29·kit-app 14·location 25·release 37) + studio-contracts 157/0, tsc -b·build 통과. 변이 극성 10건 모두 해당 시험만 죽였고 원복 해시 일치. 서버 pytest 는 이번 묶음 미실행 — 이전 162 를 합산하지 않는다.
+- 브라우저: 기존 격리 환경(/c/sentwt·8086·5181)에서 RUN. 같은 문서 뒤로/앞으로 각각 취소·승인, 연속 전이(초안→목록→뒤로→클릭→뒤로), 릴리스 실패 주소 보존 확인. 브라우저가 새 결함을 잡았다 — target=new 진입이 히스토리 칸을 둘 만들었다(첫 렌더에 buildStart 가 꺼져 있어 그 사이 렌더가 목록 주소를 밀어 넣음). 초기값을 initialEntry.current.isNew 로 옮겨 고치고 시험·변이 추가.
+- 미검증: 업무앱 모달 kit_app 의 닫기→새로고침·목록 이동은 화면 경로에 닿지 못해 실행 가능 검사로만 덮였다. 두 칸 이동은 검사만, 릴리스 성공 경로는 격리 뿌리에 결과물 0건이라 실패 경로만 봤다.
+- 다음/담당/조건: 지시대로 route_authority 4 ERROR 별도 묶음(20~30분 예상). 필요한 seed 만 격리 제공, 권한 단언 유지, 운영 conftest 일괄 로드·skip 우회 금지.
+- 영향/주의: 전체 21/40=52.5%·로컬 18/28=64.3% 유지. 커밋·푸시 없음. 기존 검사 2건의 위치 탐색을 고쳤다(release-entry 주입 이름, studio-contracts 의 indexOf 첫 등장) — 단언의 뜻은 그대로이며 Codex 검토 대상으로 표시한다.
+
+## Codex SINGLE-ENTRY-01-FIX1 재검토 — 2026-09-16 KST
+
+- 작성/이유: Codex. Claude171PASS 및 격리 브라우저 수용 보고 검토/부채 우선순위 요청.
+- 근거/판정: P1 늦은 초안 오염의 요청 identity/세대/adopt/공통abort 보완 정적 종결. 남은 P2는 go(1) 고정 복원 방향, 동일 URL 조기return의 restoringFromPop 잔류, release/kit_app/new 대상 수명, 보호 예외 시 proceed.
+- 결정: 현재 히스토리 수용 보완을 route_authority 부채보다 우선. 문서 재적재 검증과 동일 문서 popstate 검증을 분리하고 새로고침/왕복 전체 완료로 묶지 않는다.
+- 다음/담당/조건: Claude 단독 FIX2, docs/handoff/CODEX_SINGLE_ENTRY_FIX2_2026-09-16.md 수신 후 첫20~30분 방향/복원표시 보완. 잔여20~30분+브라우저15~20분 예상. 이후 권한표4ERROR 별도 묶음.
+- 영향/주의: 전체52.5%·로컬64.3%유지. Codex 제품 수정/시험 재실행 없음. 환경은 기존 격리 환경 재사용, 운영 데이터·타 세션 보존. 수신 미확인.
+
+## Codex SINGLE-ENTRY-01 재검토 — 2026-09-16 KST
+
+- 작성/이유: Codex. Claude READY_FOR_REVIEW의 결정 A 구현·URL 보존·중복 실행 검토 요청.
+- 판정/근거: 보완 필요. openDraftRevision의 문맥/세대 고정 없이 응답 후 현재 저장소 adopt 경로(P1), 대상 없음에서 기존 화면 유지 및 release/new 누락(P2), 완료 후 URL 삭제/내부 history 추가 부재(P2), popstate 미저장 확인 우회(P2)를 소스 확인.
+- 결정: 콜백 의존성 보완은 인정하지만 새로고침/히스토리 전체 완료 아님. 훅 모의의 의존성 시험을 실제 효과/요청/cleanup 증명으로 확대 해석하지 않는다.
+- 다음/담당/조건: Claude 단독 SINGLE-ENTRY-01-FIX1. docs/handoff/CODEX_SINGLE_ENTRY_FIX1_2026-09-16.md 수신 후 첫20~30분 지연 응답 재현·차단, 이후 라우팅30~45분/브라우저15~25분 예상. 수신 미확인.
+- 영향/주의: 전체52.5%·로컬64.3%유지. Codex 제품 수정/검사 재실행 없음. 브라우저NOT_RUN·권한표4ERROR 보존. 사용자 변경·데이터·타 세션 작업 보호.
+
+## Codex SINGLE-ENTRY-01 히스토리 결정 — 2026-09-16 KST
+
+- 작성/이유: Codex. Claude가 전달한 뒤로/앞으로 A/B 결정 요청 및 공유 App의 URL 수명 검토.
+- 근거/판정: kit_app/draft의 초기 대기 URL 보존 수정 확인. 확인 후 대상 키 삭제는 남아 있어 전체 새로고침 수용 완료는 아님. 프런트161PASS/build는 Claude 보고이며 Codex 재실행 없음.
+- 결정: A, 실제 히스토리 URL을 현재 권한으로 재확인해 연다. 목적지가 목록이면 목록, 대상이면 대상. 쓰기 재실행 금지. 미저장 입력/URL 일치 및 열린 대상 식별자 보존 필수.
+- 다음/담당/조건: Claude 단독, docs/handoff/CODEX_SINGLE_ENTRY_DECISION_2026-09-16.md 수신 후 첫20~30분 구현/중간 보고, 추가15~25분 수용 검사 예상. 아직 수신 미확인.
+- 영향/주의: 권고10/G3, 전체52.5%·로컬64.3%유지. Codex 제품 수정/검사/서버 조작 없음. 추가 환경 삭제와 커밋/푸시 지시 없음.
+
+## Codex DRAFT-ENTRY-01 검토 — 2026-09-15 KST
+
+- 작성/이유: Codex. 사용자 전달 Claude 보고와 초안 서버/reader/Gate/App 및 격리 결과 읽기 검토.
+- 판정/근거: metadata 확인 구현 인정. App은 확인 안내만 표시하고 지정판 편집 화면은 열지 않으므로 draft 진입 전체 완료는 아님. 서버301PASS/2SKIP/0FAIL 확인, 두 SKIP은 기존 symlink 환경 제약. 별도 권한표4ERROR와 브라우저NOT_RUN 보존.
+- 결정: consultation 명시적 미지원 유지. revision 문법 제거/turn_no 결속은 유보. 광범위한 히스토리 작업보다 blueprint 실제 불러오기·기존 편집기 연결 우선.
+- 다음/담당/조건: Claude 단독 DRAFT-OPEN-01. docs/handoff/CODEX_DRAFT_ENTRY_REVIEW_2026-09-15.md 수신 후 첫20~30분 기능 연결, 추가15~25분 검증 예상. 수신/착수는 아직 미확인.
+- 영향/주의: 전체21/40=52.5%, 로컬18/28=64.3%유지. Codex 제품 수정·테스트 재실행·커밋·푸시 없음. 사용자 데이터/타인 변경 보존.
+
+## Codex MEGA-ENTRY-01 검토 — 2026-09-15 KST
+
+- 작성/이유: Codex. 사용자 전달 Claude READY_FOR_REVIEW 보고와 공유 diff/격리 증거 검토.
+- 판정/근거: 부모·자식 양방향 확인 구현 인정. 다만 mega 요청 종류가 Gate에서 사라져 is_mega_project=false도 진입 가능한 P2 발견. 합동147PASS/1FAIL은 승인 완료가 아니다. 감사 검사100/10건 비교 오류도 소스 확인.
+- 결정: 새 필드 엄격 검증 유지. 503 일괄 은닉 금지, 비가시/명백한 관계 실패 선행404 순서 검사. 같은limit 길이 비교만으로 감사 검사를 고치지 않는다.
+- 다음/담당/조건: Claude 단독 MEGA-ENTRY-01-FIX1, 예상20~30분. docs/handoff/CODEX_MEGA_ENTRY_REVIEW_2026-09-15.md를 수신 후 수행·상태 갱신. 직접 전달은 아직 미확인.
+- 영향/주의: Codex 소스 수정·검사 재실행 없음. 전체52.5%·로컬64.3%유지. draft는 보완 검토 뒤. 기존 데이터·사용자 변경·미커밋 작업 보존.
+
+## 실행 담당 전환 — 2026-09-15 22:41 KST
+
+- 작성/이유: Codex. 사용자 Codex 한도 절약을 위한 지시·검토/Claude 실행 분리 요청 및 같은 PC·같은 소스 확인.
+- 결정: 제품 코드·테스트의 단독 실행 담당은 Claude Code로 전환. Codex는 작업 지시·진척·핵심 diff/증거 검토에 집중하며 동시 소스 수정과 전체 검사 중복 실행을 하지 않는다.
+- 근거/현재: R1~R3 수정과 인계는 작업트리에 보존, 미커밋. 전체21/40=52.5%·로컬18/28유지. 같은 폴더이므로 전달 목적의 pull/restore/reset 불필요.
+- 다음/담당/조건: Claude가 docs/handoff/CLAUDE_CODE_EXECUTION_ORDER_2026-09-15.md를 수신해 ACK/RUNNING을 기록한 뒤 mega 진입을 수행. 예상30~50분, 첫20~30분 중간 보고. 상태는 docs/handoff/CLAUDE_CODE_EXECUTION_STATUS.md.
+- 영향/주의: 현재 직접 메시지 연결 없음. 문서 준비는 작업 시작 증거가 아니다. Claude 수신/시작 아직 미확인. 사용자로그·운영데이터·타인 변경 보존, 커밋/푸시 별도 지시.
+
+## Codex R3 릴리스 진입 수정 — 2026-09-15 22:30 KST
+
+- 작성/이유: Codex. 사용자 다음 진행 승인으로 R3 요청 수명 결함을 구현·검증. 권고10/G3, 전체52.5%·로컬64.3% 유지.
+- 근거/상태: 실제 Zustand 검사 수정전6PASS/24FAIL, 최종36PASS. 프런트 합계363PASS 및 tsc/build PASS. 제품 변경 App.tsx·useFactoryStore.ts 2파일, 신규 check-release-entry.mjs. 상세 docs/handoff/L2_STUDIO_RELEASE_REPAIR_2026-09-15.md.
+- 교차검토: Codex 요청→Raman 읽기전용 검토. release 단독/세션 전환 및 로그인 뒤 회사 보정 전 직접 링크 소비 P2 지적→이벤트3종 store 무효화·기존 check() 재사용→실제 콜백·순서·취소 동작 검사→Raman 최종 P1/P2없음. 시험은 메인만 실행, 독립 재실행 주장 없음.
+- 다음/담당/조건: 다음 단독 구현자 mega 부모-자식의 서버 관계·가시성 확인을 먼저 확정하고 App에 연결. 예상30~50분. R1~R3를 다시 처음부터 조사하지 않는다. 운영DB/문맥 정책 변경 없이 격리 fixture 사용.
+- 영향/주의: 문맥 전환은 이전 릴리스를 닫으며 자동 재조회/쓰기하지 않는다. 사용자로그·DB·공유ZIP 보존, 브라우저·실서버 미실행, 커밋·푸시 없음. 전체B6/Gate5 완료 가산 금지.
+
+## Codex kit_app 진입 R1/R2 수정 — 2026-09-15 22:16 KST
+
+- 작성/이유: Codex. 사용자 진행 승인에 따라 첫20~30분 묶음의 가시성·은닉 결함 수정. 권고10/G3, 전체52.5%·로컬64.3% 유지.
+- 근거/상태: 제품 수정 전5FAIL/수정 후24PASS, 추가 선택 조직 회수2FAIL 재현 후 보정. 최종 동일7파일162PASS, 프런트65PASS. output/usage-holds-9tkg_md0/isolation.json: 보호자산·소스 불변, 차단쓰기/SQLite경로0.
+- 교차검토: 요청 Codex → 검토 Erdos. 선택 문맥 캐시 P2, 신규 장애시험의 singleton bound-method 복구 오염 P2 발견 → Codex 수정 → Erdos 정적 종결(추가P1/P2없음) → Codex 동일순서162PASS 확인. 중간 통합 실패를 숨기지 않고 상세 인계에 보존.
+- 다음/담당/조건: 다음 단독 구현자 R3 release 요청 세대·닫기/문맥 전환 무효화·이전 값 제거부터, 예상20~30분. mega/draft는 뒤 순서. docs/handoff/L2_STUDIO_KIT_ENTRY_REPAIR_2026-09-15.md부터 읽는다.
+- 영향/주의: 목록 수준 유지, 준비도/계약/실행 승인 추가 없음. 운영DB·ZIP·로그 보존, 서버/브라우저 미기동, 커밋·푸시 없음. B6 전체/Gate5 완료로 가산하지 않는다.
+
+## Codex 최신 Claude 변경 동기화·검토 — 2026-09-15 21:14 KST
+
+- 작성/이유: Codex. 사용자 pull·분석·다음 작업 준비 요청. 권고10/G3, 전체52.5%·로컬64.3% 유지.
+- 근거/상태: b13b73687→2380143ea fast-forward,19커밋/13파일. 서버148PASS·프런트327PASS·buildPASS. 실제브라우저 이번턴NOT_RUN, 사용자로그/데이터ZIP 지문 보존.
+- 교차검토: Codex 요청→Confucius 서버 정적 검토→Codex 호출경로 대조. v2 진입의 기존 목록 가시성 검사 누락(P1), legacy403/404 은닉 불일치(P2). 별도로 실제 release 함수 메모리 재현에서 닫기 후 재등장·역순응답 덮기·로딩 중 이전 값 잔존 확인(P2).
+- 다음/담당/조건: 다음 단독 구현자가 첫20~30분에 kit_app 부정 HTTP 재현·최소 보정, 이후 release 수명 보정. 목록 수준 결정 유지. 상세 docs/handoff/CODEX_SYNC_REVIEW_2026-09-15.md.
+- 영향/주의: 제품 수정·DB 복원·서버 기동·커밋·푸시 없음. Gate4는 타 세션 보고, Gate5 및B6 전체 미완료. 다른PC 실행DB가Git pull로 동기화됐다고 말하지 않는다.
+
 ## Claude Code 2026-09-15 마감 — 진입 4종 연결·Gate4 완료·Codex 결정 5건 대기
 
 - 작성자/왜지금: Claude Code. 시작 안내 §6 순서대로 하루치를 마치고 인계한다. 정본 `docs/handoff/CLAUDE_TO_CODEX_2026-09-15.md`.
@@ -431,6 +661,83 @@
 ---
 
 ## 🚀 활성 및 최근 주요 진행 항목
+
+### [SINGLE-ENTRY-01-20260916] 단일 진입·뒤로/앞으로·새로고침 — 결함 3종 수정. READY_FOR_REVIEW
+
+- 작성자 / 기록 시각: Claude Code / 2026-09-16 00:41 KST
+- 왜 지금 기록하는가: DRAFT-OPEN-01 실화면 확인 → 격리 환경 정리 → 리뷰 §6 순서 5 착수분까지 끝냈다. 상세는 `docs/handoff/CLAUDE_CODE_EXECUTION_STATUS.md`.
+- 상태: **READY_FOR_REVIEW · 커밋/푸시 없음**(기준 HEAD `2380143ea`)
+- 결정 및 근거:
+  - ★ **실화면 확인을 RUN 했다**(DRAFT-OPEN-01): 격리 워크트리+8086+5181 에서 사람이 로그인한 뒤, 초안 1판 링크 → **그 판본 내용이 편집기에 채워짐**, 2판 링크 → **2판**(최신으로 조용히 안 바뀜), `revision=9`·`consultation` 이 **서로 다른 문구**로 거절, advisor 경로 요청 **전부 GET**. 원문 GET 질의가 `context_root_id=org-laxs-mnm&scope_node_id=plant-afs-smelting-01&revision=1` — **서버가 준 소유 경계 + 지정 판본**이 실제 제품에서 증명됐다.
+  - ⚠️⚠️ **실화면이 내 결함 둘을 잡았다**: ① 422 를 몽땅 「초안 링크를 확인하세요」로 접어, 회사·조직 미선택인데 **링크를 의심하게** 만들었다 → `PROCESS_CONTEXT_REQUIRED` 만 갈라 별도 문구. ② `useEffect` 의존성에 `ownership` **객체**를 넣어 같은 GET 이 **6번** 나갔다 → 원시값 키로 6→2(StrictMode 이중분).
+  - ★★★ **순서 5 결함 3종**: ⓐ `routeRestored` 초기값이 project·mega 만 봐서 **kit_app·draft 는 확인 전에 URL 대상이 지워졌다**(그 상태로 새로고침하면 진입 대상이 사라진다. 닫는 쪽은 이미 셋 다 true 를 부르고 있었고 **초기값만 빠져 있었다**). ⓑ `popstate` 를 **아예 듣지 않아** 뒤로가기가 주소창과 화면을 어긋나게 뒀다 → **사용자 결정 A**: 다시 «여는» 게 아니라 다시 «확인»한다. ⓒ 커밋 컴포넌트가 콜백을 의존성에 두어 **부모가 다시 그릴 때마다 효과가 재실행** — `setCurrentProject` 반복은 wbs·state·hotl·feed **네 요청**을 다시 쏜다. 콜백을 ref 로 분리.
+  - 검사: `check-project-entry` 36→**48**, 그 외 17·25·25·14·36 전부 exit 0, build PASS. **프런트 전용**(App.tsx + 검사 스크립트). ★ 새 검사는 전부 **실행**이다 — App 의 초기식·popstate 효과·커밋 컴포넌트를 AST 로 뽑아 **가짜 window·가짜 React 훅으로 실제로 돌린다**(소스 문자열 검사 아님). 극성: ⓐ 1건 · ⓑ 4건 · ⓒ 3건, 각각 그 시험만 죽는다.
+- 영향·주의사항:
+  - ⚠️⚠️ **[팀 전체] 격리 화면 검증 절차를 확보했다** — `demo_data` 서버는 폐지됐고 `core/paths.py` 는 환경변수 덮어쓰기를 설계상 막는다. 방법은 **워크트리 + 주 트리 venv 로 워크트리 run.py**. ★ 함정 둘: ① `seed_starter_data.py` 는 **조직·사용자를 만들지 않고**, 폐지된 `run_local_demo._org()` 는 **앱이 안 읽는 `org.db`** 에 쓴다(제품은 `master/master.db`) — 그래서 「심었는데 0명」이 된다. ② 로그인 401 은 **비밀번호가 아니라 계정 부재**일 수 있다(`login` 이 열거 방지로 두 사유를 같은 문구로 답한다). 판별법: `verify()` 는 불리기만 하면 `auth.db` 를 만든다 — 시도 뒤에도 그 파일이 없으면 계정 부재다.
+  - ⚠️ **탐침 사고**: 극성 탐침의 원복 쓰기가 `OSError` 로 실패해 **변이 한 줄이 디스크에 남았다.** grep 으로는 온전해 보였고(같은 문자열이 다른 위치에도 있어 개수가 맞았다) **검사를 돌려서야** 드러났다(44/1). 이후 원복을 **해시로 단언**한다. 교훈: 원복은 「했다」가 아니라 **「같아졌다」**로 확인한다.
+  - ⚠️ **실제 브라우저 재확인 NOT_RUN** — 이번 3종은 실행 검사·극성으로만 증명했다. 앞선 실화면 확인은 «수정 전» 코드 기준이다.
+  - 격리 환경은 **정리 완료**(서버 2개 중지 · 워크트리 제거 · 임시 launch 항목·env 파일 제거). 다른 세션 워크트리 7개는 손대지 않았다.
+- 다음 행동 / 담당 / 착수 조건: **Codex** 검토(핵심: 결정 A 구현 범위 · 진입 대상 URL 보존 규칙 · 미검증 항목). 커밋 여부는 별도 지시 대상.
+- 교대 체크포인트: 마지막 확인 상태 = 순서 5 착수분 완료, **미커밋** · 변경 범위(이번) = `frontend/src/App.tsx`, `frontend/scripts/check-project-entry.mjs` · 앞선 묶음 = `frontend/src/{lib/studioRequirementDraft.ts,factory/studioDraftEntry.ts}` 등 · 미변경 = 운영 DB·RAW·키·사용자 로그, 다른 세션 워크트리 · 검증 증거 = 프런트 48+17+25+25+14+36 exit 0 · build PASS · 극성 8종 · 커밋/푸시 = **없음** · 재개 지점 = Codex 검토 회신 · 금지 범위 = 실제 브라우저 결과 사칭, 원복 미확인 탐침, 원격 Git
+
+### [DRAFT-ENTRY-01-20260915] 초안 진입 — 경계를 «받지 않고 찾는다». 합동 301 passed / 0 failed
+
+- 작성자 / 기록 시각: Claude Code / 2026-09-15 23:27 KST
+- 왜 지금 기록하는가: 리뷰 §6 순서 4 `draft 진입` 을 수행 완료했다. 상세 보고는 `docs/handoff/CLAUDE_CODE_EXECUTION_STATUS.md`, 설계는 `docs/design_l2_studio_entry_readers_2026-09-15.md` §12.
+- 상태: **READY_FOR_REVIEW · 커밋/푸시 없음**(기준 HEAD `2380143ea`)
+- 결정 및 근거:
+  - `GET /api/v1/advisor/drafts/{draft_id}/entry-metadata?kind=&revision=` 신규. ★★★ **경계를 인자로 받지 않는다** — 조사에서 `advisor_v2_drafts.draft_id` 가 **PRIMARY KEY** 고 초안이 자기 경계를 들고 있음을 확인했다. 서버가 id 로 찾아 소유 문맥을 읽고 선택 문맥(헤더)과 대조한다. ⚠️ 기존 `GET /drafts/{id}?context_root_id=…` 는 **그대로 뒀다** — 그 경로는 이미 그 문맥에서 일하는 화면이 쓰는 것이라 맞다. 문제는 **URL 로 들어온 초안**이고 그때 프런트는 문맥을 모른다.
+  - 판정 순서: 종류·판본 형식 → 선택 문맥 확정 → 소유 문맥 판독 → **기존 `_authorize`** → 판본 존재(제품 경로, 내용은 버린다). ★ **서버 권한 정책 변경 0건.**
+  - ⚠️⚠️ **`consultation` 을 조용히 열지 않았다.** 종류 둘이 다른 저장소에 살고 **판본은 blueprint 에만 있는데** URL 문법은 두 종류 모두에 판본을 필수로 받는다. 버리면 kit_app `releaseId` 와 같은 결함이라, 서버가 `STUDIO_DRAFT_KIND_UNSUPPORTED`(422)로 **말하고** 프런트도 「없다」와 다른 문구로 보여 준다. **결정 요청**: ⒜ 지원 전으로 두고 URL 문법에서 판본 제거(권장) / ⒝ `consultation_turns.turn_no` 결속(제품 의미를 새로 정하는 일이라 내 범위 밖).
+  - **flow 공통부 추출**(Codex 권고 4): `project`·`kit_app` 의 flow 본체가 **글자까지 같아서** 셋째를 붙이며 `frontend/src/factory/studioEntryFlow.ts` 로 뽑았다. ⚠️ **오류 코드·메시지는 뽑지 않았다** — 공통인 것은 «수명»뿐이다. 기존 43·14건 그대로 통과가 그 증거다.
+  - 실측: 합동 9스위트 **301 passed / 0 failed / exit_code 0**(`output/usage-holds-aifmeq2d`). 프런트 43+16+25+14+36 PASS, build PASS.
+- 영향·주의사항:
+  - ⚠️⚠️ **[팀 전체] 시험이 내 시험의 구멍을 잡았다.** 극성으로 재 보니 **권한 대조를 통째로 지워도 28건이 통과**했다 — 문맥 시험들이 전부 **앞선 관문(`explicit_context`)에 가려져** 있었고 권한 층은 한 번도 판정한 적이 없었다. 「조직에 없는 노드」를 쓰면 거기서 막히므로, **실재하는 남의 부서**를 골라야 권한 층만이 막는 자리가 된다. 같은 함정이 다른 시험에도 있을 수 있다.
+  - ⚠️ **거절 문구가 갈라져 있었다**: 「없는 초안」과 「다른 문맥의 초안」이 다른 문구로 답했다 — 그 차이가 존재를 알려 준다. 문구를 짓지 않고 권한 층의 `missing()` 을 그대로 쓰게 고쳤다.
+  - ⚠️ `tests/test_route_authority_table.py::test_viewer_is_blocked_by_the_table` 4건이 격리 러너에서 **ERROR**(`fixture 'ecm_org_seed' not found`) — 앞서 알린 `repository_conftest_loaded: false` 와 **같은 뿌리**이고 그 파일은 미변경이다. ★ 표↔라우터 양방향 대조 4건은 통과(새 GET 경로가 표를 안 깬다). 다만 그 스위트는 **이 러너에서 전부 검증되지 않는다.**
+  - ⚠️ 확인된 초안을 **여는 화면이 아직 없다**. `BuildStartDialog` 는 밖에서 받은 초안을 싣는 자리가 없다 — 없는 화면을 지어내지 않고 인계한다.
+  - 앞선 승인 작업과 `data/interaction_log.jsonl` 보존.
+- 다음 행동 / 담당 / 착수 조건: **Codex** 검토 + 위 결정 요청 ⒜⒝. 다음은 리뷰 §6 순서 5 **단일 진입·히스토리·UI 수용**(실제 브라우저 필요)이며 범위 지시 대기. 커밋 여부도 별도 지시 대상.
+- 교대 체크포인트: 마지막 확인 상태 = 서버·프런트 구현·검사 완료, **미커밋** · 변경 범위 = `api/routes/studio_draft_control.py`, `core/advisor_revision_store.py`, `tests/test_b6_draft_entry.py`(신규 30건), `frontend/src/factory/{studioEntryFlow.ts,studioDraftEntry.ts,StudioDraftEntryGate.tsx}`(신규) + `{studioProjectEntry,studioKitAppEntry}.ts`, `frontend/src/App.tsx`, `frontend/scripts/{check-draft-entry.mjs(신규),check-project-entry.mjs,check-kit-app-entry.mjs}`, 설계안 §12 · 미변경 = 앞선 승인 작업, 운영 DB·RAW·키·사용자 로그 · 검증 증거 = `output/usage-holds-aifmeq2d`(301/0) · 프런트 5스크립트 exit 0 · build PASS · 극성 5종 · 커밋/푸시 = **없음** · 재개 지점 = Codex 검토 또는 순서 5 지시 · 금지 범위 = 실제 브라우저 결과 사칭, 없는 화면 발명, 원격 Git
+
+### [MEGA-ENTRY-01-FIX1-20260915] Codex 핵심 검토 보완 — 합동 검사 155 passed / 0 failed
+
+- 작성자 / 기록 시각: Claude Code / 2026-09-15 23:12 KST
+- 왜 지금 기록하는가: Codex 핵심 검토(`docs/handoff/CODEX_MEGA_ENTRY_REVIEW_2026-09-15.md`)의 보완 지시 셋을 반영 완료했다. 아래 [MEGA-ENTRY-01-20260915] 의 판단을 **취소하지 않고 보완**한다. 상세는 `docs/handoff/CLAUDE_CODE_EXECUTION_STATUS.md`.
+- 상태: **READY_FOR_REVIEW · 커밋/푸시 없음**(기준 HEAD `2380143ea` 그대로)
+- 결정 및 근거:
+  - ★★★ **보완1 — 지적이 맞았다. 내가 적어 놓고 만들지 않았다.** 설계안에 「Gate 가 거절한다」고 쓰고 구현하지 않아, 서버가 `is_mega_project` 를 정확히 답해도 **아무도 그 사실을 쓰지 않았다** → 메가 링크로 일반 프로젝트가 열렸다. **적은 것과 만든 것이 다르면 적은 쪽은 통제가 아니다.** App 이 «메가로 요청했다»는 사실 자체를 보존하고(`megaChildId` → `megaRequest`), Gate·flow·reader 까지 `requireMega` 를 내려 **명시 true 일 때만** 진행한다(`ENTRY_NOT_MEGA`). 자식 유무와 무관하다.
+  - **보완2 — 「같은 limit 로 바꾸면 된다」던 내 제안도 틀렸다.** 창이 가득 차면 새 사건이 생겨도 길이는 안 는다. 건수 비교 자체를 버리고 ① 시험 자신의 감사 저장소(격리 러너는 `repository_conftest_loaded: false` 라 conftest 격리가 **안 걸린다** — 실측) ② 창을 0·12·120 으로 **일부러 채우고** ③ 요청 «직전» 표식 이후에 추가된 사건만 본다. ⚠️ 운영 로그를 지우거나 비우지 않았고 제품 로직·단언 약화·skip/xfail 없다.
+  - **결정B — 503 을 404 로 접지 않고 «순서» 를 고쳤다.** 부모 사실만으로 끝나는 거절(비메가·목록 밖·자기 자신)을 **자식을 읽기 전에** 처리한다. 읽고 나서 거절하면 그 읽기가 실패할 때 503 이 나가 「없는 자식」과 「관계 밖이지만 존재하는 자식」이 구분된다.
+  - 실측: **동일 5파일 합동 155 passed / 0 failed / exit_code 0**(`output/usage-holds-d6aphsu8`, 직전 147/1FAIL). 프런트 43+25+14+36 PASS, build PASS.
+  - ★ 극성 증명: 감사 기록 호출을 지우니 **3건 전부(0·12·120) 실패**. 같은 모양의 다른 기록기 둘을 지웠을 때는 14 passed — 즉 이 검사가 **정확히 그 경로**를 본다. 임시 수정은 전부 해시 일치로 원복.
+- 영향·주의사항:
+  - ⚠️ **[팀 전체] 격리 러너(`scripts/verify_data_usage_holds.py`)에서는 저장소 conftest 가 로드되지 않는다**(`repository_conftest_loaded: false`). 즉 **conftest 의 감사·원장 격리에 기대는 시험은 이 러너에서 격리되지 않는다.** 그런 시험은 자기 안에서 직접 격리해야 한다. 이번 감사 검사 결함의 실제 뿌리가 이것이다.
+  - ⚠️ 같은 거부를 기록하는 곳이 **셋**이다(`api/routes/mcp_control.py` 둘, `core/crosswalk.py` 하나). 이번 경로는 `mcp_control:45` 하나만 탄다 — 나머지 둘은 이 요청으로 **검증되지 않는다.**
+  - ★ **판독 장애가 항상 503 인 것이 아니다**: `project_meta.json`(소속) 손상은 **404**(기존 PDP 은폐), `latest_state.json`(상태) 손상은 **503**, 상태 파일 **없음**은 200+false(레거시 보존). 설계안 §11.2 에 표로 고정했다.
+  - 앞선 승인 작업과 `data/interaction_log.jsonl` 보존. **서버 권한 변경 없음.**
+- 다음 행동 / 담당 / 착수 조건: **Codex** 재검토. 다음은 **draft 진입**(40~60분)이며 범위 지시 대기. 커밋 여부도 별도 지시 대상이다.
+- 교대 체크포인트: 마지막 확인 상태 = FIX1 반영·검사 완료, **미커밋** · 변경 범위 = `api/routes/factory_control.py`, `frontend/src/factory/{studioProjectEntry.ts,StudioProjectEntryGate.tsx}`, `frontend/src/App.tsx`, `frontend/scripts/check-project-entry.mjs`, `tests/{test_b6_mega_entry.py,test_m2_entry_gates.py}`, 설계안 §11 · 미변경 = 앞선 승인 작업 전부, 운영 DB·RAW·키·사용자 로그·감사 운영 로그 · 검증 증거 = `output/usage-holds-d6aphsu8`(155/0) · 프런트 4스크립트 exit 0 · build PASS · 극성 3종 · 커밋/푸시 = **없음** · 재개 지점 = Codex 재검토 회신 또는 draft 범위 지시 · 금지 범위 = 실제 브라우저 결과 사칭, 운영 감사로그 조작, 원격 Git
+
+### [MEGA-ENTRY-01-20260915] 메가 직접 진입 — 서버가 부모·자식 «관계»를 판정한다. READY_FOR_REVIEW
+
+- 작성자 / 기록 시각: Claude Code / 2026-09-15 22:57 KST
+- 왜 지금 기록하는가: Codex 지시서(`docs/handoff/CLAUDE_CODE_EXECUTION_ORDER_2026-09-15.md`)의 MEGA-ENTRY-01 을 수행 완료했다. 상세 보고는 지정 보고 파일 `docs/handoff/CLAUDE_CODE_EXECUTION_STATUS.md` 에 있고, 여기에는 팀이 알아야 할 것만 남긴다.
+- 상태: **READY_FOR_REVIEW · 커밋/푸시 없음**(기준 HEAD `2380143ea`, 브랜치 `codex/l2-unified-studio-20260912`)
+- 결정 및 근거:
+  - `GET /api/v1/factory/{project_id}/entry-metadata[?child=<ID>]` — **새 엔드포인트를 만들지 않고** 기존 경로를 호환 확장했다(설계안 §10, 변경 «전» 확정). 응답에 `is_mega_project`(항상)와 `child`(요청 시 객체, 아니면 null) 두 칸만 늘었다. **하나의 확인 응답**이라 프런트가 두 번 물어 관계를 추론하지 않는다.
+  - ★★★ **관계의 출처가 «둘» 이다** — 부모의 `sub_projects_map` 과 자식의 `parent_project_id` 가 **서로 다른 파일**(각자의 `latest_state.json`)에 있고 어긋날 수 있다. 한쪽만 보면 조용히 뚫린다: 자식이 남의 메가에 끼어들거나, 부모가 남의 자식을 끌어온다. **둘 다 가리킬 때만** 관계로 인정한다.
+  - ★ 소속은 **좁혀서** 읽는다(세 칸만). `latest_state.json` 은 «실행 상태» 파일이라 프로젝트가 도는 동안 계속 바뀌는데, 통째로 들고 나와 재확인에서 비교하면 **가동 중인 프로젝트가 진입할 때마다 503** 이 된다. 덤으로 「상태·계획 원문을 주지 않는다」가 저절로 지켜진다.
+  - 실측: 서버 **147 passed / 1 failed**(격리 실행 `--strict-writes`, `sources_unchanged: true`), 프런트 **36+25+14+36 PASS**, **build PASS**(`tsc -b` 포함). 이전 실측(서버162·프런트363)은 합산하지 않았다.
+  - 극성 증명 6건 — 통제를 하나씩 빼니 **그 통제를 단언한 시험만 정확히 죽었다**(서버 6·3·2건, 프런트 1·1·1건). 임시 수정은 전부 **해시 일치로 원복**.
+- 영향·주의사항:
+  - ⚠️⚠️ **[팀 전체에 알림] `tests/test_m2_entry_gates.py::test_gate_b_denial_is_written_to_the_audit_log` 는 순서 의존이다.** 단독 12 passed, 다른 스위트와 합동 실행하면 실패한다. 기전 확정: `before = len(audit.recent(limit=100))` 로 세고 `events = audit.recent(limit=10)` 로 다시 읽어 `len(events) > before` 를 단언한다 — **감사 사건이 10건을 넘으면 성립 불가**다. 내 변경과 접점 0(`/api/v1/mcp/resolve` 경로). 지시 없이 감사 통제 의미를 바꾸지 않으려고 **고치지 않았다.** 제안: 같은 limit 으로 읽거나 「직전 사건 이후의 새 사건」을 보게 한다.
+  - ⚠️ **프런트가 새 칸을 엄격히 요구한다** — `is_mega_project` 가 없으면 `malformed`. 같은 저장소에서 함께 배포되므로 택했으나 **서버보다 프런트가 먼저 나가면 프로젝트 진입이 전부 막힌다.** 관용으로 바꿀지는 결정 대상.
+  - ⚠️ 관찰: `_safe_id` 의 `_ID_RE` 에 **길이 상한이 없다**(프런트는 160자로 막는다). 부모 `project_id` 도 처음부터 같은 성질이라 이번 범위에서 바꾸지 않았다.
+  - `tests/test_b6_project_entry.py` 의 **DTO 정확 고정 단언**에 두 칸을 더했다. 그 단언은 「응답에 뭐가 더 따라 나오지 않는가」를 지키는 유일한 통제이므로 **느슨하게 풀지 않았다** — 정확한 집합을 유지한 채 갱신했다.
+  - 지시서 §1 의 앞선 승인 작업과 `data/interaction_log.jsonl` 은 **손대지 않았다.** 서버 **권한 변경 없음**.
+- 다음 행동 / 담당 / 착수 조건: **Codex** 가 핵심 diff(`api/routes/factory_control.py` 의 `get_project_entry_metadata`)와 위 결정 두 가지를 검토한다. 다음 후보는 리뷰 §6 순서 4 **draft 진입**이며 **별도 범위 지시 대기**. 커밋 여부도 별도 지시 대상이다.
+- 교대 체크포인트: 마지막 확인 상태 = 서버·프런트 구현과 검사 완료, **미커밋** · 변경 범위 = `api/routes/factory_control.py`, `tests/test_b6_mega_entry.py`(신규 43건), `tests/test_b6_project_entry.py`, `frontend/src/factory/studioProjectEntry.ts`, `frontend/src/factory/StudioProjectEntryGate.tsx`, `frontend/src/App.tsx`, `frontend/scripts/check-project-entry.mjs`, 설계안 §10 · 미변경 = 지시서 §1 의 앞선 승인 작업 전부, 운영 DB·RAW·키·사용자 로그 · 검증 증거 = `output/usage-holds-6elfprs_` · 프런트 4스크립트 exit 0 · build PASS · 극성 6건 · 커밋/푸시 = **없음**(지시 전 금지) · 재개 지점 = Codex 검토 회신 또는 draft 진입 지시 · 금지 범위 = 실제 브라우저 결과 사칭, 이전 실측 합산, 운영 DB pytest·서버 기동, 원격 Git
 
 ### [L2-STUDIO-B1-CLOSED-20260913] ECM v2 저장·권한·CAS 지정 출구 완료 / 다음 B2
 
@@ -1530,3 +1837,30 @@
   conftest 가 `DATA_DIR` 을 tmp 로 돌리므로 감시자 판정이 **뒤집힌다**(실측 2건).
   `PROJECT_ROOT/data` 로 고정한다.
 - 상세: `docs/handoff/KIT_APP_GENERATION_2026-08-23.md`
+
+### 🔔 2026-09-19 (3) — Claude Code · 안내 수명 보완 · 미리보기 조사 종료
+
+- **검토 요청: `docs/handoff/CLAUDE_REVIEW_REQUEST_PREVIEW_2026-09-19.md`** (Codex 앞).
+  지시서 `CODEX_DOWNLOAD_REVIEW_NEXT_2026-09-19.md` 의 세 가지를 모두 끝냈다.
+- **제품 변경은 프런트 2파일뿐이다** — `factory/RunControls.tsx` · `components/ControlPanel.tsx`.
+  서버·권한 정책·CORS **무변경**. 커밋·푸시 없음.
+- ⚠️⚠️ **`result.projectId !== pid` 는 «자기 자신과의 비교» 였다.** `pid` 는 요청을 시작한
+  렌더의 클로저 값이라 결과와 언제나 같다. 화면을 바꿔도 통과했고, 구 통제실의 `alert` 는
+  **전역**이라 남의 화면 위에 떴다. 이제 **완료 시점의 store** 와 화면 생존을 본다.
+  → 같은 모양의 「대상 확인」이 다른 비동기 호출부에도 있는지 각자 한 번씩 봐 주기 바란다.
+- **앱/보고서/문서 미리보기는 정상이라 아무것도 바꾸지 않았다.** 기존/신규가 같은
+  `/state/latest` 스냅샷을 읽고, 새 Studio 는 기존 `PreviewPanel`·`ManualRenderer` 를
+  그대로 재사용한다. 합성 산출물로 실제 클릭 이동해 앱 실행·판정칩·문서·빈 결과 두 종류를
+  모두 확인했다.
+- ⚠️ **계측 함정 둘(둘 다 제품 결함이 아니었다).**
+  ① **fixture 가 에이전트 id 를 지어내면 화면이 「0단계 완료」로 보인다.** 정본은
+     `core/agent_registry.py` 이고 id 는 `Frontend`(≠ `Frontend_Dev`)다. 필드 이름도
+     `factoryViewModel.ts` 의 `STAGE_DOC_FIELDS` 를 보고 맞출 것.
+  ② **브라우저 뷰포트를 강제로 바꾸면 그 뒤 클릭이 아무 데도 닿지 않는다.** 화면이 반응하지
+     않으면 제품을 의심하기 전에 **다른 버튼도 안 눌리는지**부터 보라. 뷰포트를 되돌리면
+     같은 클릭이 한 번에 된다.
+- `<details>` 안에 든 버튼은 **접혀 있으면 접근성 트리에 없다.** 좌표 클릭이 빗나간 원인이
+  이것이었다 — summary 를 먼저 누르면 정상적으로 클릭된다.
+- §10.1 보존 대상 **17개** 중: 실화면 증거로 닫을 수 있음 **2**(내려받기·미리보기),
+  새 Studio 입구 없음 **1**(공유·승격 진입), 서버 지표 부재 **1**(비용),
+  코드 연결만 있고 실화면 증거 미기록 **13**. 전체 진척 **21/40=52.5% 유지**(가산 없음).
