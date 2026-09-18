@@ -729,6 +729,33 @@ class RevisionStore:
             return conn.execute("SELECT 1 FROM advisor_v2_bootstraps WHERE project_id=?",
                                 (project_id,)).fetchone() is not None
 
+    def boundary_of(self, *, draft_id: str) -> dict | None:
+        """[DRAFT-ENTRY-01] 초안이 **자기 경계를 들고 있다.** 그 경계만 돌려준다.
+
+        ★★★ 진입 확인은 「이 초안이 어느 문맥의 것인가」를 먼저 알아야 하는데, 기존
+          `get()` 은 **경계를 인자로 받아** 그 경계와 일치하는 행만 준다. 그래서
+          호출자가 경계를 «지어내야» 했고, 지어낸 값이 사용자의 현재 선택과 다르면
+          다른 문맥의 초안을 여는 길이 생긴다.
+
+        ⚠️ **내용도 판본도 주지 않는다.** 소유 4키와 소유자뿐이다 — 판정은 호출부가
+          기존 권한 층(`_authorize`)에 맡기고, 여기서 권한을 새로 만들지 않는다.
+        ⚠️ 없으면 `None` 이다. 호출부가 **다른 거절과 같은 문구**로 접어야 한다 —
+          여기서 「없다」와 「못 본다」를 구분해 주면 존재가 응답으로 샌다."""
+        draft_id = _text(draft_id, "draft_id")
+        with self._transaction() as conn:
+            row = conn.execute(
+                "SELECT boundary_json, owner_actor FROM advisor_v2_drafts WHERE draft_id=?",
+                (draft_id,)).fetchone()
+        if row is None:
+            return None
+        try:
+            boundary = json.loads(row["boundary_json"])
+        except Exception:
+            return None
+        if not isinstance(boundary, dict) or set(boundary) != _BOUNDARY_KEYS:
+            return None
+        return {"boundary": boundary, "owner_actor": row["owner_actor"]}
+
     def get_for_project(self, *, boundary: dict, project_id: str) -> dict | None:
         """현재 PDP가 허용한 exact boundary의 현재 operation을 서버 내부에서 조회한다.
 

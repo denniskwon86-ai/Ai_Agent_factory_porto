@@ -1157,36 +1157,52 @@ async def app_entry_metadata(instance_id: str, app_id: str, p: Principal = Depen
         raise HTTPException(status_code=400, detail="잘못된 app_id 형식입니다.")
     # ⚠️ `_instance_or_404` 의 기존 문구를 그대로 쓰면 「인스턴스는 있고 앱만 없다」와
     #   「인스턴스가 없다」가 **다른 문구**가 되어 인스턴스 존재 여부가 샌다. 한 문구로 접는다.
-    try:
-        inst = _instance_or_404(p, instance_id)
-    except HTTPException as exc:
-        if exc.status_code == 404:
-            raise HTTPException(status_code=404, detail=hidden) from exc
-        raise
-    # 목록과 같은 분기. v2 로 연결된 인스턴스는 그 경로가, 아니면 legacy 권한이 정한다.
-    try:
-        with ProcessContextService._errors():
-            linked = binding_for_instance(store, inst)
-    except ProcessError as exc:
-        _process_error(exc, p.user_id, instance_id)
-    if not linked:
-        require_caps(p, PROJECT_RUN, resource="data_preparation",
-                     action=f"apps:entry:{instance_id}")
+    def visible_entry():
+        """목록의 가시성만 재사용한다. 준비도·계약·실행 승인은 계산하지 않는다."""
+        from dataclasses import replace
+        from core import kit_app_contract as kac
+        from core.org_directory import org_directory
+        try:
+            # Principal에 담긴 요청 시작 시점의 캐시로 권한 회수를 놓치지 않는다.
+            try:
+                current = replace(p, scope=org_directory.resolve_scope(p.user_id, fresh=True))
+            except Exception as exc:
+                raise HTTPException(status_code=503, detail="현재 업무 앱 조회 권한을 확인하지 못했습니다.") from exc
+            # _ctx의 공유 캐시와 별개로 선택 조직도 최신 권한으로 확인한다.
+            want = (current.requested_scope_node_id or "").strip()
+            if want and not (current.scope.unrestricted or want in current.scope.readable_scope_nodes):
+                raise HTTPException(status_code=404, detail=hidden)
+            instance = _instance_or_404(current, instance_id)
+            with ProcessContextService._errors():
+                link = binding_for_instance(store, instance)
+                if link:
+                    context = _kit_review_context(current)
+                    instance = kac._visible_v2_instance(store, instance_id, current.user_id, context)
+            if not link:
+                require_caps(current, PROJECT_RUN, resource="data_preparation",
+                             action=f"apps:entry:{instance_id}")
+                context = _ctx(current)
+            return instance, link, context
+        except ProcessError as exc:
+            if exc.status_code in (403, 404):
+                raise HTTPException(status_code=404, detail=hidden) from exc
+            # 명시 문맥 누락422와 판독 장애503은 은닉404로 바꾸지 않는다.
+            _process_error(exc, p.user_id, instance_id)
+        except HTTPException as exc:
+            if exc.status_code in (403, 404):
+                raise HTTPException(status_code=404, detail=hidden) from exc
+            raise
+
+    inst, linked, view = visible_entry()
     profile = _kit_profile_or_503(inst)
     found = next((row for row in kit_registry.outputs(profile)
                   if str(row.get("output") or "") == app_id), None)
     if not found:
         raise HTTPException(status_code=404, detail=hidden)
     # 반환 직전 재확인 — 조회 중 권한·문맥이 바뀌었을 수 있다.
-    try:
-        again = _instance_or_404(p, instance_id)
-    except HTTPException as exc:
-        if exc.status_code == 404:
-            raise HTTPException(status_code=404, detail=hidden) from exc
-        raise
-    if any(str(again[k]) != str(inst[k]) for k in ("tenant_id", "entity_mode", "scope_node_id")):
-        raise HTTPException(status_code=404, detail=hidden)
-    view = _ctx(p)
+    again, current_link, current_view = visible_entry()
+    if again != inst or current_link != linked or current_view != view:
+        raise HTTPException(status_code=503, detail="조회 중 업무 앱 문맥이 변경되었습니다. 다시 확인하십시오.")
     return {"status": "success", "data": {
         "instance_id": str(inst["instance_id"]), "app_id": app_id,
         "app_label": str(found.get("label") or app_id),

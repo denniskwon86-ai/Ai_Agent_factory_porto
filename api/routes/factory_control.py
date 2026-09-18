@@ -2580,8 +2580,19 @@ async def get_supervisor_feed(project_id: str,
         return {"status": "success", "data": []}
 
 @router.get("/{project_id}/entry-metadata")
-async def get_project_entry_metadata(project_id: str, p: Principal = Depends(current_principal)):
-    """선택한 문맥에서의 읽기 진입 확인만 제공한다. 실행 준비/승인을 뜻하지 않는다."""
+async def get_project_entry_metadata(project_id: str, child: str = "",
+                                     p: Principal = Depends(current_principal)):
+    """선택한 문맥에서의 읽기 진입 확인만 제공한다. 실행 준비/승인을 뜻하지 않는다.
+
+    ## [MEGA-ENTRY-01 · 2026-09-15] `?child=` — **하나의 확인 응답**
+
+    메가는 `project` 의 한 종류이므로 새 엔드포인트를 만들지 않는다. `?child=` 가 오면
+    **부모·자식을 한 번에** 판정해서 한 응답으로 돌려준다.
+
+    ⚠️⚠️ 프런트가 두 번 물어 관계를 추론하게 두지 않는다. 두 응답을 맞춰 보는 쪽은
+      「부모를 볼 수 있다」와 「자식을 볼 수 있다」에서 **「자식이 이 부모의 것이다」를
+      지어낸다** — 그건 서버만 아는 사실이다.
+    """
     from pathlib import Path
     from api.routes import studio_input_draft_control as drafts
     from api.routes.studio_revision_control import _same_context
@@ -2590,6 +2601,9 @@ async def get_project_entry_metadata(project_id: str, p: Principal = Depends(cur
     from core.org_directory import org_directory
 
     _safe_id(project_id, "project_id")
+    child_id = (child or "").strip()
+    if child_id:
+        _safe_id(child_id, "child")
     root = Path(workspace_path(project_id))
 
     def check_fresh_selection():
@@ -2600,12 +2614,51 @@ async def get_project_entry_metadata(project_id: str, p: Principal = Depends(cur
         if want and not (scope.unrestricted or want in scope.readable_scope_nodes):
             raise HTTPException(404, "현재 문맥에서 프로젝트를 찾을 수 없습니다.")
 
-    def read_metadata():
+    def membership(target_root):
+        """메가 소속의 **정본**(`latest_state.json`)을 읽는다. 없으면 `None`.
+
+        ★ 읽을 수 없을 때 `None` 을 주는 방향이 중요하다. 이 값이 없으면 호출부는
+          `is_mega_project=False` 로 답하는데, 그것이 **두 가지를 동시에 만족**한다.
+
+            ① 기존 `project` 진입을 깨지 않는다 — 레거시 프로젝트엔 이 파일이 없다.
+               여기서 503 을 내면 지금 되던 진입이 죽는다.
+            ② 메가 진입에는 fail-closed 다 — false 면 메가로 열리지 않는다.
+
+        ⚠️ 그래서 «관계를 주장하는» `?child=` 요청은 `None` 을 **404 로 받는다**.
+          주장은 증명돼야 한다. 그 판정은 호출부가 한다."""
+        state_path = target_root / "latest_state.json"
+        for path in (target_root, state_path):
+            if path.is_symlink() or getattr(path, "is_junction", lambda: False)():
+                return None
+        if not state_path.is_file():
+            return None
+        try:
+            with state_path.open(encoding="utf-8") as stream:
+                state = json.load(stream)
+        except Exception:
+            return None
+        if not isinstance(state, dict):
+            return None
+        #: ★★★ **소속 사실만 좁혀서 들고 나온다. 상태 원문은 가져오지 않는다.**
+        #:
+        #: ⚠️⚠️ 이 파일은 «실행 상태» 파일이라 프로젝트가 도는 동안 계속 바뀐다.
+        #:   통째로 들고 나와 `recheck` 에서 비교하면, 가동 중인 프로젝트는 진입할
+        #:   때마다 「읽는 중에 바뀌었다」로 503 이 된다 — 아무도 아무것도 잘못하지
+        #:   않았는데. 소속 세 칸은 실행 중에 바뀌지 않으므로 그것만 본다.
+        #: ★ 덤으로 §10.6 의 「상태·계획 원문을 주지 않는다」가 저절로 지켜진다.
+        listed = state.get("sub_projects_map")
+        return {"is_mega_project": state.get("is_mega_project") is True,
+                "parent_project_id": str(state.get("parent_project_id") or ""),
+                "children": (frozenset(str(value) for value in listed.values())
+                             if isinstance(listed, dict) else None)}
+
+    def read_metadata(target_root=None):
         # 존재/삭제 확인도 파일을 만들지 않는다. 연결된 파일을 원본으로 인정하지 않는다.
-        if not root.is_dir():
+        target_root = root if target_root is None else target_root
+        if not target_root.is_dir():
             raise HTTPException(404, "현재 문맥에서 프로젝트를 찾을 수 없습니다.")
-        meta_path = root / "project_meta.json"
-        for path in (root, meta_path):
+        meta_path = target_root / "project_meta.json"
+        for path in (target_root, meta_path):
             if path.is_symlink() or getattr(path, "is_junction", lambda: False)():
                 raise ValueError("linked project metadata")
         with meta_path.open(encoding="utf-8") as stream:
@@ -2623,28 +2676,111 @@ async def get_project_entry_metadata(project_id: str, p: Principal = Depends(cur
         boundary, studio = await asyncio.to_thread(drafts._authorized, project_id, p, False)
         await asyncio.to_thread(check_fresh_selection)
         meta = await asyncio.to_thread(read_metadata)
-        if studio is not None:
-            version = studio.get("runtime_document_version")
-        else:
-            version = meta.get("runtime_document_version", "1.0")
-            if version != "1.0":
-                raise ValueError("managed project without verified studio context")
-        if version not in ("1.0", "2.0"):
-            raise ValueError("unknown runtime document version")
-        name = meta.get("project_name")
-        if name is None or name == "":
-            name = project_id
-        elif not isinstance(name, str) or len(name) > 2000:
-            raise ValueError("invalid project display name")
-        data = dict(project_id=project_id, project_name=name,
-            runtime_document_version=version,
-            ownership={key: boundary["ownership"][key] for key in ("tenant_id", "enterprise_scope_id", "entity_mode")},
-            viewing_context={key: boundary["viewing_context"][key] for key in ("tenant_id", "scope_node_id", "entity_mode")})
+        def describe(pid, meta_row, studio_row):
+            """표시 정보를 만든다. **부모와 자식이 같은 규칙을 지나게 한다** — 두 벌로
+            만들면 한쪽만 느슨해지고, 느슨해진 쪽으로 원문이 샌다."""
+            if studio_row is not None:
+                version = studio_row.get("runtime_document_version")
+            else:
+                version = meta_row.get("runtime_document_version", "1.0")
+                if version != "1.0":
+                    raise ValueError("managed project without verified studio context")
+            if version not in ("1.0", "2.0"):
+                raise ValueError("unknown runtime document version")
+            name = meta_row.get("project_name")
+            if name is None or name == "":
+                name = pid
+            elif not isinstance(name, str) or len(name) > 2000:
+                raise ValueError("invalid project display name")
+            return version, name
+
+        def shown(pid, row_version, row_name, row_boundary):
+            return dict(project_id=pid, project_name=row_name,
+                runtime_document_version=row_version,
+                ownership={key: row_boundary["ownership"][key]
+                           for key in ("tenant_id", "enterprise_scope_id", "entity_mode")},
+                viewing_context={key: row_boundary["viewing_context"][key]
+                                 for key in ("tenant_id", "scope_node_id", "entity_mode")})
+
+        def parent_claims(parent_row):
+            """관계의 **부모 쪽 절반** — 자식을 읽지 «않고» 알 수 있는 부분.
+
+            ★★★ [FIX1 · 결정 B] 이것을 따로 뗀 이유는 **판정 순서** 때문이다. 부모가
+              메가가 아니거나 부모 목록에 없는 자식은 **부모 사실만으로 거절**할 수 있고,
+              그러면 숨겨야 할 대상의 상세 상태를 **아예 읽지 않는다.**
+            ⚠️ 읽고 나서 거절하면, 그 읽기가 실패할 때 503 이 나가 「없는 자식」과
+              「관계 밖이지만 존재하는 자식」이 구분된다 — 존재가 응답으로 새는 것이다."""
+            if not isinstance(parent_row, dict):
+                return False            # 소속을 못 읽었다 — 주장은 증명돼야 한다
+            if not parent_row["is_mega_project"]:
+                return False
+            return bool(parent_row["children"]) and child_id in parent_row["children"]
+
+        def related(parent_row, child_row):
+            """⚠️⚠️ **양쪽이 다 가리켜야 관계다.**
+
+            소속의 출처가 «둘» 이다 — 부모의 `sub_projects_map` 과 자식의
+            `parent_project_id` 가 **서로 다른 파일**에 있다. 한쪽만 보면 조용히 뚫린다:
+            자식이 남의 메가를 가리키거나, 부모가 남의 자식을 열거한다. 둘 다 볼 때만
+            어느 한 파일이 틀려도 관계가 서지 않는다."""
+            if not parent_claims(parent_row):
+                return False
+            if not isinstance(child_row, dict):
+                return False            # 자식 소속을 못 읽었다
+            return child_row["parent_project_id"] == project_id
+
+        version, name = describe(project_id, meta, studio)
+        parent_state = await asyncio.to_thread(membership, root)
+        data = shown(project_id, version, name, boundary)
+        data["is_mega_project"] = bool(parent_state and parent_state["is_mega_project"])
+        data["child"] = None
+
+        child_root = child_meta = child_boundary = child_studio = child_state = None
+        if child_id:
+            #: ⚠️ 어디서 막혔는지 «말하지 않는다». 「부모는 있는데 자식이 없다」를
+            #:   구분해 주면 존재 여부가 응답으로 샌다(설계안 §2.3 첫 줄).
+            hidden = HTTPException(404, "현재 문맥에서 프로젝트를 찾을 수 없습니다.")
+            if child_id == project_id:
+                raise hidden            # 자기 자신은 자기 자식이 아니다
+            #: ★★★ [FIX1 · 결정 B] **부모 사실만으로 끝나는 거절을 «먼저» 한다.**
+            #:   여기서 닫으면 관계 밖 자식의 작업공간·소속·권한을 **아예 읽지 않는다** —
+            #:   읽으면 그 읽기가 실패할 때 503 이 나가 존재가 새기 때문이다.
+            if not parent_claims(parent_state):
+                raise hidden
+            child_root = Path(workspace_path(child_id))
+            if not child_root.is_dir():
+                raise hidden
+            child_boundary, child_studio = await asyncio.to_thread(
+                drafts._authorized, child_id, p, False)
+            child_meta = await asyncio.to_thread(read_metadata, child_root)
+            child_state = await asyncio.to_thread(membership, child_root)
+            if not related(parent_state, child_state):
+                raise hidden
+            child_version, child_name = describe(child_id, child_meta, child_studio)
+            data["child"] = shown(child_id, child_version, child_name, child_boundary)
 
         def recheck():
+            #: ⚠️⚠️ **문맥 확인을 «먼저» 하고 파일 비교를 «나중에» 한다.**
+            #:
+            #: 종전에는 파일부터 비교했는데, 그러면 `_same_context` 가 도는 «동안»
+            #:   바뀐 소속을 못 본다 — 비교가 이미 끝났기 때문이다. 시험이 그 구멍을
+            #:   잡았다(부모 쪽 변경 2건이 통과해 버렸다). 파일 비교를 마지막에 두면
+            #:   재확인 창이 반환 직전까지 좁혀진다.
+            _same_context(project_id, p, boundary, studio, write=False)
+            if child_id:
+                _same_context(child_id, p, child_boundary, child_studio, write=False)
             if read_metadata() != meta:
                 raise ValueError("project metadata changed during read")
-            _same_context(project_id, p, boundary, studio, write=False)
+            #: 소속도 다시 본다 — 판정의 근거가 된 파일이 하나 늘었기 때문이다.
+            if membership(root) != parent_state:
+                raise ValueError("mega membership changed during read")
+            if child_id:
+                if read_metadata(child_root) != child_meta:
+                    raise ValueError("child metadata changed during read")
+                if membership(child_root) != child_state:
+                    raise ValueError("child membership changed during read")
+                if not related(parent_state, child_state):
+                    raise ValueError("mega relationship changed during read")
             check_fresh_selection()
 
         await asyncio.to_thread(recheck)
