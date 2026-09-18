@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'reac
 import { HubDialog } from '../design/HubDialog';
 import { DataPrepError, listInstances } from '../lib/dataPrepApi';
 import { processContextIdentity } from '../lib/processInstallationApi';
+import { registerLeaveGuard } from '../factory/studioLeaveGuard';
 import { getStudioRequirementDraft, subscribeStudioRequirementContext,
   type StudioDeliverable, type StudioRequirementForm, type StudioRequirementRevision,
 } from '../lib/studioRequirementDraft';
@@ -34,6 +35,9 @@ export type BuildStartDialogProps = {
   onSaveDraft?: (revision: StudioRequirementRevision, form: StudioRequirementForm) => void;
   /** 현재 문맥에서 서버가 확인한 후보만 공급. 없으면 코드 직접 입력 대신 준비 필요를 표시. */
   masterDomainOptions?: { value: string; label: string }[];
+  /** [B6-CONTEXT] 회사 문맥 칩. **대화상자 안**에 그려야 초점 가둠에서 닿는다.
+   *  ⚠️ 여기서 칩을 «만들지» 않는다 — 모양·상태 출처가 갈라진다. 부모가 넣어 준다. */
+  contextChip?: React.ReactNode;
 };
 
 export function BuildStartDialog(props: BuildStartDialogProps) {
@@ -43,7 +47,7 @@ export function BuildStartDialog(props: BuildStartDialogProps) {
 
 function BuildStartContent({ templates, knowledgePacks, packsBlocked, deliverableType = 'software_app',
   onClose, onOpenDataPrep, onCreate, supportsInitialIdea = false, initialIdea, form: seed,
-  onFormChange, onSaveDraft, masterDomainOptions, identity,
+  onFormChange, onSaveDraft, masterDomainOptions, identity, contextChip,
 }: BuildStartDialogProps & { identity: string }) {
   // 바깥 key가 사용자/문맥 변경 시 본문을 새로 마운트한다.
   const flow = useMemo(() => getStudioRequirementDraft(deliverableType), [deliverableType]);
@@ -51,7 +55,10 @@ function BuildStartContent({ templates, knowledgePacks, packsBlocked, deliverabl
   const form = state.form;
   const [message, setMessage] = useState('');
   const creating = state.creationState === 'PENDING';
-  const [navigation, setNavigation] = useState<'close' | 'data' | null>(null);
+  //: ★ [FIX1 · 지시 4] `'history'` 는 앱 «안» 이동(뒤로/앞으로)이다. 기존 확인 UI 를
+  //:   그대로 쓰되, 「이동」이 곧 그 이동을 이어 가는 것이 되게 한다.
+  const [navigation, setNavigation] = useState<'close' | 'data' | 'history' | null>(null);
+  const pendingLeave = useRef<(() => void) | null>(null);
   const [domainQuery, setDomainQuery] = useState('');
   const [dataInstances, setDataInstances] = useState<KitInstanceChoice[] | null>(null);
   const [dataError, setDataError] = useState('');
@@ -124,6 +131,20 @@ function BuildStartContent({ templates, knowledgePacks, packsBlocked, deliverabl
     return () => window.removeEventListener('beforeunload', protect);
   }, [hasInput, saved, state.creationState]);
 
+  //: ★★★ [FIX1 · 지시 4] **앱 «안» 이동도 같은 확인을 거친다.**
+  //:
+  //: ⚠️ 위의 `beforeunload` 는 문서를 떠날 때만 뜬다 — 뒤로/앞으로의 대체 수단이 아니다.
+  //:   종전에는 그 이동이 편집기를 즉시 닫아 이 확인을 통째로 건너뛰었다.
+  //: ★ 정책(저장/유지/폐기)은 **아래 기존 UI 가 그대로** 가진다. 여기서 새로 만들지 않는다.
+  useEffect(() => registerLeaveGuard({
+    //: ⚠️ [FIX2 · 지시 4] 기존 `requestLeave` 와 **같은 제한**을 쓴다 — 생성 중·요청 중·
+    //:   결과 미확인이면 떠나지 않는다. 한쪽만 느슨하면 그 문으로 입력이 빠져나간다.
+    safe: () => !(hasInput && !saved) && !creating && !state.busy
+      && state.creationState !== 'UNKNOWN',
+    confirm: (proceed) => { pendingLeave.current = proceed; setNavigation('history'); },
+    onConfirmError: () => setMessage('이동 확인을 띄우지 못했습니다. 입력은 그대로 있습니다. 다시 시도해 주세요.'),
+  }), [hasInput, saved, creating, state.busy, state.creationState]);
+
   const update = (patch: Partial<StudioRequirementForm>) => {
     if (locked) return;
     flow.update(patch); setMessage('');
@@ -138,8 +159,9 @@ function BuildStartContent({ templates, knowledgePacks, packsBlocked, deliverabl
     }
     return row;
   };
-  const leave = (target: 'close' | 'data') => {
+  const leave = (target: 'close' | 'data' | 'history') => {
     setNavigation(null);
+    if (target === 'history') { const go = pendingLeave.current; pendingLeave.current = null; go?.(); return; }
     if (target === 'close') onClose(); else onOpenDataPrep();
   };
   const requestLeave = (target: 'close' | 'data') => {
@@ -184,8 +206,14 @@ function BuildStartContent({ templates, knowledgePacks, packsBlocked, deliverabl
   return <HubDialog label={copy} onClose={() => requestLeave('close')}>
     <div className="afs-dialog-bar"><b>{copy}</b>
       <span>업무와 요구부터 정리하세요. 데이터와 업무 연결은 나중에 준비할 수 있습니다.</span>
-      <div className="bar-actions"><button type="button" className="secondary-button" disabled={creating || state.busy}
-        onClick={() => requestLeave('close')}>닫기</button></div>
+      {/*: ★★★ [B6-CONTEXT · 결정 1] 회사 문맥을 **이 화면 안에** 둔다.
+           ⚠️ 대화상자는 초점을 가둔다(focus trap). 바깥 셸의 칩을 쓰라고 하면 키보드
+             사용자는 그 버튼에 **닿지 못한다.** 그래서 대화상자 «자기 머리 바» 에 둔다.
+           ★ 모양·접근 이름·상태 출처는 셸과 같은 컴포넌트가 책임진다(부모가 넣어 준다). */}
+      <div className="bar-actions">
+        {contextChip}
+        <button type="button" className="secondary-button" disabled={creating || state.busy}
+          onClick={() => requestLeave('close')}>닫기</button></div>
     </div>
     <div className="afs-dialog-body" style={{ padding: 24, display: 'grid', gap: 18 }}>
       <label style={labelStyle}>어떤 업무인가요? (미정 가능)

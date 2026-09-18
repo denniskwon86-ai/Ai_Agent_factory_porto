@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useFactoryStore } from '../store/useFactoryStore';
 // [트랙 E 7단계 전제] Sprint 명령의 조립·호출은 **한 곳**에서 한다. 새 Studio 와 같은
 //   함수를 부른다 — 각자 조립하면 두 화면이 서로 다른 payload 를 보내게 된다.
-import { newPlanningTaskId, replanWbs, resumeAfterQuota, startPlanning }
+import { downloadProjectArchive, newPlanningTaskId, replanWbs, resumeAfterQuota, startPlanning }
   from '../factory/sprintActions';
 import { API_BASE_URL } from '../lib/api';
 
@@ -788,15 +788,20 @@ export default function ControlPanel() {
                 >
                   {state?.supervisor_verdict !== "PASS" ? "⚠️ 수용검수 미통과 — 그래도 배포(저장)" : "🚀 최종 결과물 저장 (배포)"}
                 </button>
-                {/* 생성된 산출물(코드·문서)을 zip 으로 즉시 내려받기 — Content-Disposition 헤더가 파일명 지정 */}
+                {/* 생성된 산출물(코드·문서)을 zip 으로 즉시 내려받기 — Content-Disposition 헤더가 파일명 지정.
+                    ★★★ [2026-09-19 실측] 앵커 직접 이동은 **세션 헤더를 못 싣는다**(401).
+                      새 Studio 와 **같은 공용 함수**를 부른다 — 각자 앵커를 만들면 또 갈라진다. */}
                 <button
                   onClick={() => {
-                    const a = document.createElement('a');
-                    a.href = `${API_BASE_URL}/api/v1/factory/${currentProjectId}/export`;
-                    a.download = `${currentProjectId}.zip`;
-                    document.body.appendChild(a);
-                    a.click();
-                    document.body.removeChild(a);
+                    void (async () => {
+                      const result = await downloadProjectArchive(currentProjectId);
+                      //: ⚠️⚠️ [검토 2026-09-19] `currentProjectId` 는 **요청을 시작한 렌더**의
+                      //:   값이라 결과와 늘 같다 — 화면 전환을 감지하지 못한다. 게다가
+                      //:   `alert` 는 **전역**이라 다른 화면 위에도 뜬다.
+                      //: ★ 완료 시점의 열린 프로젝트와 비교한다.
+                      if (useFactoryStore.getState().currentProjectId !== result.projectId) return;
+                      if (!result.ok) alert(result.reason);
+                    })();
                   }}
                   className="w-full mt-2 text-emerald-200 font-bold py-2.5 rounded-lg border border-emerald-700/50 bg-emerald-900/20 hover:bg-emerald-800/40 transition-all text-sm"
                 >

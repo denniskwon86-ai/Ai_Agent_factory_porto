@@ -18,7 +18,9 @@
 // - store 를 읽거나 쓰지 않는다. 순수 함수 + fetch 뿐이다 — 호출부가 자기 상태를 갱신한다.
 // - `alert()` 을 쓰지 않는다. 결과를 돌려주고 **문구는 호출부가 화면에 맞게** 보여 준다
 //   (Studio 는 화면 안 배너, 종전 통제실은 기존 `alert`).
-import { API_BASE_URL } from '../lib/api';
+import { API_BASE_URL, apiFetch } from '../lib/api';
+//: ⚠️ store 를 끌어오지 않는다(순환 의존). 신원은 기존 유틸 하나로만 본다.
+import { studioIdentityKey } from './studioInputMemory';
 import { executeStudioCommand, hasExecutionPending } from '../lib/studioExecutionApi';
 import { PROJECT_TASK } from '../lib/studioExecutionApi';
 import type { ExecutionOperation, ExecutionRequest } from '../lib/studioExecutionApi';
@@ -346,8 +348,11 @@ export const REVISION_NOTE =
    + '지금 멈춰 선 결정에 답하는 것이 아니라 **다음에 할 일**을 만드는 것입니다.');
 
 // ── Export (산출물 ZIP) ─────────────────────────────────────────────────────
-/** 생성된 코드·문서를 zip 으로 내려받는 주소. **fetch 하지 않고 링크로 연다** —
- *  서버가 `Content-Disposition` 으로 파일명을 정하고, 브라우저가 그대로 저장한다.
+/** 생성된 코드·문서를 zip 으로 내려받는 **주소**.
+ *
+ *  ⚠️ [2026-09-19] 종전 주석은 「fetch 하지 않고 링크로 연다」였다. **그 방식이 결함이었다** —
+ *    링크 이동은 `X-Session-Token` 을 못 실어 401 이 된다. 지금 내려받기는 아래
+ *    `downloadProjectArchive` 가 **fetch 로** 한다. 이 함수는 주소가 필요한 곳(표시·진단)만 쓴다.
  *
  *  ★ [2026-08-07 전환 게이트] §8 「Export 가 보존된다」가 신규 Studio 에서 빠져 있었다
  *    (`StageArtifactCanvas` 가 「종전 통제실에서 하십시오」라고 스스로 적어 두었다).
@@ -355,4 +360,115 @@ export const REVISION_NOTE =
  *    다른 것을 내려받게 되고, 그때 어느 쪽이 «진짜 산출물» 인지 알 수 없다. */
 export function exportArchiveUrl(projectId: string): string {
   return `${API_BASE_URL}/api/v1/factory/${encodeURIComponent(projectId)}/export`;
+}
+
+/** 내려받기 결과 — **성공과 실패를 같은 모양으로** 돌려준다(호출부가 문구를 화면에 맞게 쓴다).
+ *
+ *  ⚠️ `projectId` 를 함께 돌려준다. 호출부가 **자기 대상이 맞는지** 보고 안내를 붙이게 —
+ *    늦게 끝난 결과가 다른 프로젝트 화면에 성공/오류를 남기면 안 된다. */
+export type ArchiveDownload =
+  | { ok: true; projectId: string; filename: string; bytes: number }
+  | { ok: false; projectId: string; reason: string; status: number };
+
+/** `Content-Disposition` 의 파일명. ⚠️ 서버가 정한 이름을 쓴다 — 우리가 지어내면 확장자·판본이 갈린다. */
+function filenameFrom(header: string, fallback: string): string {
+  const star = /filename\*=UTF-8''([^;]+)/i.exec(header || '');
+  if (star) { try { return decodeURIComponent(star[1].trim()); } catch { /* 형식이 깨졌으면 아래로 */ } }
+  const plain = /filename="?([^";]+)"?/i.exec(header || '');
+  return (plain ? plain[1].trim() : '') || fallback;
+}
+
+/** ★★★ [§10.1 「코드·문서 내려받기」] 산출물 ZIP 을 **세션을 실어** 받아 저장을 시작한다.
+ *
+ *  ## 왜 앵커를 쓰지 않는가 (2026-09-19 실측)
+ *
+ *  종전에는 두 화면이 각자 `a.href = .../export; a.click()` 이었다. 그런데 이 제품의 신원은
+ *  **`X-Session-Token` 헤더**이고(쿠키가 아니다), **앵커 이동은 헤더를 실을 수 없다.**
+ *
+ *      헤더 없음(앵커와 같은 조건) → 401 「사용자 식별 정보가 없습니다」
+ *      세션 헤더 있음             → 200 application/zip
+ *
+ *  즉 **서버는 멀쩡한데 버튼만 되지 않았다.** 실패가 화면에 나타나지도 않아 「눌렀는데
+ *  아무 일도 없다」로 보였다(개발 신뢰 헤더가 켜진 환경에서는 그마저 안 보인다).
+ *
+ *  ## 실패는 «전부» 결과로 돌아온다 (2026-09-19 검토 보완 1)
+ *
+ *  ⚠️ 종전 판은 `apiFetch` 만 try 로 감쌌다. `blob()`·`createObjectURL`·저장 준비가 실패하면
+ *    **Promise 가 reject** 되고, 호출부가 `void async` 였으므로 **안내가 통째로 사라졌다.**
+ *    받기부터 저장 준비까지 전부 이 함수의 결과 계약으로 돌린다.
+ *  ⚠️ 서버 원문·예외 문구를 그대로 내보내지 않는다 — 연결 실패와 파일 준비 실패를 구분한 문장만.
+ *
+ *  ## 늦게 도착한 결과 (검토 보완 2)
+ *
+ *  ⚠️ 문맥·사용자가 바뀐 뒤 본문이 끝나면 **그때 저장을 시작하면 안 된다** — A 문맥에서
+ *    요청한 산출물이 B 문맥 화면에서 저장되고 성공 안내까지 붙는다. 요청 시작 시점의
+ *    `studioIdentityKey()` 를 잡고 **응답 후·blob 후·클릭 직전** 에 다시 본다.
+ *  ★ 이미 브라우저에 넘긴 다운로드는 **취소·회수할 수 없다.** 그래서 「시작되지 않은 저장」만
+ *    막고, 성공 문구도 「내려받기를 시작했습니다」까지만 말한다.
+ *
+ *  ⚠️ 한계: ZIP 전체가 메모리에 올라온다. 대용량이면 서버가 1회용 표를 주는 방식이 낫지만
+ *    그것은 서버 계약 변경이라 별도 승인 대상이다.
+ *  ⚠️ 두 화면이 **이 함수 하나**를 부른다 — 각자 앵커를 만들면 그 순간 다시 갈라진다. */
+export async function downloadProjectArchive(
+  projectId: string, options: { signal?: AbortSignal } = {}): Promise<ArchiveDownload> {
+  const pid = (projectId || '').trim();
+  const fail = (reason: string, status: number): ArchiveDownload =>
+    ({ ok: false, projectId: pid, reason, status });
+  if (!pid) return fail('프로젝트를 먼저 선택하십시오.', 0);
+
+  const identity = studioIdentityKey();
+  //: 「지금도 그 사람·그 문맥인가」. 아니면 **아직 시작하지 않은** 저장을 시작하지 않는다.
+  const live = () => !options.signal?.aborted && studioIdentityKey() === identity;
+  const STALE = '회사·사용자가 바뀌어 내려받기를 멈췄습니다. 현재 문맥에서 다시 시도하십시오.';
+
+  let res: Response;
+  try {
+    res = await apiFetch(`/api/v1/factory/${encodeURIComponent(pid)}/export`,
+      options.signal ? { signal: options.signal } : undefined);
+  } catch {
+    return fail('서버에 연결하지 못했습니다. 연결 상태를 확인하십시오.', 0);
+  }
+  if (!live()) return fail(STALE, -1);
+  if (!res.ok) {
+    //: ★ 사유를 **구분해서** 말한다. 셋은 사용자가 할 일이 서로 다르다.
+    //: ⚠️ 404 는 「없다」를 확정하지 않는다 — 현재 문맥에서 안 보이는 것일 수도 있다(은닉 계약).
+    const reason = res.status === 401
+      ? '로그인이 필요합니다. 다시 로그인한 뒤 내려받으십시오.'
+      : res.status === 403
+        ? '이 결과물을 내려받을 권한이 없습니다.'
+        : res.status === 404
+          ? '결과를 찾을 수 없거나 현재 문맥에서 조회할 수 없습니다.'
+          : `내려받지 못했습니다(서버 응답 ${res.status}).`;
+    return fail(reason, res.status);
+  }
+
+  let blob: Blob;
+  try {
+    blob = await res.blob();
+  } catch {
+    //: 연결이 끊겼거나 본문이 깨졌다 — «받는 중» 실패다. 연결 실패와 구분해서 말한다.
+    return fail('받은 내용을 끝까지 읽지 못했습니다. 다시 시도하십시오.', res.status);
+  }
+  if (!live()) return fail(STALE, -1);
+
+  const filename = filenameFrom(res.headers.get('content-disposition') || '', `${pid}.zip`);
+  let url = '';
+  let anchor: HTMLAnchorElement | null = null;
+  try {
+    url = URL.createObjectURL(blob);
+    //: ★ **클릭 직전** 한 번 더 본다. 여기까지 오는 동안에도 문맥은 바뀔 수 있다.
+    if (!live()) return fail(STALE, -1);
+    anchor = document.createElement('a');
+    anchor.href = url; anchor.download = filename;
+    document.body.appendChild(anchor);
+    anchor.click();
+  } catch {
+    return fail('파일 저장을 시작하지 못했습니다. 브라우저 설정을 확인하십시오.', res.status);
+  } finally {
+    //: ⚠️ 실패 경로에서도 **반드시** 치운다. 남기면 화면에 보이지 않는 요소와 해제되지 않은
+    //:   메모리가 쌓인다.
+    if (anchor && anchor.parentNode) anchor.parentNode.removeChild(anchor);
+    if (url) setTimeout(() => URL.revokeObjectURL(url), 10_000);
+  }
+  return { ok: true, projectId: pid, filename, bytes: blob.size };
 }

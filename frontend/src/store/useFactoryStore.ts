@@ -214,9 +214,26 @@ let _projectGeneration = 0;
 let _identityGeneration = 0;
 const _readGeneration = { wbs: 0, state: 0, hotl: 0, feed: 0, releases: 0 };
 let _healingInFlight: (() => boolean) | null = null;
+// 릴리스는 프로젝트 선택과 별개다. 닫기·재조회·문맥 전환마다 표시 요청을 무효화한다.
+let _releaseGeneration = 0;
+let _releaseAbort: AbortController | null = null;
+function invalidateReleaseRequest() {
+  _releaseGeneration += 1;
+  _releaseAbort?.abort();
+  _releaseAbort = null;
+}
+function releaseIdentity(): string {
+  const c = getEnterpriseContext();
+  return JSON.stringify([getSessionToken(), getActingUser(), c.tenantId, c.scopeNodeId, c.entityMode]);
+}
 if (typeof window !== 'undefined') {
-  const invalidateIdentity = () => { _identityGeneration += 1; };
+  const invalidateIdentity = () => {
+    _identityGeneration += 1;
+    // 이벤트는 store 초기화 뒤 발생한다. 이전 사용자의 원문도 즉시 제거하며 재조회하지 않는다.
+    useFactoryStore.getState().closeRelease();
+  };
   window.addEventListener('factory:session-changed', invalidateIdentity);
+  window.addEventListener('factory:acting-user-changed', invalidateIdentity);
   window.addEventListener('factory:enterprise-context-changed', invalidateIdentity);
 }
 
@@ -589,9 +606,30 @@ export const useFactoryStore = create<FactoryStore>()((set, get) => ({
   //: ★ 401·403·404 는 **같은 문구**로 답한다. 나누면 존재 여부가 응답으로 새고, 사용자가
   //:   할 일은 어느 쪽이든 같다.
   viewRelease: async (releaseId: string) => {
-    set({ releaseLoad: 'loading', releaseError: '' });
+    invalidateReleaseRequest();
+    const generation = _releaseGeneration;
+    const identity = releaseIdentity();
+    const isCurrent = () => {
+      if (generation !== _releaseGeneration) return false;
+      if (identity !== releaseIdentity()) {
+        // 이벤트 없이 값이 바뀐 경로에서도 이전 원문/로딩을 남기지 않는다.
+        get().closeRelease();
+        return false;
+      }
+      return true;
+    };
+    set({ viewingRelease: null, releaseLoad: 'loading', releaseError: '' });
+    if (typeof releaseId !== 'string' || !/^[A-Za-z0-9_-]+$/.test(releaseId)) {
+      set({ releaseLoad: 'failed', releaseError: '결과물 주소를 확인하십시오.' });
+      return;
+    }
+    const controller = new AbortController();
+    _releaseAbort = controller;
     try {
-      const res = await fetch(`${API_BASE_URL}/api/v1/factory/library/item/${releaseId}`);
+      const res = await fetch(`${API_BASE_URL}/api/v1/factory/library/item/${encodeURIComponent(releaseId)}`,
+        { method: 'GET', cache: 'no-store', signal: controller.signal });
+      // 취소를 무시하는 통신 구현과 이미 도착한 본문도 요청 세대로 차단한다.
+      if (!isCurrent()) return;
       if (!res.ok) {
         const hidden = res.status === 401 || res.status === 403 || res.status === 404;
         set({ viewingRelease: null,
@@ -602,19 +640,27 @@ export const useFactoryStore = create<FactoryStore>()((set, get) => ({
         return;
       }
       const r = await res.json();
-      if (!r || r.status !== 'success' || !r.data) {
+      if (!isCurrent()) return;
+      if (!r || r.status !== 'success' || !r.data || typeof r.data !== 'object'
+          || Array.isArray(r.data) || r.data.release_id !== releaseId) {
         set({ viewingRelease: null, releaseLoad: 'failed',
               releaseError: '서버가 결과물을 확인해 주지 않았습니다. 다시 확인하십시오.' });
         return;
       }
       set({ viewingRelease: r.data, releaseLoad: 'idle', releaseError: '' });
     } catch (error) {
+      if (!isCurrent()) return;
       set({ viewingRelease: null, releaseLoad: 'failed',
             releaseError: '연결을 확인하지 못했습니다. 다시 확인하십시오.' });
+    } finally {
+      if (generation === _releaseGeneration) _releaseAbort = null;
     }
   },
 
-  closeRelease: () => set({ viewingRelease: null, releaseLoad: 'idle', releaseError: '' }),
+  closeRelease: () => {
+    invalidateReleaseRequest();
+    set({ viewingRelease: null, releaseLoad: 'idle', releaseError: '' });
+  },
 
   // ⚠️ [사용자 결정 2026-07-30] 서버는 기본적으로 **삭제를 거부**한다(409).
   //   배포된 프로그램을 지우면 다른 사용자가 남긴 기록이 고아가 되기 때문이며,

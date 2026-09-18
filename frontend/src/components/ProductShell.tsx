@@ -49,6 +49,34 @@ const NAV_PARENT: Partial<Record<ShellModule, ShellModule>> = {
   telemetry: 'agent',
 };
 
+/** [B6-CONTEXT · 결정 1] 시안의 **회사 문맥 칩 한 벌.**
+ *
+ *  ⚠️ 칩이 셸에만 있어서, 대상을 연 화면(작업공간·초안 편집기)에서는 **지금 어느 회사·범위인지
+ *    보이지도 않고 바꿀 수도 없었다.** 그 화면에 칩을 «다시 그리면» 그 순간부터 모양과
+ *    접근 이름이 갈라진다 — 그래서 **여기서 한 벌만 만들고 셸도 이것을 쓴다.**
+ *  ★ 상태의 출처도 하나다(`useOperatingContext`). 칩은 받은 것을 그리기만 한다. */
+export function OperatingContextChip({ company, scope, entityMode, onContext }: {
+  company: string; scope: string; entityMode: string; onContext: () => void;
+}) {
+  //: 시안의 `LS MnM · 전사공통 · 경영관리팀` 자리 — 회사 · 범위를 이어 적는다.
+  const contextLine = [company || '확인 중', scope].filter(Boolean).join(' · ');
+  //: 시안의 `M` 마크 — 회사 첫 글자. ⚠️ 회사를 모르면 «?» 다(빈 사각형을 남기지 않는다).
+  const mark = (company || '?').trim().charAt(0).toUpperCase();
+  return (
+    <button type="button" className="afs-context" onClick={onContext}
+      aria-label="회사 문맥 전환">
+      <span className="afs-context-mark">{mark}</span>
+      <span className="afs-context-copy">
+        <small>OPERATING CONTEXT</small>
+        <b>{contextLine}</b>
+      </span>
+      {/* ⚠️ 실행 문맥은 **항상** 보인다 — REAL 과 VIRTUAL 을 헷갈리면 시연 숫자가
+          실적으로 읽힌다(시안 §1.2 ⑥ 「회사 Context 상시 노출」). */}
+      <span className="afs-context-mode">{entityMode || 'REAL'}</span>
+    </button>
+  );
+}
+
 export function ProductShell({
   module, company, scope, entityMode, onNav, onContext, onAbout, onSettings, onNewWork,
   primaryActionLabel = '＋ 새 업무', right,
@@ -68,10 +96,6 @@ export function ProductShell({
   right?: React.ReactNode;
 }) {
   const activeModule = NAV_PARENT[module] || module;
-  //: 시안의 `LS MnM · 전사공통 · 경영관리팀` 자리 — 회사 · 범위를 이어 적는다.
-  const contextLine = [company || '확인 중', scope].filter(Boolean).join(' · ');
-  //: 시안의 `M` 마크 — 회사 첫 글자. ⚠️ 회사를 모르면 «?» 다(빈 사각형을 남기지 않는다).
-  const mark = (company || '?').trim().charAt(0).toUpperCase();
 
   return (
     <header className="afs-product-shell" data-module={module}>
@@ -86,17 +110,9 @@ export function ProductShell({
         </span>
       </button>
 
-      <button type="button" className="afs-context" onClick={onContext}
-        aria-label="회사 문맥 전환">
-        <span className="afs-context-mark">{mark}</span>
-        <span className="afs-context-copy">
-          <small>OPERATING CONTEXT</small>
-          <b>{contextLine}</b>
-        </span>
-        {/* ⚠️ 실행 문맥은 **항상** 보인다 — REAL 과 VIRTUAL 을 헷갈리면 시연 숫자가
-            실적으로 읽힌다(시안 §1.2 ⑥ 「회사 Context 상시 노출」). */}
-        <span className="afs-context-mode">{entityMode || 'REAL'}</span>
-      </button>
+      {/*: ★ 칩은 **한 벌**이다(위 `OperatingContextChip`). 셸도 그것을 쓴다. */}
+      <OperatingContextChip company={company} scope={scope} entityMode={entityMode}
+        onContext={onContext} />
 
       <nav className="afs-global-nav" aria-label="주요 기능">
         {NAV.map((n) => (

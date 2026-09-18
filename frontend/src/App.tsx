@@ -6,8 +6,12 @@ import { Group, Panel, Separator } from 'react-resizable-panels';
 
 import ControlPanel from './components/ControlPanel';
 import { AdaptiveProductionStudio } from './factory/AdaptiveProductionStudio';
-import { parseStudioLocation } from './factory/studioLocation';
+import { parseStudioLocation, serializeStudioLocation } from './factory/studioLocation';
+import type { StudioTarget } from './factory/studioLocation';
 import { StudioProjectEntryGate } from './factory/StudioProjectEntryGate';
+import { StudioDraftEntryGate } from './factory/StudioDraftEntryGate';
+import { openDraftRevision } from './lib/studioRequirementDraft';
+import { canLeaveNow, confirmLeave } from './factory/studioLeaveGuard';
 import type { ProjectEntry } from './factory/studioProjectEntry';
 import { StudioKitAppEntryGate } from './factory/StudioKitAppEntryGate';
 import type { KitAppEntry } from './factory/studioKitAppEntry';
@@ -54,7 +58,7 @@ import { ScenarioPanel } from './components/ScenarioPanel';
 import { ReleasePromotionPanel } from './components/ReleasePromotionPanel';
 import { CompanySetupPanel } from './components/CompanySetupPanel';
 import { OperatingContextSwitcher } from './components/OperatingContextSwitcher';
-import { ProductShell } from './components/ProductShell';
+import { OperatingContextChip, ProductShell } from './components/ProductShell';
 import { SystemAboutPage } from './components/SystemAboutPage';
 import { KitOperationsPanel } from './components/KitOperationsPanel';
 import { SimulationGovernanceShell } from './components/SimulationGovernanceShell';
@@ -83,9 +87,11 @@ import {
 type StudioEntry = {
   project: string | null; isNew: boolean; release: string | null;
   kitApp: { instanceId: string; appId: string } | null;
+  mega: { megaProjectId: string; childProjectId: string } | null;
+  draft: { draftId: string; draftKind: string; revision: number } | null;
 };
 function readStudioEntry(): StudioEntry {
-  const none: StudioEntry = { project: null, isNew: false, release: null, kitApp: null };
+  const none: StudioEntry = { project: null, isNew: false, release: null, kitApp: null, mega: null, draft: null };
   if (typeof window === 'undefined') return none;
   const parsed = parseStudioLocation(window.location.search);
   if (parsed.kind !== 'MATCH') return none;
@@ -97,7 +103,30 @@ function readStudioEntry(): StudioEntry {
     //   ★ `releaseId` 는 진입 확인 범위 밖이다(설계안 §6-2 미결). 문법으로 받되 여기서는
     //     쓰지 않는다 — 결정 전에 의미를 임의로 부여하지 않는다.
     kitApp: target.kind === 'kit_app' ? { instanceId: target.instanceId, appId: target.appId } : null,
+    //   ★ [MEGA-ENTRY-01] 메가는 `project` 의 한 종류다. 같은 확인 경로를 쓰되 자식을
+    //     함께 넘겨 **서버가 관계까지** 판정하게 한다(설계안 §10).
+    mega: target.kind === 'mega'
+      ? { megaProjectId: target.megaProjectId, childProjectId: target.childProjectId || '' } : null,
+    //   ★ [DRAFT-ENTRY-01] 초안은 **경계를 URL 에 싣지 않는다** — 종류·판본만 질문이고
+    //     소유 문맥은 서버가 찾는다(설계안 §12).
+    draft: target.kind === 'draft'
+      ? { draftId: target.draftId, draftKind: target.draftKind, revision: target.revision } : null,
   };
+}
+
+/** [FIX1 · 지시 2] URL 의 `space` 판독. **초기 마운트와 popstate 복원이 같은 규칙을 쓴다.**
+ *
+ *  ⚠️ 종전에는 초기식 안에만 있었다 — 뒤로/앞으로가 목록·홈 주소로 돌아와도 그 화면으로
+ *    전환할 방법이 없었고, 그래서 주소창과 화면이 어긋났다. */
+const STUDIO_SPACES = ['enterprise', 'about', 'build', 'operate', 'twin', 'report', 'knowledge',
+  'agent', 'advisor', 'data', 'calc', 'path', 'briefing', 'master', 'terminology', 'crosswalk',
+  'governance', 'planning', 'shadow', 'promotion', 'workspace', 'company', 'org', 'standard',
+  'agentgov', 'skills', 'telemetry'] as const;
+type StudioSpace = (typeof STUDIO_SPACES)[number];
+function readSpaceFromUrl(): StudioSpace {
+  if (typeof window === 'undefined') return 'enterprise';
+  const value = new URLSearchParams(window.location.search).get('space') || '';
+  return (STUDIO_SPACES as readonly string[]).includes(value) ? value as StudioSpace : 'enterprise';
 }
 
 /** [B6] 서버가 확인해 준 진입 대상만 실제 선택으로 옮긴다.
@@ -105,7 +134,17 @@ function readStudioEntry(): StudioEntry {
  *  ⚠️ 렌더 중에 store 를 바꾸지 않는다 — effect 에서만 옮기고, 옮겨지기 전에는 아무것도
  *    그리지 않는다. 조회 가능은 실행·게시 승인이 아니므로 여기서 더 하는 일은 없다. */
 function StudioEntryCommit({ entry, onCommit }: { entry: ProjectEntry; onCommit: (id: string) => void }) {
-  useEffect(() => { onCommit(entry.project_id); }, [entry.project_id, onCommit]);
+  //: ★ [MEGA-ENTRY-01] 자식이 **확인돼 왔으면** 그 자식으로 들어간다. 메가 회의실의
+  //:   「상세 뷰 진입」 버튼이 하는 일과 같은 자리이고, 다른 점은 **관계를 서버가
+  //:   확인해 줬다**는 것뿐이다. 확인이 안 된 자식은 애초에 여기까지 오지 않는다.
+  const target = entry.child ? entry.child.project_id : entry.project_id;
+  //: ⚠️⚠️ [2026-09-16] **콜백을 의존성에 넣지 않는다.** 부모가 JSX 안에서 인라인
+  //:   화살표로 넘기므로 렌더마다 신원이 바뀌고, 그러면 이 효과가 **다시 돈다** —
+  //:   `setCurrentProject` 가 반복되고 그것이 wbs·state·hotl·feed 네 요청을 다시 쏜다.
+  //: ★ 최신 콜백은 ref 로 들고, 의존성은 «무엇을 열 것인가» 하나로 둔다.
+  const commit = React.useRef(onCommit);
+  commit.current = onCommit;
+  useEffect(() => { commit.current(target); }, [target]);
   return null;
 }
 
@@ -113,8 +152,76 @@ function StudioEntryCommit({ entry, onCommit }: { entry: ProjectEntry; onCommit:
 function KitAppEntryCommit({ entry, onCommit }: {
   entry: KitAppEntry; onCommit: (instanceId: string, appId: string) => void;
 }) {
-  useEffect(() => { onCommit(entry.instance_id, entry.app_id); }, [entry.instance_id, entry.app_id, onCommit]);
+  //: ⚠️ 위와 같은 이유로 콜백은 ref 로 들고 의존성에서 뺀다.
+  const commit = React.useRef(onCommit);
+  commit.current = onCommit;
+  useEffect(() => { commit.current(entry.instance_id, entry.app_id); },
+    [entry.instance_id, entry.app_id]);
   return null;
+}
+
+/** [DRAFT-OPEN-01] **확인된 초안을 실제로 연다.**
+ *
+ *  ⚠️ 렌더 중에 부르지 않는다 — effect 에서만. 그리고 «확인된 뒤에만» 온다(Gate 가
+ *    AVAILABLE 일 때만 children 을 만든다). 조회 가능은 편집·승인 허가가 아니므로
+ *    여기서 더 하는 일은 없다: 불러와서 기존 요구사항 화면에 넘길 뿐이다.
+ *  ⚠️ 미저장 입력이 있으면 `openDraftRevision` 이 **멈춘다.** 그때는 사용자에게 묻고,
+ *    「계속」을 누른 경우에만 `replaceUnsaved` 로 다시 부른다. */
+function DraftOpenCommit({ entry, onOpened }: {
+  entry: { draft_id: string; revision: number;
+    ownership: { tenant_id: string; context_root_id: string; entity_mode: string; scope_node_id: string } };
+  onOpened: (deliverable: 'software_app' | 'hybrid_simulation' | 'document_report') => void;
+}) {
+  const [error, setError] = useState<{ message: string; replaceable: boolean } | null>(null);
+  const [busy, setBusy] = useState(true);
+  //: ⚠️ 콜백 신원이 바뀌어도 다시 불러오지 않는다 — 같은 이유다.
+  const opened = React.useRef(onOpened);
+  opened.current = onOpened;
+  const own = entry.ownership;
+  const ownershipKey = `${own.tenant_id}|${own.context_root_id}|${own.entity_mode}|${own.scope_node_id}`;
+  //: ★★★ [FIX1 · P1] **자동 진입과 재시도 버튼이 «같은» 취소 수명을 쓴다.**
+  //:
+  //: ⚠️⚠️ 종전에는 `open()` 이 돌려준 정리 함수를 `useEffect` 만 썼다 — 버튼으로 시작한
+  //:   요청은 아무도 취소하지 않아, 화면이 사라진 뒤에도 콜백이 돌 수 있었다.
+  //: ⚠️ 그리고 취소는 **거들 뿐**이다. 실제 오염 차단은 `openDraftRevision` 안에서
+  //:   문맥·세대를 adopt 직전에 다시 보는 쪽이 한다.
+  const request = React.useRef<AbortController | null>(null);
+  const open = React.useCallback((replaceUnsaved: boolean) => {
+    request.current?.abort();
+    const controller = new AbortController();
+    request.current = controller;
+    const live = () => request.current === controller && !controller.signal.aborted;
+    setBusy(true); setError(null);
+    void openDraftRevision(
+      { draftId: entry.draft_id, revision: entry.revision, ownership: entry.ownership },
+      { replaceUnsaved, signal: controller.signal })
+      .then((result) => { if (live()) opened.current(result.deliverable); })
+      .catch((failure: unknown) => {
+        if (!live()) return;
+        const reason = (failure as { reasonCode?: string })?.reasonCode || '';
+        const message = (failure as { message?: string })?.message || '초안을 불러오지 못했습니다.';
+        setError({ message, replaceable: reason === 'STUDIO_UNSAVED_INPUT' });
+      })
+      .finally(() => { if (live()) setBusy(false); });
+    return () => controller.abort();
+    //: ⚠️⚠️ [2026-09-16 실화면 실측] 의존성에 `entry.ownership` **객체**를 넣었더니
+    //:   렌더마다 새 신원이 되어 effect 가 다시 돌았다 — 같은 GET 이 **6번** 나갔다.
+    //:   조회라 해가 없어 보이지만 같은 실수가 쓰기 경로에 있으면 중복 실행이 된다.
+  }, [entry.draft_id, entry.revision, ownershipKey]);
+  useEffect(() => open(false), [open]);
+  //: 화면이 사라지면 **버튼으로 시작한 요청도** 함께 폐기한다.
+  useEffect(() => () => request.current?.abort(), []);
+  if (busy) return <p role="status" aria-live="polite">초안 {entry.revision}판을 불러오는 중입니다.</p>;
+  if (!error) return null;
+  return (
+    <section aria-label="초안 불러오기 실패">
+      <p role="alert">{error.message}</p>
+      {error.replaceable && (
+        <button type="button" onClick={() => open(true)}>지금 입력을 버리고 불러오기</button>
+      )}
+      <button type="button" onClick={() => open(false)}>다시 시도</button>
+    </section>
+  );
 }
 
 function AppShell() {
@@ -154,27 +261,28 @@ function AppShell() {
   //     한쪽만 고쳐도 조용히 다른 답을 준다. legacy `?project=` 단독은 그 모듈이
   //     `kind:'project'` 로 정규화하므로 기존 링크 동작은 그대로다.
   const initialEntry = React.useRef(readStudioEntry());
-  const initialProject = React.useRef<string | null>(initialEntry.current.project);
+  //   ★ [MEGA-ENTRY-01] 메가도 **같은 진입 확인**을 탄다 — 부모가 곧 확인 대상이다.
+  const initialProject = React.useRef<string | null>(
+    initialEntry.current.project ?? initialEntry.current.mega?.megaProjectId ?? null);
   const [space, setSpace] = useState<'enterprise' | 'about' | 'build' | 'operate' | 'twin' | 'report' | 'knowledge' | 'agent'
     | 'advisor' | 'data' | 'calc' | 'path' | 'briefing'
     | 'master' | 'terminology' | 'crosswalk' | 'governance' | 'planning' | 'shadow'
     | 'promotion' | 'workspace' | 'company' | 'org' | 'standard' | 'agentgov' | 'skills'
     | 'telemetry'>(() => {
     if (initialProject.current) return 'build';
-    if (typeof window === 'undefined') return 'enterprise';
-    const value = new URLSearchParams(window.location.search).get('space');
-    return value === 'about' || value === 'build' || value === 'operate' || value === 'twin'
-      || value === 'report' || value === 'knowledge' || value === 'agent'
-      || value === 'advisor' || value === 'data' || value === 'calc' || value === 'path'
-      || value === 'briefing' || value === 'master' || value === 'terminology'
-      || value === 'crosswalk' || value === 'governance' || value === 'planning' || value === 'shadow'
-      || value === 'promotion' || value === 'workspace'
-      || value === 'company' || value === 'org' || value === 'standard'
-      || value === 'agentgov' || value === 'skills'
-      || value === 'telemetry'
-      ? value : 'enterprise';
+    return readSpaceFromUrl();
   });
-  const [routeRestored, setRouteRestored] = useState(initialProject.current === null);
+  //   ★★★ [2026-09-16 실화면 실측] **확인이 끝날 때까지 URL 대상을 지우지 않는다.**
+  //
+  //   ⚠️⚠️ 종전에는 `initialProject.current === null` 만 봤다. 그 값은 **project·mega 만**
+  //     채운다 — 그래서 `kit_app`·`draft` 로 들어오면 시작부터 `true` 였고, 아래 효과가
+  //     **게이트가 확인을 끝내기도 전에** URL 의 대상 키를 지웠다. 그 상태에서 새로고침하면
+  //     진입 대상이 **사라진다**(브라우저로 초안 링크를 눌러 보고서야 드러났다).
+  //   ★ 닫는 쪽은 이미 셋 다 `setRouteRestored(true)` 를 부르고 있었다 — 의도는 처음부터
+  //     이것이었고 초기값만 빠져 있었다.
+  const [routeRestored, setRouteRestored] = useState(
+    initialProject.current === null && initialEntry.current.kitApp === null
+    && initialEntry.current.draft === null);
   //   ★★★ [B6] 직접 링크로 들어온 프로젝트는 **서버가 확인하기 전에 열지 않는다.**
   //     종전에는 여기서 곧바로 `setCurrentProject()` 를 불렀고, 그것이 wbs·state·hotl·feed
   //     네 요청을 즉시 쏘았다. 없는 프로젝트여도 화면은 열렸고 404 네 건은 「서버 연결 끊김」
@@ -183,8 +291,57 @@ function AppShell() {
   //     목록에서 고른 것이라 진입 확인을 한 번 더 할 이유가 없다.
   const [entryGateId, setEntryGateId] = useState<string | null>(initialProject.current);
   const [kitAppGate, setKitAppGate] = useState<{ instanceId: string; appId: string } | null>(initialEntry.current.kitApp);
+  //   ★★★ [FIX1 · 보완1] **«메가로 요청했다»는 사실 자체를 보존한다.** 자식 id 만
+  //     넘기면 「자식 없는 메가 링크」가 일반 프로젝트 요청과 구분되지 않는다 —
+  //     그러면 메가 링크로 일반 프로젝트가 열린다(검토에서 지적된 그대로였다).
+  //   ⚠️ 게이트가 닫힐 때 함께 비운다. 남겨 두면 다음 확인에 옛 요청이 딸려 간다.
+  const [megaRequest, setMegaRequest] = useState<{ childProjectId: string } | null>(
+    initialEntry.current.mega ? { childProjectId: initialEntry.current.mega.childProjectId } : null);
+  const [draftGate, setDraftGate] = useState(initialEntry.current.draft);
+  //   ★★★ [FIX1 · 지시 3 / 결정서 §3] **열린 대상은 새로고침으로 재현 가능해야 한다.**
+  //
+  //   ⚠️⚠️ 종전에는 확인이 끝나면 URL 의 대상 키를 «전부» 지우고 legacy `project` 만 남겼다.
+  //     그래서 메가의 부모/자식, 초안의 종류·판본, 업무앱의 instance/app, 릴리스 ID 가
+  //     **새로고침에서 사라졌다.** 「확인 중 보존」과 「열린 뒤 보존」은 다른 문제다.
+  //   ★ 직렬화는 문법 모듈(`serializeStudioLocation`)에 맡긴다 — 정규형을 두 곳에서 만들면
+  //     한쪽만 고쳐도 조용히 다른 주소가 된다.
+  const [openedMega, setOpenedMega] = useState<{ megaProjectId: string; childProjectId: string } | null>(null);
+  const [openedKitApp, setOpenedKitApp] = useState<{ instanceId: string; appId: string } | null>(null);
+  const [openedDraft, setOpenedDraft] = useState<{ draftId: string; draftKind: string; revision: number } | null>(null);
+  //: 릴리스는 조회가 끝나야 `viewingRelease` 가 찬다. 그 «사이» 에도 목적지를 잃지 않게 붙든다.
+  const [pendingRelease, setPendingRelease] = useState<string | null>(initialEntry.current.release);
+  //: `openTarget` 이 `new` 를 읽어야 하므로 «주소 계산보다 위» 에 둔다(선언 순서).
+  //: ★★★ [FIX2 · 실화면 실측] **첫 렌더부터 켜져 있어야 한다.** effect 로 뒤늦게 켜면
+  //:   그 «사이» 렌더에서 `openTarget` 이 비어, URL 동기화가 목록 주소를 **새 칸으로 밀어
+  //:   넣는다.** 실제로 `?target=new` 로 들어가면 칸이 둘 생겼고 뒤로가기가 중간의
+  //:   `?space=build` 로 갔다. 릴리스(`pendingRelease`)와 같은 이유·같은 처방이다.
+  const [buildStart, setBuildStart] = useState(initialEntry.current.isNew);
+  /** ★★★ [FIX2 · 지시 3] 릴리스의 **열기·닫기를 한 계약으로 묶는다.**
+   *
+   *  ⚠️ 종전에는 `viewRelease` 만 부르고 주소는 `viewingRelease` 가 차기를 기다렸다.
+   *    조회 중·실패 중에는 그 값이 **비어 있어** 목적지 주소를 잃었다.
+   *  ⚠️ 반대로 닫을 때 `closeRelease()` 만 부르면 주소에 대상이 **남는다.** 두 값을
+   *    따로 만지는 자리를 늘리지 않고 여기 둘로 모은다. */
+  const openRelease = useCallback((releaseId: string) => {
+    setPendingRelease(releaseId); void viewRelease(releaseId);
+  }, [viewRelease]);
+  const leaveRelease = useCallback(() => {
+    setPendingRelease(null); closeRelease();
+  }, [closeRelease]);
+  //: ★ 저장소는 **스스로도** 릴리스를 닫는다(세션·행위자·회사 문맥 변경). 그때 의도만
+  //:   남으면 화면은 비었는데 주소는 그 릴리스를 가리킨다 — 같은 신호를 함께 듣는다.
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const drop = () => setPendingRelease(null);
+    const events = ['factory:session-changed', 'factory:acting-user-changed',
+                    'factory:enterprise-context-changed'];
+    for (const name of events) window.addEventListener(name, drop);
+    return () => { for (const name of events) window.removeEventListener(name, drop); };
+  }, []);
   const closeEntryGate = useCallback(() => {
     setEntryGateId(null);
+    setMegaRequest(null);
+    setDraftGate(null);
     // 확인이 끝났으므로 이제 URL 을 현재 선택 상태로 다시 써도 된다.
     setRouteRestored(true);
   }, []);
@@ -194,39 +351,252 @@ function AppShell() {
   //   ⚠️ 닫기만 하지 않고 **같은 프로젝트를 새 문맥으로 다시 확인**한다. 상위/하위 조직으로
   //     옮긴 경우처럼 여전히 볼 수 있으면 확인 뒤 그대로 열리고, 볼 수 없으면 거절 화면이
   //     뜬다. 판정은 서버가 한다 — 여기서 조직 ID 를 비교해 흉내 내지 않는다.
-  const revalidateOpenProject = useCallback(() => {
-    const open = useFactoryStore.getState().currentProjectId;
+  /** ★★★ [B6-CONTEXT-SSE-01 · 사용자 결정 ②] 회사·행위자가 바뀌면 **열린 대상을 다시 확인한다.**
+   *
+   *  ⚠️⚠️ 종전에는 `project` **하나만** 다시 확인했다(`currentProjectId` 가 있을 때만).
+   *    초안·업무앱·메가·릴리스가 열려 있으면 **옛 문맥의 화면이 그대로 남았다** — 권한이
+   *    좁아진 문맥에서도 보이던 것이 계속 보인다. 여섯 대상에 분기를 여섯 개 다는 대신
+   *    **이미 있는 단 하나의 진입 경로**(`applyStudioEntry`)로 되돌린다.
+   *  ★ 대상의 정본은 **URL** 이다(FIX2 이후 열린 대상은 언제나 주소에 있다). 그래서
+   *    「지금 주소가 가리키는 것」을 새 권한으로 다시 확인하면 그것이 곧 재확인이다.
+   *  ⚠️ URL 은 건드리지 않는다 — 확인이 끝날 때까지 `routeRestored=false` 이므로 주소를
+   *    다시 쓰지 않고, 따라서 히스토리 칸도 늘지 않는다.
+   *  ⚠️ 목록·홈이면 확인할 것이 없다. 괜히 화면을 흔들지 않는다. */
+  const revalidateOpenEntry = useCallback(() => {
+    if (typeof window === 'undefined') return;
+    //: ⚠️ 주소와 화면이 어긋난 동안에는 URL 이 «지금 열린 대상» 이 아니다. 그 값으로 다시
+    //:   확인하면 엉뚱한 것을 확인한다 — 안전하게 **정리만** 하고 아무것도 열지 않는다.
+    if (strandedRef.current) {
+      applyStudioEntryRef.current(
+        { project: null, isNew: false, release: null, kitApp: null, mega: null, draft: null });
+      return;
+    }
+    const next = readStudioEntry();
+    const open = next.project || next.mega || next.draft || next.kitApp || next.release;
     if (!open) return;
+    applyStudioEntryRef.current(next);
+  }, []);
+  //   ★★★ [SINGLE-ENTRY-01 · 사용자 결정 A] **뒤로/앞으로는 진입을 «다시 실행»한다.**
+  //
+  //   ⚠️ 다시 «여는» 것이 아니라 다시 «확인하는» 것이다 — 그 사이 권한·문맥이 바뀌었을 수 있다.
+  //   ★ [FIX1 · 지시 2] 대상이 없는 주소로 돌아오면 **그 주소가 가리키는 화면으로 전환**한다.
+  //     종전에는 게이트만 닫아 기존 화면이 남았고 주소창과 어긋났다. `release`·`new` 도 복원한다.
+  //: `revalidateOpenEntry` 가 **위에서** 이것을 부른다. 선언 순서와 의존성 고리를 만들지
+  //: 않으려고 ref 로 최신 것을 가리킨다.
+  const applyStudioEntryRef = React.useRef<(next: StudioEntry) => void>(() => {});
+  const applyStudioEntry = useCallback((next: StudioEntry) => {
+    const project = next.project ?? next.mega?.megaProjectId ?? null;
+    if (project || next.kitApp || next.draft) {
+      // 확인이 끝날 때까지 편집기·선택을 내린다 — 확인 전에는 아무것도 열지 않는다.
+      //: ★★★ [FIX2 · 지시 3] **이전 대상을 «함께» 정리한다.** 종전에는 릴리스·업무앱 화면을
+      //:   그대로 두어, 릴리스에서 초안으로 가도 `openTarget` 이 릴리스를 먼저 고르고
+      //:   **새 주소를 옛 릴리스가 덮었다.** 대상은 배타적이다.
+      setBuildStart(false); setOpenedDraft(null);
+      setOpenedKitApp(null); setOpenedMega(null); setShowPathCalc(false);
+      leaveRelease();
+      setCurrentProject(null);
+      setEntryGateId(project);
+      setMegaRequest(next.mega ? { childProjectId: next.mega.childProjectId } : null);
+      setKitAppGate(next.kitApp);
+      setDraftGate(next.draft);
+      // URL 의 대상 키를 지우지 않는다 — 확인 중에 새로고침해도 잃지 않게.
+      setRouteRestored(false);
+      return;
+    }
+    //: 대상 없음 — 떠나는 화면을 정리하고 **URL 의 목적지**로 간다.
+    setEntryGateId(null); setMegaRequest(null); setDraftGate(null); setKitAppGate(null);
+    setOpenedMega(null); setOpenedKitApp(null); setOpenedDraft(null);
+    setShowPathCalc(false);
     setCurrentProject(null);
-    setEntryGateId(open);
-    // 확인이 끝날 때까지 URL 의 project 를 지우지 않는다(새로고침으로 잃지 않게).
-    setRouteRestored(false);
-  }, [setCurrentProject]);
+    setBuildStart(false);
+    leaveRelease();
+    //: ★ [FIX2 · 지시 3] 릴리스는 **조회가 끝나기 전에도 주소를 지킨다.** 종전에는
+    //:   `viewingRelease` 가 빌 동안 목적지 주소를 잃었다(로딩·실패 모두 `openTarget` 을 비웠다).
+    if (next.release) { setSpace('build'); openRelease(next.release); }
+    else if (next.isNew) { setSpace('build'); setBuildStartType('software_app'); setBuildStart(true); }
+    else setSpace(readSpaceFromUrl());
+    setRouteRestored(true);
+  }, [leaveRelease, openRelease, setCurrentProject]);
+  applyStudioEntryRef.current = applyStudioEntry;
+  //   ★★★ [FIX2 · 지시 1] **앱이 만든 항목에 번호를 붙인다 — 그래야 «방향과 칸 수»를 안다.**
+  //
+  //   ⚠️⚠️ 종전에는 모든 취소를 `go(1)` 로 되돌렸다. 「뒤로 한 칸」만 가정한 것이라
+  //     **앞으로 이동을 취소하면 더 앞으로 갔고**, 마지막 항목이면 아무 일도 안 일어나
+  //     `skipNextPop` 만 남았다. 두 칸 이동도 원위치로 못 돌아왔다.
+  //   ★ 번호는 우리가 만든 항목에만 붙인다. **없는 번호를 지어내지 않는다** — 번호가 없는
+  //     항목으로 가는 것은 「앱 밖으로 나가는 정상 이동」이고 붙잡지 않는다(문서 이탈은
+  //     기존 `beforeunload` 가 맡는다).
+  const historyIndex = React.useRef<number | null>(null);
+  /** ★★★ [FIX4 · 검토 A] **번호가 같아도 «같은 구간»이 아닐 수 있다.**
+   *
+   *  ⚠️ 번호를 잃은 뒤 우리는 0 부터 다시 센다. 그러면 옛 칸의 5 와 새 칸의 0 사이에
+   *    「−5」라는 **그럴듯한 정수 차이**가 생긴다. 그 차이로 방향·칸 수를 계산하면
+   *    엉뚱한 곳으로 이동시킨다 — 검토가 짚은 「관리 구간이 다른 항목 간 정수 차이만으로
+   *    방향을 추정하지 않는다」가 이것이다.
+   *  ★ 그래서 칸마다 **구간 표시**를 함께 찍고, 같은 구간일 때만 차이를 쓴다. */
+  const historyEpoch = React.useRef<string>('');
+  const newEpoch = React.useCallback(() => {
+    historyEpoch.current = Math.random().toString(36).slice(2, 10);
+    return historyEpoch.current;
+  }, []);
+  const skipNextPop = React.useRef(false);
+  const leavingAnyway = React.useRef(false);
+  //: 복원 popstate 가 끝나기 «전» 에 승인 클릭이 오면 여기 담아 두었다가 그 뒤에 실행한다.
+  //: ⚠️ 빠른 클릭이 잘못된 이동을 만들지 않게 하는 순서 제어다.
+  const pendingApproval = React.useRef<number | null>(null);
+  const restoringFromPop = React.useRef(false);
+  /** ★★★ [FIX3 · 검토 §4] **위치를 모르는 이동**에서 화면을 지키지 못한 주소.
+   *
+   *  ⚠️ 번호가 없다는 것은 「앱 밖」이라는 증거가 **아니다.** 같은 문서에서 다른 코드가
+   *    만든 항목일 수도 있고, 그때 `beforeunload` 는 **뜨지 않는다.** 종전에는 그런
+   *    항목으로 오면 묻지도 않고 편집기를 내렸다 — 미저장 입력이 그대로 사라진다.
+   *  ★ 그렇다고 방향·칸 수를 **지어내지 않는다.** 되돌릴 수 없으면 되돌리는 «시늉» 대신
+   *    어긋난 사실을 **보이게 두고** 사용자가 고르게 한다. 주소와 화면이 다른 것을
+   *    조용히 덮지 않는다. */
+  const [strandedEntry, setStrandedEntry] = useState<StudioEntry | null>(null);
+  //: 안정된 콜백 안에서 «지금» 값을 보려면 ref 가 필요하다(렌더 값은 그 시점에 굳는다).
+  const strandedRef = React.useRef<StudioEntry | null>(null);
+  strandedRef.current = strandedEntry;
+  //: 주소를 «다시 쓸» 필요가 생겼을 때만 URL 효과를 한 번 더 돌린다(칸은 늘리지 않는다).
+  const [addressNonce, setAddressNonce] = useState(0);
+  useEffect(() => {
+    if (typeof window === 'undefined' || historyIndex.current !== null) return;
+    //: 이 문서의 «현재» 항목을 우리 것으로 표시한다 — 새 칸을 만들지 않고 기존 state 도 보존한다.
+    const state = (window.history.state || {}) as Record<string, unknown>;
+    //: 새로고침으로 돌아온 «우리 칸» 이면 번호와 구간을 그대로 이어받는다.
+    if (Number.isSafeInteger(state.__studioIndex) && typeof state.__studioEpoch === 'string'
+        && state.__studioEpoch) {
+      historyIndex.current = state.__studioIndex as number;
+      historyEpoch.current = state.__studioEpoch;
+      return;
+    }
+    historyIndex.current = 0;
+    window.history.replaceState({ ...state, __studioIndex: 0, __studioEpoch: newEpoch() }, '',
+      `${window.location.pathname}${window.location.search}${window.location.hash}`);
+  }, [newEpoch]);
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const onPopState = (event: PopStateEvent) => {
+      if (skipNextPop.current) {
+        skipNextPop.current = false;
+        const redo = pendingApproval.current;
+        pendingApproval.current = null;
+        if (redo) { leavingAnyway.current = true; window.history.go(redo); }
+        return;
+      }
+      const state = (event.state || {}) as Record<string, unknown>;
+      //: ⚠️ 번호는 **정수**여야 쓴다. 남이 넣은 값·소수·NaN 을 그대로 빼면 엉뚱한 칸으로 간다.
+      const raw = state.__studioIndex;
+      //: ⚠️ 구간이 다르면 번호는 **남의 눈금**이다. 정수 차이가 그럴듯해도 쓰지 않는다.
+      const sameRange = typeof state.__studioEpoch === 'string'
+        && state.__studioEpoch !== '' && state.__studioEpoch === historyEpoch.current;
+      const incoming = sameRange && typeof raw === 'number' && Number.isSafeInteger(raw) ? raw : null;
+      const here = historyIndex.current;
+      const move = () => {
+        leavingAnyway.current = false;
+        historyIndex.current = incoming;
+        //: 남의 칸으로 왔으면 우리 눈금은 **거기서 끝난다.** 새 구간을 열어야 다음에
+        //: 우리가 만든 칸이 옛 눈금과 섞이지 않는다.
+        if (incoming === null) newEpoch();
+        restoringFromPop.current = true;
+        setStrandedEntry(null); setContextBlocked(false);
+        applyStudioEntry(readStudioEntry());
+      };
+      //: ★★★ [FIX3 · 검토 §4] **되돌릴 칸 수를 믿을 수 있을 때만** 붙잡는다.
+      //:   · 양쪽 번호를 알아야 한다.
+      //:   · `delta === 0` 이면 안 된다 — `history.go(0)` 은 **문서를 다시 읽는다.**
+      //:     되돌리려다 입력을 통째로 잃는다. 번호가 겹쳤다는 것 자체가 「모른다」는 뜻이다.
+      //:   · 칸 수가 이 문서의 히스토리보다 클 수 없다.
+      const delta = incoming !== null && here !== null ? incoming - here : 0;
+      const trusted = delta !== 0 && Math.abs(delta) < window.history.length;
+      //: 잃을 것이 없으면 그대로 간다 — 물을 이유가 없다.
+      if (leavingAnyway.current || canLeaveNow()) { move(); return; }
+      if (!trusted) {
+        //: ★ 위치를 모른다. **추측하지 않는다** — `go()` 를 부르지 않고 화면·입력도 그대로 둔다.
+        //:   확인 전에는 아무것도 적용하지 않고, 어긋난 주소를 배너로 «보이게» 남긴다.
+        setStrandedEntry(readStudioEntry());
+        return;
+      }
+      //: ★★★ [지시 4 유지] 이동 «전» 에 묻는다.
+      //: ⚠️ 취소는 **온 만큼 그대로** 되돌린다. `pushState` 로 되돌리면 항목이 늘어난다.
+      skipNextPop.current = true;
+      window.history.go(-delta);
+      confirmLeave(() => {
+        //: 복원 popstate 가 아직 안 왔으면 담아 두었다가 그 뒤에 간다.
+        if (skipNextPop.current) { pendingApproval.current = delta; return; }
+        leavingAnyway.current = true;
+        window.history.go(delta);
+      });
+    };
+    window.addEventListener('popstate', onPopState);
+    return () => window.removeEventListener('popstate', onPopState);
+  }, [applyStudioEntry]);
+  //   ★★★ [FIX1 · 지시 3 / 결정서 §2·§3] **열린 대상을 주소에 유지하고, 히스토리는 아껴 쓴다.**
+  //
+  //   ⚠️ 정규형은 문법 모듈이 만든다. 여기서 손으로 조립하면 파서와 조용히 갈라진다.
+  //   ⚠️ 관련 없는 쿼리와 hash 는 **그대로 둔다**(결정서 §3) — 직렬화 결과를 통째로
+  //     덮어쓰지 않고 «대상 키만» 바꿔 끼운다.
+  const openTarget = React.useMemo<StudioTarget | null>(() => {
+    const release = (viewingRelease as { release_id?: string } | null)?.release_id || pendingRelease;
+    if (release) return { kind: 'release', releaseId: release };
+    if (openedDraft && (openedDraft.draftKind === 'blueprint' || openedDraft.draftKind === 'consultation')) {
+      return { kind: 'draft', draftKind: openedDraft.draftKind,
+        draftId: openedDraft.draftId, revision: openedDraft.revision };
+    }
+    if (openedKitApp) return { kind: 'kit_app', instanceId: openedKitApp.instanceId, appId: openedKitApp.appId };
+    if (openedMega && currentProjectId) {
+      return { kind: 'mega', megaProjectId: openedMega.megaProjectId,
+        ...(openedMega.childProjectId ? { childProjectId: openedMega.childProjectId } : {}) };
+    }
+    if (currentProjectId) return { kind: 'project', projectId: currentProjectId };
+    //: ★ [FIX2 · 지시 3] `new` 도 주소로 재현된다. 빠뜨리면 만들기 화면이 열려 있는데
+    //:   URL 은 목록을 가리켜, 새로고침하면 입력하던 화면이 사라진다.
+    if (buildStart) return { kind: 'new' };
+    return null;
+  }, [viewingRelease, pendingRelease, openedDraft, openedKitApp, openedMega, currentProjectId, buildStart]);
   useEffect(() => {
     if (!routeRestored || typeof window === 'undefined') return;
+    //: ★★★ [FIX2 · 지시 2] **«복원 완료» 와 «쓰기 필요» 를 분리한다.**
+    //:
+    //: ⚠️⚠️ 종전에는 URL 이 이미 같으면 여기서 일찍 `return` 하고 표시를 그 «뒤» 에서
+    //:   껐다. 정상 복원은 대개 URL 이 같으므로 표시가 **다음 클릭까지 남았고**, 그
+    //:   클릭이 추가(push) 대신 교체(replace)가 되어 **기록을 잃었다.**
+    const restoring = restoringFromPop.current;
+    restoringFromPop.current = false;
     const next = new URL(window.location.href);
-    // [B6] 진입 대상 키는 App 상태가 소유한다. URL 에 남겨 두면 새로고침·뒤로가기가
-    //   이미 처리한 진입을 다시 실행하거나, 반쪽짜리 쿼리가 남아 다음 해석을 흐린다.
-    //   legacy `project` 만 아래에서 다시 쓴다 — 기존 공유 링크가 그 형태다.
-    for (const key of ['target', 'draft_kind', 'draft', 'revision', 'instance', 'app',
-                       'release', 'mega', 'child']) next.searchParams.delete(key);
-    if (currentProjectId) {
-      next.searchParams.set('space', 'build');
-      next.searchParams.set('project', currentProjectId);
+    for (const key of ['space', 'target', 'draft_kind', 'draft', 'revision', 'instance', 'app',
+                       'release', 'mega', 'child', 'project']) next.searchParams.delete(key);
+    if (openTarget) {
+      try {
+        new URLSearchParams(serializeStudioLocation({ target: openTarget }).slice(1))
+          .forEach((value, key) => next.searchParams.set(key, value));
+      } catch {
+        return;            // 정규형을 만들 수 없으면 주소를 건드리지 않는다
+      }
+    } else if (space !== 'enterprise') next.searchParams.set('space', space);
+    const search = next.search;
+    if (search === window.location.search) return;      // 같은 주소면 기록하지 않는다
+    const url = `${next.pathname}${search}${next.hash}`;
+    const state = (window.history.state || {}) as Record<string, unknown>;
+    if (restoring) {
+      //: 복원은 «현재 칸을 교체» 한다 — 번호도 그대로 둔다.
+      window.history.replaceState(state, '', url);
     } else {
-      next.searchParams.delete('project');
-      if (space === 'enterprise') next.searchParams.delete('space');
-      else next.searchParams.set('space', space);
+      //: ⚠️ 번호를 «잃은» 상태(우리 것이 아닌 항목 위)에서는 0 부터 다시 센다. 1 로 시작하면
+      //:   실제 위치와 어긋난 채로 `go(delta)` 를 계산하게 된다.
+      const index = (historyIndex.current ?? -1) + 1;
+      window.history.pushState(
+        { ...state, __studioIndex: index, __studioEpoch: historyEpoch.current || newEpoch() },
+        '', url);
+      historyIndex.current = index;
     }
-    window.history.replaceState(window.history.state, '', `${next.pathname}${next.search}${next.hash}`);
-  }, [currentProjectId, routeRestored, space]);
+  }, [openTarget, routeRestored, space, addressNonce, newEpoch]);
   // 경영 홈 → Factory, 목록 → 프로젝트처럼 화면 문맥이 바뀔 때 이전 화면의 스크롤 위치를
   // 가져오면 핵심 행동과 헤더가 화면 밖에서 시작한다. 새 화면은 항상 문서 맨 위에서 시작한다.
   useEffect(() => {
     window.scrollTo({ top: 0, left: 0, behavior: 'auto' });
   }, [space, currentProjectId]);
   // §5.2 «새 업무 만들기» — 생성은 목록면에서 분리된 별도 흐름이다(설계 `/build/start`).
-  const [buildStart, setBuildStart] = useState(false);
   const [buildStartType, setBuildStartType] = useState<BuildDeliverableType>('software_app');
   const openBuildStart = (type: BuildDeliverableType) => {
     setBuildStartType(type);
@@ -234,13 +604,12 @@ function AppShell() {
   };
   //   ★ [B6] `?space=build&target=new` 로 들어오면 만들기 흐름을 연다. 조회 대상이 없으므로
   //     진입 확인 게이트를 태우지 않는다 — 확인할 것이 없는 곳에 확인 화면을 띄우지 않는다.
-  //   ⚠️ 한 번만 연다. 닫은 뒤 새로고침·뒤로가기로 폼이 되살아나면 사용자는 자기가 만들려던
-  //     것인지 아닌지 알 수 없다. URL 의 `target` 은 아래 URL 동기화 effect 가 걷어 낸다.
+  //   ⚠️ 여는 자리는 **첫 렌더의 초기값**이다(위 `buildStart` 선언). effect 로 옮기면
+  //     그 사이 렌더가 주소를 목록으로 밀어 히스토리에 군더더기 칸이 생긴다 — 실측으로 봤다.
+  //   ★ 닫으면 `onClose` 가 주소에서 `target=new` 를 걷어 내므로, 닫은 뒤 새로고침해도
+  //     폼이 되살아나지 않는다. 「열려 있으면 주소에도 있다」가 이제 양쪽으로 성립한다.
   useEffect(() => {
-    if (!initialEntry.current.isNew) return;
-    initialEntry.current = { ...initialEntry.current, isNew: false };
-    setBuildStartType('software_app');
-    setBuildStart(true);
+    if (initialEntry.current.isNew) initialEntry.current = { ...initialEntry.current, isNew: false };
   }, []);
   //   ★ [B6] `?space=build&target=release&release=<id>` 직접 링크. `viewRelease` 가 서버에
   //     묻고 실패를 상태로 남기므로 별도 게이트를 두지 않는다 — 판정은 서버가 한다.
@@ -248,8 +617,8 @@ function AppShell() {
     const target = initialEntry.current.release;
     if (!target) return;
     initialEntry.current = { ...initialEntry.current, release: null };
-    void viewRelease(target);
-  }, [viewRelease]);
+    openRelease(target);
+  }, [openRelease]);
   const [showSkillEvolution, setShowSkillEvolution] = useState(false);
   const [showKnowledgeHub, setShowKnowledgeHub] = useState(false);
   const [knowledgeInitialView, setKnowledgeInitialView] = useState<KnowledgeView>('packs');
@@ -268,6 +637,20 @@ function AppShell() {
   const [showWorkStandard, setShowWorkStandard] = useState(false);
   const [showOrgChart, setShowOrgChart] = useState(false);
   const [showContextSwitcher, setShowContextSwitcher] = useState(false);
+  //: 어긋난 주소가 떠 있는데 전환을 누른 경우 — 배너에 한 줄을 덧붙여 «먼저 고르라» 고 말한다.
+  const [contextBlocked, setContextBlocked] = useState(false);
+  /** ★★★ [B6-CONTEXT · 결정 1] 문맥 전환을 여는 **단 하나의 문.**
+   *
+   *  ⚠️ 대상을 연 화면에도 칩을 달았으므로, 미저장 입력을 든 채로 눌릴 수 있다.
+   *    **기존 보호 정책을 그대로** 태운다 — 새 정책을 만들지 않는다. 사용자가 취소하면
+   *    전환 창이 열리지 않고, 따라서 **문맥 자체가 바뀌지 않는다.**
+   *  ⚠️⚠️ 주소와 화면이 어긋난 동안(경계 배너)에는 **URL 이 열린 대상이라는 가정을 쓸 수 없다.**
+   *    그 상태로 전환하면 「무엇을 다시 확인해야 하는지」를 모른 채 확인하게 된다.
+   *    그래서 **먼저 그 불일치를 고르게** 한다. */
+  const openContextSwitcher = useCallback(() => {
+    if (strandedEntry) { setContextBlocked(true); return; }
+    confirmLeave(() => setShowContextSwitcher(true));
+  }, [strandedEntry]);
   const [showCollaboration, setShowCollaboration] = useState(false);
   // 핵심 여정의 «의사결정 안건»은 계산 결과에 결속된 Decision Case를 검토하는 곳이다.
   // 협업 메뉴는 수신함에서, 핵심 여정 4단계는 의사결정 센터에서 시작한다.
@@ -325,22 +708,22 @@ function AppShell() {
       //     계속 **이전 사용자의 스트림**이다. 새 사용자의 알림은 안 오고 이전 사용자의
       //     알림이 이 화면으로 들어온다. 두 번째가 더 나쁘다.
       connectSSE();
-      // [B6] 사용자가 바뀌면 열려 있던 프로젝트도 새 권한으로 다시 확인한다.
-      revalidateOpenProject();
+      // [B6] 사용자가 바뀌면 열려 있던 **대상**도 새 권한으로 다시 확인한다(여섯 종류 모두).
+      revalidateOpenEntry();
     };
     window.addEventListener('factory:acting-user-changed', h);
     return () => window.removeEventListener('factory:acting-user-changed', h);
-  }, [connectSSE, revalidateOpenProject]);
+  }, [connectSSE, revalidateOpenEntry]);
 
   // ★★★ [G1-C1.2] 회사·사업부를 바꾸면 **SSE 를 다시 맺는다.**
   //   티켓에 조직 범위가 봉인돼 있어서, 스트림을 그대로 두면 목록은 A 인데 실시간 이벤트는
   //   계속 B 로 흐른다. 회사 선택기와 실시간 데이터 범위가 어긋나면 사용자는 자기가 보는
   //   숫자가 어느 회사 것인지 알 수 없다 — 경영 화면에서 그것은 오답보다 나쁘다.
   useEffect(() => {
-    const h = () => { connectSSE(); revalidateOpenProject(); };
+    const h = () => { connectSSE(); revalidateOpenEntry(); };
     window.addEventListener('factory:enterprise-context-changed', h);
     return () => window.removeEventListener('factory:enterprise-context-changed', h);
-  }, [connectSSE, revalidateOpenProject]);
+  }, [connectSSE, revalidateOpenEntry]);
 
   useEffect(() => {
     // 런처 진입 시 지식팩 목록 로드(생성 폼의 선택지)
@@ -424,7 +807,9 @@ function AppShell() {
         { id: 'path-calc', icon: '3️⃣', label: '경로 계산',
           desc: '승인된 관계를 따라가 부족량·생산가능량·매출 이연을 계산합니다 — 막히면 무엇이 없는지 말합니다',
           onSelect: () => {
-            setPathCalcInitialAppId(''); setShowPathCalc(false); setSpace('path');
+            //: ★ 모달을 닫고 전체 화면으로 간다 — 대상도 함께 놓는다(위 goHome 과 같은 짝).
+            setPathCalcInitialAppId(''); setShowPathCalc(false); setOpenedKitApp(null);
+            setSpace('path');
           } },
         { id: 'decision-pkg', icon: '4️⃣', label: '의사결정 안건',
           desc: '경로 계산에서 만든 안건을 세 관점으로 검토하고 · 실행 책임자와 기한을 확정하고 · 근거 계보를 확인합니다',
@@ -662,7 +1047,13 @@ function AppShell() {
     setShowKnowledgeHub(false);
     setShowDataPrep(false);
     setShowCalcApproval(false);
-    setShowPathCalc(false);
+    //: ★★★ [FIX3 · 2026-09-18 실화면 실측] 업무앱은 **화면과 대상을 «함께»** 놓는다.
+    //:   ⚠️ 종전에는 이 줄이 `setShowPathCalc(false)` 뿐이었다. 화면은 닫히는데
+    //:     `openedKitApp` 이 남아 **주소는 계속 업무앱을 가리켰다** — 실제로 「⌂ 경영 홈」
+    //:     을 눌러 홈으로 갔는데 URL 은 `target=kit_app…` 이었고, 새로고침하면 방금
+    //:     떠난 화면이 다시 열린다. 이 머리말이 경고한 「새 화면을 더할 때 여기도 더한다」
+    //:     를 내가 빠뜨린 것이다.
+    setShowPathCalc(false); setOpenedKitApp(null);
     setShowScenario(false);
     setShowPromotion(false);
     setShowKitOperations(false);
@@ -692,14 +1083,72 @@ function AppShell() {
 
   const overlays = (
     <HomeNavContext.Provider value={goHome}>
+      {/*: ★★★ [FIX3 · 검토 §4] **주소와 화면이 어긋난 채로 둔다 — 대신 보이게 둔다.**
+            뒤로/앞으로가 «번호를 모르는» 항목으로 갔고, 저장하지 않은 입력이 있어 화면을
+            내리지 않았다. 되돌릴 칸 수를 모르므로 `history.go()` 로 되돌리는 시늉을 하지
+            않는다(잘못 세면 엉뚱한 곳으로 가고, `go(0)` 은 문서를 다시 읽어 입력을 잃는다).
+            ★ 그래서 **고르는 것은 사용자**다. 둘 다 명시적이고, 둘 다 칸을 늘리지 않는다. */}
+      {strandedEntry && (
+        <div className="afs-stranded-address" style={{ position: 'fixed', left: 16, right: 16, bottom: 16, zIndex: 60 }}>
+          <Banner tone="warn" title="주소창이 이 화면과 다릅니다">
+            저장하지 않은 입력이 있어 화면을 그대로 두었습니다. 어떻게 할까요?
+            {contextBlocked && (
+              <div style={{ marginTop: 6, fontWeight: 700 }}>
+                주소와 화면이 다른 동안에는 회사·범위를 바꿀 수 없습니다 — 먼저 아래에서 골라 주십시오.
+              </div>
+            )}
+            <div style={{ display: 'flex', gap: 8, marginTop: 8, flexWrap: 'wrap' }}>
+              <button type="button" className="primary-button" onClick={() => {
+                //: 주소가 가리키는 곳으로 간다 — **입력 정책은 기존 확인 UI 가 그대로** 가진다.
+                const target = strandedEntry;
+                confirmLeave(() => {
+                  const st = (window.history.state || {}) as Record<string, unknown>;
+                  const at = st.__studioIndex, ep = st.__studioEpoch;
+                  if (Number.isSafeInteger(at) && typeof ep === 'string' && ep) {
+                    historyIndex.current = at as number; historyEpoch.current = ep;
+                  } else { historyIndex.current = null; newEpoch(); }
+                  restoringFromPop.current = true;
+                  setStrandedEntry(null); setContextBlocked(false);
+                  applyStudioEntry(target);
+                });
+              }}>주소가 가리키는 화면으로 이동</button>
+              <button type="button" className="secondary-button" onClick={() => {
+                //: 이 화면을 지킨다. **현재 칸의 주소만 바꿔 끼운다** — 새 칸을 만들지 않고
+                //: 없는 번호도 지어내지 않는다(기존 state 를 그대로 둔 채 교체한다).
+                //: ★★★ [FIX4 · 검토 A] 그리고 **우리 눈금을 «이 칸» 에 맞춘다.**
+                //:   ⚠️ 종전에는 옛 화면의 번호가 그대로 남았다. 그 상태로 다음 이동을 하면
+                //:     엉뚱한 번호를 붙이고, 그 뒤 뒤로/앞으로가 남의 눈금으로 계산된다.
+                //:   ★ 이 칸에 번호가 없으면 **없는 채로 둔다**(지어내지 않는다). 그러면
+                //:     다음에 우리가 만드는 칸이 0 부터 새 구간으로 시작한다.
+                const st = (window.history.state || {}) as Record<string, unknown>;
+                const at = st.__studioIndex, ep = st.__studioEpoch;
+                if (Number.isSafeInteger(at) && typeof ep === 'string' && ep) {
+                  historyIndex.current = at as number; historyEpoch.current = ep;
+                } else { historyIndex.current = null; newEpoch(); }
+                setStrandedEntry(null); setContextBlocked(false);
+                restoringFromPop.current = true;
+                setAddressNonce((n) => n + 1);
+              }}>이 화면의 주소로 되돌리기</button>
+            </div>
+          </Banner>
+        </div>
+      )}
       {buildStart && (
         <BuildStartDialog
           deliverableType={buildStartType}
           templates={templates as any}
           knowledgePacks={knowledgePacks}
           packsBlocked={packsBlocked}
-          onClose={() => setBuildStart(false)}
-          onOpenDataPrep={() => { setBuildStart(false); setShowDataPrep(true); }}
+          /*: ⚠️⚠️ [2026-09-16 실화면 실측] **닫으면 주소도 그 초안을 놓아야 한다**(결정서 §4).
+              종전에는 편집기를 닫아도 `openedDraft` 가 남아 URL 이 계속 「초안이 열려 있다」고
+              말했다 — 화면은 목록인데 새로고침하면 초안이 다시 열린다. 주소가 거짓말을 한다. */
+          /*: ★ [B6-CONTEXT · 결정 1] 초안 편집기 안에서도 회사 문맥을 보고 바꾼다.
+               셸과 같은 컴포넌트를 «부모가» 넣는다 — 대화상자가 스스로 만들면 갈라진다. */
+          contextChip={<OperatingContextChip company={shellCompanyName}
+            scope={shellCtx.scopeLabel} entityMode={shellCtx.entityMode}
+            onContext={openContextSwitcher} />}
+          onClose={() => { setBuildStart(false); setOpenedDraft(null); }}
+          onOpenDataPrep={() => { setBuildStart(false); setOpenedDraft(null); setShowDataPrep(true); }}
           onCreate={async (r) => {
             const domains = r.masterDomains.split(',').map((x) => x.trim()).filter(Boolean);
             const createdProjectId = r.isMega
@@ -723,7 +1172,8 @@ function AppShell() {
       {showPathCalc && <PathCalcPanel
         initialInstanceId={pathCalcInitialInstanceId}
         initialAppId={pathCalcInitialAppId}
-        onClose={() => setShowPathCalc(false)} />}
+        /*: ⚠️ [FIX2 · 지시 3] 닫으면 **주소도 그 업무앱을 놓는다** — 초안 닫기와 같은 문제였다. */
+        onClose={() => { setShowPathCalc(false); setOpenedKitApp(null); }} />}
       {showScenario && <ScenarioPanel onClose={() => setShowScenario(false)} />}
       {showPromotion && (
         <ReleasePromotionPanel onClose={() => setShowPromotion(false)} />
@@ -740,6 +1190,9 @@ function AppShell() {
             setPathCalcInitialInstanceId(instanceId);
             setPathCalcInitialAppId(appId);
             setShowKitOperations(false);
+            //: ★ [FIX2 · 지시 3] 주소로 «열 때» 와 «같은 대상» 을 기록한다. 한쪽만 기록하면
+            //:   화면은 업무앱인데 주소는 목록이고, 새로고침이 화면을 버린다.
+            setOpenedKitApp({ instanceId, appId });
             setShowPathCalc(true);
           }}
         />
@@ -833,24 +1286,30 @@ function AppShell() {
 
   //   [B6] 조회 실패를 빈 화면으로 두지 않는다. 결과물을 못 열었으면 그렇게 말하고
   //     되돌아갈 길과 다시 시도할 길을 함께 준다.
-  if (!viewingRelease && (releaseLoad === 'failed' || releaseLoad === 'forbidden')) {
+  if (!viewingRelease && (releaseLoad === 'loading' || releaseLoad === 'failed' || releaseLoad === 'forbidden')) {
     return (
       <ErrorBoundary>
         {overlays}
         <div className="afs-scope afs-page h-screen w-full flex flex-col overflow-hidden font-sans">
           <div className="flex items-center gap-3 px-4 py-3 border-b afs-border">
             <button
-              onClick={() => { closeRelease(); setSpace('enterprise'); }}
+              onClick={() => { leaveRelease(); setSpace('enterprise'); }}
               className="text-sm font-bold text-gray-100 hover:text-white bg-indigo-700 hover:bg-indigo-600 px-3 py-1.5 rounded transition-colors"
             >⌂ 경영 홈</button>
             <button
-              onClick={() => { closeRelease(); setSpace('build'); }}
+              onClick={() => { leaveRelease(); setSpace('build'); }}
               className="text-sm font-bold text-gray-400 hover:text-gray-100 bg-gray-700 px-3 py-1.5 rounded transition-colors"
             >◀ 앱 제작</button>
           </div>
           <main className="flex-1 min-h-0 overflow-auto p-6">
-            <section aria-label="결과물 확인 필요">
-              <p role="alert">{releaseError || '결과물을 확인하지 못했습니다.'}</p>
+            <section aria-label={releaseLoad === 'loading' ? '결과물 조회 중' : '결과물 확인 필요'}>
+              {releaseLoad === 'loading' ? (
+                <>
+                  <p role="status">결과물을 불러오는 중입니다.</p>
+                  <button onClick={leaveRelease}
+                    className="mt-4 text-sm px-3 py-2 rounded bg-gray-700 text-gray-100">조회 취소</button>
+                </>
+              ) : <p role="alert">{releaseError || '결과물을 확인하지 못했습니다.'}</p>}
             </section>
           </main>
         </div>
@@ -864,7 +1323,7 @@ function AppShell() {
         <div className="h-screen w-screen bg-gray-900 text-gray-100 flex flex-col font-sans overflow-hidden">
           <header className="h-14 bg-gray-800 border-b border-gray-700 flex items-center justify-between px-6 shrink-0">
             <div className="flex items-center gap-4 min-w-0">
-              <button onClick={closeRelease} className="text-sm font-bold text-gray-400 hover:text-gray-100 bg-gray-700 px-3 py-1.5 rounded transition-colors shrink-0">◀ 라이브러리</button>
+              <button onClick={leaveRelease} className="text-sm font-bold text-gray-400 hover:text-gray-100 bg-gray-700 px-3 py-1.5 rounded transition-colors shrink-0">◀ 라이브러리</button>
               <h1 className="text-lg font-bold text-gray-100 truncate">
                 📦 결과물 실행: <span className="text-emerald-400">{viewingRelease.project_name}</span>
                 <span className="text-xs text-gray-500 font-normal ml-2">{viewingRelease.created_at}</span>
@@ -967,7 +1426,7 @@ function AppShell() {
             scope={shellCtx.scopeLabel}
             entityMode={shellCtx.entityMode}
             onNav={handleShellNav}
-            onContext={() => setShowContextSwitcher(true)}
+            onContext={openContextSwitcher}
             onAbout={() => setSpace('about')}
             onSettings={() => setOpenConsole(true)}
             onNewWork={() => setSpace('build')}
@@ -994,7 +1453,7 @@ function AppShell() {
             scope={shellCtx.scopeLabel}
             entityMode={shellCtx.entityMode}
             onNav={handleShellNav}
-            onContext={() => setShowContextSwitcher(true)}
+            onContext={openContextSwitcher}
             onAbout={() => setSpace('about')}
             onSettings={() => setOpenConsole(true)}
             onNewWork={() => setSpace('build')}
@@ -1038,7 +1497,7 @@ function AppShell() {
             scope={shellCtx.scopeLabel}
             entityMode={shellCtx.entityMode}
             onNav={handleShellNav}
-            onContext={() => setShowContextSwitcher(true)}
+            onContext={openContextSwitcher}
             onAbout={() => setSpace('about')}
             onSettings={() => setOpenConsole(true)}
             onNewWork={() => setSpace('build')}
@@ -1081,7 +1540,7 @@ function AppShell() {
             scope={shellCtx.scopeLabel}
             entityMode={shellCtx.entityMode}
             onNav={handleShellNav}
-            onContext={() => setShowContextSwitcher(true)}
+            onContext={openContextSwitcher}
             onAbout={() => setSpace('about')}
             onSettings={() => setOpenConsole(true)}
             onNewWork={() => setSpace('build')}
@@ -1110,7 +1569,7 @@ function AppShell() {
             scope={shellCtx.scopeLabel}
             entityMode={shellCtx.entityMode}
             onNav={handleShellNav}
-            onContext={() => setShowContextSwitcher(true)}
+            onContext={openContextSwitcher}
             onAbout={() => setSpace('about')}
             onSettings={() => setOpenConsole(true)}
             onNewWork={() => setSpace('build')}
@@ -1140,7 +1599,7 @@ function AppShell() {
             scope={shellCtx.scopeLabel}
             entityMode={shellCtx.entityMode}
             onNav={handleShellNav}
-            onContext={() => setShowContextSwitcher(true)}
+            onContext={openContextSwitcher}
             onAbout={() => setSpace('about')}
             onSettings={() => setOpenConsole(true)}
             onNewWork={() => openBuildStart('document_report')}
@@ -1180,7 +1639,7 @@ function AppShell() {
             scope={shellCtx.scopeLabel}
             entityMode={shellCtx.entityMode}
             onNav={handleShellNav}
-            onContext={() => setShowContextSwitcher(true)}
+            onContext={openContextSwitcher}
             onAbout={() => setSpace('about')}
             onSettings={() => setOpenConsole(true)}
             onNewWork={() => openBuildStart('hybrid_simulation')}
@@ -1212,7 +1671,7 @@ function AppShell() {
             scope={shellCtx.scopeLabel}
             entityMode={shellCtx.entityMode}
             onNav={handleShellNav}
-            onContext={() => setShowContextSwitcher(true)}
+            onContext={openContextSwitcher}
             onAbout={() => setSpace('about')}
             onSettings={() => setOpenConsole(true)}
             onNewWork={() => { setSpace('build'); openBuildStart('software_app'); }}
@@ -1256,6 +1715,9 @@ function AppShell() {
             <StudioKitAppEntryGate instanceId={kitAppGate.instanceId} appId={kitAppGate.appId}>
               {(entry) => (
                 <KitAppEntryCommit entry={entry} onCommit={(instanceId, appId) => {
+                  //: 업무앱도 instance/app 을 주소에 남긴다(결정서 §3).
+                  setOpenedKitApp({ instanceId, appId });
+                  setOpenedMega(null); setOpenedDraft(null);
                   setPathCalcInitialInstanceId(instanceId);
                   setPathCalcInitialAppId(appId);
                   setShowPathCalc(true);
@@ -1273,12 +1735,12 @@ function AppShell() {
   // ★★★ [B6] 직접 링크 진입 — 서버 확인 전에는 목록도 Studio 도 보여 주지 않는다.
   //   확인 중·거절 표시는 `StudioProjectEntryGate` 가 맡고, 여기서는 그 화면에서
   //   빠져나갈 길(경영 홈·목록)만 함께 둔다. 확인되면 아래 기존 흐름으로 넘어간다.
-  if (entryGateId && !currentProjectId) {
+  if ((entryGateId || draftGate) && !currentProjectId) {
     return (
       <ErrorBoundary>
         {overlays}
         <div className="afs-scope afs-page h-screen w-full flex flex-col overflow-hidden font-sans">
-          <div className="flex items-center gap-3 px-4 py-3 border-b afs-border">
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-2 px-4 py-3 border-b afs-border">
             <button
               onClick={() => { closeEntryGate(); setSpace('enterprise'); }}
               className="text-sm font-bold text-gray-100 hover:text-white flex items-center gap-1 bg-indigo-700 hover:bg-indigo-600 px-3 py-1.5 rounded transition-colors"
@@ -1293,16 +1755,49 @@ function AppShell() {
             >
               ◀ 앱 제작
             </button>
+            {/*: ★★★ [B6-CONTEXT · 검토 §3] **거절 화면에서도 «되돌아올» 수 있어야 한다.**
+                 ⚠️ 종전에는 여기 칩이 없어, 권한 있는 범위로 돌아가려면 홈으로 나갔다가
+                   다시 들어와야 했다. 주소는 대상을 지키고 있는데 사용자는 그 길을 잃는다.
+                 ★ **새 전환 창을 만들지 않는다** — 셸·작업공간과 같은 칩, 같은 문
+                   (`openContextSwitcher`)이다. 미저장 보호·주소 불일치 차단도 그대로 탄다. */}
+            <div className="shrink-0">
+              <OperatingContextChip company={shellCompanyName} scope={shellCtx.scopeLabel}
+                entityMode={shellCtx.entityMode} onContext={openContextSwitcher} />
+            </div>
           </div>
           <main className="flex-1 min-h-0 overflow-auto p-6">
-            <StudioProjectEntryGate projectId={entryGateId}>
-              {(entry) => (
-                <StudioEntryCommit entry={entry} onCommit={(id) => {
-                  setCurrentProject(id);
-                  closeEntryGate();
-                }} />
-              )}
-            </StudioProjectEntryGate>
+            {entryGateId ? (
+              <StudioProjectEntryGate projectId={entryGateId}
+                childId={megaRequest?.childProjectId || ''} requireMega={megaRequest !== null}>
+                {(entry) => (
+                  <StudioEntryCommit entry={entry} onCommit={(id) => {
+                    //: 메가로 들어왔으면 **부모/자식을 잃지 않는다**(결정서 §3).
+                    setOpenedMega(megaRequest && entryGateId
+                      ? { megaProjectId: entryGateId, childProjectId: megaRequest.childProjectId } : null);
+                    setOpenedKitApp(null); setOpenedDraft(null);
+                    setCurrentProject(id);
+                    closeEntryGate();
+                  }} />
+                )}
+              </StudioProjectEntryGate>
+            ) : draftGate ? (
+              /* ⚠️ 확인까지가 이번 범위다. 확인된 초안을 **여는 화면**(앱 제작 시작에
+                 그 판본을 실어 넘기는 자리)은 아직 없다 — 없는 화면을 지어내지 않는다.
+                 서버가 「볼 수 있다」고 한 사실만 보이고, 나머지는 인계한다. */
+              <StudioDraftEntryGate draftId={draftGate.draftId}
+                draftKind={draftGate.draftKind} revision={draftGate.revision}>
+                {(entry) => (
+                  <DraftOpenCommit entry={entry} onOpened={(deliverable) => {
+                    //: 초안은 **종류·판본까지** 주소에 남는다.
+                    setOpenedDraft(draftGate);
+                    setOpenedMega(null); setOpenedKitApp(null);
+                    setBuildStartType(deliverable);
+                    setBuildStart(true);
+                    closeEntryGate();
+                  }} />
+                )}
+              </StudioDraftEntryGate>
+            ) : null}
           </main>
         </div>
       </ErrorBoundary>
@@ -1321,7 +1816,7 @@ function AppShell() {
             scope={shellCtx.scopeLabel}
             entityMode={shellCtx.entityMode}
             onNav={handleShellNav}
-            onContext={() => setShowContextSwitcher(true)}
+            onContext={openContextSwitcher}
             onAbout={() => setSpace('about')}
             onSettings={() => setOpenConsole(true)}
             onNewWork={() => openBuildStart('software_app')}
@@ -1353,7 +1848,7 @@ function AppShell() {
             scopeLabel={shellCtx.scopeLabel}
             entityMode={shellCtx.entityMode}
             onOpenProject={(id) => setCurrentProject(id)}
-            onOpenRelease={(releaseId) => viewRelease(releaseId)}
+            onOpenRelease={(releaseId) => openRelease(releaseId)}
             onManageRelease={(r) => setAdminProgram({
               id: r.release_id, name: r.display_name || r.project_name || r.release_id,
             })}
@@ -1389,7 +1884,10 @@ function AppShell() {
           ⚠️ `afs-scope` 를 붙이지 않는다. 그것은 **라이트** 표면 계열이라 여기 오면 배경과
             글자가 뒤집힌다(실측: 뿌리에 `afs-product-shell` 을 붙였더니 결함 26 → 28건). */}
       <div className="afs-workbench h-screen w-screen bg-gray-950 text-gray-100 flex flex-col font-sans overflow-hidden">
-        <header className="min-h-14 bg-gray-950/95 backdrop-blur border-b border-gray-700 flex items-center justify-between gap-3 px-4 py-2 shrink-0 z-20">
+        {/*: ⚠️ [B6-CONTEXT] 좁은 화면에서 좌/우 묶음이 **서로 덮였다**(실측: 문맥 칩이
+             다른 버튼 아래로 들어가 눌리지 않았다). 줄바꿈을 허용해 «가려지는 대신 내려가게»
+             한다 — 상단 바가 한 줄이어야 할 이유는 없다. */}
+        <header className="min-h-14 bg-gray-950/95 backdrop-blur border-b border-gray-700 flex flex-wrap items-center justify-between gap-x-3 gap-y-2 px-4 py-2 shrink-0 z-20">
           <div className="flex items-center gap-3 min-w-0">
             {/* ★★★ [2026-08-25 사용자 지적] 「각 화면에서 홈으로 돌아가는 버튼이 없다」.
                 ⚠️⚠️ 통제실에는 «런처 복귀» 만 있었다. 그것은 Software Factory 로 가는
@@ -1415,6 +1913,17 @@ function AppShell() {
               <span className="text-blue-300 truncate">{currentProject?.name || currentProjectId}</span>
               <span className="text-gray-400 text-sm font-semibold shrink-0">· {workbenchLabel}</span>
             </h1>
+            {/*: ★★★ [B6-CONTEXT · 결정 1] **작업공간에도 회사 문맥이 보이고 바뀐다.**
+                 ⚠️ 종전에는 대상을 열면 칩이 사라져 「지금 어느 회사·범위인지」 알 수도,
+                   바꿀 수도 없었다. 실측으로 확인한 결함이다(2026-09-18).
+                 ★ 셸과 **같은 컴포넌트·같은 상태 출처·같은 접근 이름**을 쓴다. 전환 창도
+                   기존 것 하나다. 미저장 보호는 `openContextSwitcher` 가 맡는다. */}
+            {/*: ⚠️ 이 줄은 `min-w-0` 인 flex 다 — 그대로 두면 칩이 22px 로 **찌그러져
+                 다른 버튼에 덮인다**(실측). 칩은 제 크기를 지킨다. */}
+            <div className="shrink-0">
+              <OperatingContextChip company={shellCompanyName} scope={shellCtx.scopeLabel}
+                entityMode={shellCtx.entityMode} onContext={openContextSwitcher} />
+            </div>
           </div>
           <div className="relative flex items-center justify-end gap-2 overflow-x-auto shrink-0">
             <button
@@ -1591,7 +2100,9 @@ export default function App() {
     return (
       <ErrorBoundary>
         <LoginPage onLoggedIn={() => {
-          setState('in');
+          // 새로고침과 동일한 인증·회사 보정을 먼저 끝낸다. 옛 회사 문맥으로
+          // 직접 링크를 소비하면 뒤이은 문맥 보정에서 그 조회가 취소된다.
+          void check();
           // 초기 비밀번호 상태는 로그인 뒤 상단 SessionBar가 지속적으로 보여 주고 바로 옆
           // 「환경설정 · 관리자」에서 변경한다. 네이티브 alert는 첫 화면 전체를 막으므로 쓰지 않는다.
         }} />

@@ -17,10 +17,16 @@ export function ProjectEntryStatus({ state, onRetry }: { state: ProjectEntryStat
 }
 
 /** 전역 mount는 다음 배치. 확인 전/문맥 무효화 후에는 자식 Studio를 만들지 않는다. */
-export function StudioProjectEntryGate({ projectId, children }: {
-  projectId: string; children?: (entry: ProjectEntry) => ReactNode;
+export function StudioProjectEntryGate({ projectId, childId = '', requireMega = false, children }: {
+  projectId: string; childId?: string; requireMega?: boolean;
+  children?: (entry: ProjectEntry) => ReactNode;
 }) {
-  const flow = useMemo(() => createProjectEntryFlow(projectId), [projectId]);
+  //: ★ [MEGA-ENTRY-01] 자식이 바뀌면 **확인도 다시 한다** — 같은 부모라도 다른 자식은
+  //:   다른 질문이다. `childId` 를 의존성에서 빼면 옛 확인 결과로 새 자식을 연다.
+  //: ★ [FIX1 · 보완1] `requireMega` 도 **질문의 일부**다. 대상 종류가 바뀌면 이전
+  //:   flow·응답을 버린다 — 일반 프로젝트로 확인해 둔 결과로 메가 링크를 열면 안 된다.
+  const flow = useMemo(() => createProjectEntryFlow(projectId, childId, requireMega),
+    [projectId, childId, requireMega]);
   const state = useSyncExternalStore(flow.subscribe, flow.getSnapshot, flow.getSnapshot);
   useEffect(() => { flow.activate(); void flow.load(); return () => flow.dispose(); }, [flow]);
   if (state.phase === 'AVAILABLE' && state.data && flow.isCurrent()) {

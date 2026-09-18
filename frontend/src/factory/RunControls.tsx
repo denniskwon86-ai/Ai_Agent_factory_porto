@@ -9,7 +9,7 @@ import type { RevisionAttempt } from '../lib/studioRevisionFlow';
 import { getExecutionRecords, hasExecutionPending, subscribeExecutionRecords, type ExecutionAttempt } from '../lib/studioExecutionApi';
 import { StudioExecutionRequests } from './StudioExecutionRequests';
 import {
-  REPLAN_CONFIRM, REVISION_NOTE, SELF_HEAL_NOTE, exportArchiveUrl, newPlanningTaskId,
+  REPLAN_CONFIRM, REVISION_NOTE, SELF_HEAL_NOTE, downloadProjectArchive, newPlanningTaskId,
   replanWbs, resumeAfterQuota, resumeExistingTask, startPlanning, startExistingTask,
   type SprintResult,
 } from './sprintActions';
@@ -273,8 +273,26 @@ function ProjectRunControls({ vm, onReviewResult, onReviewDecision, onShowTasks 
           busy="" onClick={openRevision} />
         <Action label="검토용 버전 저장" why={activeReason || (!hasResult ? '저장할 결과가 없습니다.' : '')} busy={busy} onClick={doRelease} />
         <Action label="작업 계획 다시 나누기" why={activeReason || (!vm.docs.PLANNING ? '기획 결과가 필요합니다.' : '')} busy={busy} onClick={() => setPanel('replan')} />
+        {/*: ★★★ [§10.1 · 2026-09-19 실측] **앵커로는 내려받을 수 없다.**
+             이 제품의 신원은 `X-Session-Token` 헤더인데 앵커 이동은 헤더를 못 싣는다 —
+             서버는 200 을 줄 수 있는데 버튼만 401 이었고, 그 실패가 화면에 나오지도 않아
+             「눌렀는데 아무 일도 없다」였다. 공용 함수가 세션을 실어 받고 사유를 돌려준다. */}
         <Action label="코드·문서 내려받기" why={disabledReason || (!hasResult ? '내려받을 결과가 없습니다.' : '')} busy={busy} onClick={() => {
-          const a = document.createElement('a'); a.href = exportArchiveUrl(pid); a.download = `${pid}.zip`; a.click();
+          void (async () => {
+            const result = await downloadProjectArchive(pid);
+            //: ⚠️⚠️ [검토 2026-09-19] **완료 «시점» 의 화면과 비교한다.**
+            //:   종전에는 `result.projectId !== pid` 였다. 그런데 `pid` 는 «요청을 시작한
+            //:   렌더» 의 클로저 값이라, A 요청 뒤 B 로 옮겨도 둘이 같아 그대로 통과했다 —
+            //:   즉 그것은 「대상 확인」이 아니라 자기 자신과의 비교였다.
+            //: ★ 지금 화면이 살아 있는가(`alive`)와 **지금 열린 프로젝트**를 함께 본다.
+            //:   같은 A 로 다시 들어온 «새 화면» 은 새로 mount 되므로 옛 안내가 붙지 않는다.
+            if (!alive.current) return;
+            if (useFactoryStore.getState().currentProjectId !== result.projectId) return;
+            //: ★ 「저장 완료」가 아니라 «시작» 이다 — 디스크 저장은 브라우저가 한다.
+            setNote(result.ok
+              ? { ok: true, text: `내려받기를 시작했습니다 — ${result.filename}` }
+              : { ok: false, text: result.reason });
+          })();
         }} />
       </div>
     </details>

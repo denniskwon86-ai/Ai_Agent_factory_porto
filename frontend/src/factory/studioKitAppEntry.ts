@@ -9,6 +9,8 @@
 //   같은 모양이어야 옮기기 쉬우므로 의도적으로 같은 구조를 유지했다.
 import { apiFetch, getEnterpriseContext } from '../lib/api';
 import { studioIdentityKey } from './studioInputMemory';
+import { createEntryFlow } from './studioEntryFlow';
+import type { EntryState } from './studioEntryFlow';
 
 export type KitAppEntry = {
   instance_id: string; app_id: string; app_label: string;
@@ -75,50 +77,11 @@ export async function readKitAppEntry(instanceId: string, appId: string, signal?
   }
 }
 
-export type KitAppEntryState = {
-  phase: 'IDLE' | 'LOADING' | 'AVAILABLE' | 'BLOCKED'; data: KitAppEntry | null; error: KitAppEntryError | null;
-};
-const events = ['factory:session-changed', 'factory:acting-user-changed', 'factory:enterprise-context-changed'];
+export type KitAppEntryState = EntryState<KitAppEntry, KitAppEntryError>;
 export function createKitAppEntryFlow(instanceId: string, appId: string) {
-  let state: KitAppEntryState = { phase: 'IDLE', data: null, error: null };
-  let active = false, generation = 0, identity = '', controller: AbortController | null = null;
-  const listeners = new Set<() => void>();
-  const emit = (next: KitAppEntryState) => { state = next; for (const listener of listeners) listener(); };
-  const invalidate = () => {
-    generation++; controller?.abort(); controller = null;
-    emit({ phase: 'BLOCKED', data: null, error: contextChanged() });
-  };
-  return {
-    getSnapshot: () => state,
-    subscribe(listener: () => void) { listeners.add(listener); return () => { listeners.delete(listener); }; },
-    isCurrent: () => active && identity === studioIdentityKey(),
-    activate() {
-      if (active) return;
-      active = true;
-      if (typeof window !== 'undefined') for (const event of events) window.addEventListener(event, invalidate);
-    },
-    dispose() {
-      active = false; generation++; controller?.abort(); controller = null;
-      if (typeof window !== 'undefined') for (const event of events) window.removeEventListener(event, invalidate);
-      emit({ phase: 'IDLE', data: null, error: null });
-    },
-    invalidate,
-    async load() {
-      if (!active) return;
-      const version = ++generation;
-      controller?.abort(); controller = new AbortController();
-      identity = studioIdentityKey();
-      const requestIdentity = identity;
-      const live = () => active && version === generation && requestIdentity === studioIdentityKey();
-      emit({ phase: 'LOADING', data: null, error: null });
-      try {
-        const data = await readKitAppEntry(instanceId, appId, controller.signal);
-        if (live()) emit({ phase: 'AVAILABLE', data, error: null });
-        else if (active && version === generation) invalidate();
-      } catch (error) {
-        if (!active || version !== generation) return;
-        emit({ phase: 'BLOCKED', data: null, error: live() && error instanceof KitAppEntryError ? error : contextChanged() });
-      }
-    },
-  };
+  //: ★ 수명(세대·중단·신원·구독)은 공통부가 맡고, **검증과 오류는 이 모듈이 그대로 쓴다**.
+  return createEntryFlow<KitAppEntry, KitAppEntryError>({
+    read: signal => readKitAppEntry(instanceId, appId, signal),
+    contextChanged, isOwnError: error => error instanceof KitAppEntryError,
+  });
 }
