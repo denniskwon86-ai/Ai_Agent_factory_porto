@@ -42,6 +42,9 @@ KNOWN_STORES = (STORE_AUTH, STORE_ENTERPRISE_CONTEXT)
 
 _MANAGED_ENV = "AFS_DB_MANAGED_STORES"
 
+#: 방언 이름 — `core.db` 와 같은 값을 쓴다(두 벌로 갈리지 않게).
+SQLITE_BACKEND = "sqlite"
+
 #: DDL 로 세는 첫 낱말. 기동 경로에서 이것들이 보이면 계약 위반이다.
 _DDL_VERBS = ("create", "alter", "drop", "truncate", "rename", "reindex", "vacuum")
 
@@ -149,15 +152,24 @@ def missing_objects(db_path: str, store: str) -> List[str]:
 #   그래서 **연결을 먼저 얻고, 그 연결 위에서** 확인한다. 쓰는 곳과 찾는 곳의 출처를
 #   하나로 만든다.
 
-def target_identity(conn) -> str:
+def target_identity(conn, backend: str = SQLITE_BACKEND) -> str:
     """이 연결이 «실제로» 무엇을 보고 있는가. 캐시 키이자 증거다.
 
-    ⚠️ 못 알아내면 빈 문자열이다 — 그때는 「같은 대상」이라고 주장하지 않는다."""
+    ⚠️ 못 알아내면 빈 문자열이다 — 그때는 「같은 대상」이라고 주장하지 않는다.
+
+    ⚠️⚠️ **SQLite 가 아니면 아무 질의도 하지 않는다.** 처음 판은 backend 와 무관하게
+      `PRAGMA database_list` 를 돌리고 예외를 삼켰다. PostgreSQL 에서 그 문장은 실패하고,
+      **그 순간 트랜잭션이 실패 상태로 남아** 뒤따르는 정상 질의까지 전부 죽는다.
+      「예외를 삼켰으니 안전하다」가 아니다 — 연결이 이미 오염된다.
+      ★ 아직 «PG 대상 신원을 PG 읽기 질의로 구하는» 구현은 하지 않았다. 그건 방언을
+        실제 연결 설정에 결속하는 일과 함께 P03.2 에서 한다. 여기서는 **독성만** 막는다."""
+    if backend != SQLITE_BACKEND:
+        return ""
     try:
         for row in conn.execute("PRAGMA database_list").fetchall():
             if str(row[1]) == "main":
                 return str(row[2] or ":memory:")
-    except Exception:  # noqa: BLE001 — SQLite 가 아니면 알 수 없다
+    except Exception:  # noqa: BLE001 — 읽지 못하면 «모른다» 로 둔다
         pass
     return ""
 
@@ -209,6 +221,9 @@ def assert_installed_on(conn, store: str, backend: str = "") -> str:
 
     ⚠️ 연결은 **닫지 않는다** — 부르는 쪽이 계속 쓴다. 실패했을 때 닫는 책임도
       부르는 쪽에 있다(연결을 받은 적이 없는 호출자에게 넘기지 않기 위해서다)."""
+    if not backend:
+        from core.db import configured_backend
+        backend = configured_backend()
     gaps = missing_objects_on(conn, store, backend)
     if gaps:
         raise ManagedSchemaError(
@@ -216,7 +231,7 @@ def assert_installed_on(conn, store: str, backend: str = "") -> str:
             f"({len(gaps)}건: {', '.join(gaps[:4])}"
             f"{' …' if len(gaps) > 4 else ''}). "
             f"설치 명령으로 먼저 설치하십시오 — 자동으로 만들지 않습니다.")
-    return target_identity(conn)
+    return target_identity(conn, backend)
 
 
 def assert_installed(db_path: str, store: str) -> None:

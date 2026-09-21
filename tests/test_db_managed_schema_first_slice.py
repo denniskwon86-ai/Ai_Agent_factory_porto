@@ -488,6 +488,25 @@ def test_a_connection_refused_by_the_gate_is_closed_by_the_gate(tmp_path):
     assert (len(opened), len(closed)) == (1, 1), (len(opened), len(closed))
 
 
+def test_no_sqlite_pragma_is_sent_to_a_non_sqlite_connection():
+    """★★ PG 에서 `PRAGMA database_list` 를 시도하면 **트랜잭션이 실패 상태로 남아**
+
+    뒤따르는 정상 질의까지 전부 죽는다. 「예외를 삼켰으니 안전하다」가 아니다 —
+    연결이 이미 오염된다. backend 가 SQLite 가 아니면 **한 문장도 보내지 않는다.**
+
+    ⚠️ 아직 「PG 대상 신원을 PG 읽기 질의로 구하는」 구현은 없다. 여기서 막는 것은
+      독성뿐이고, 방언을 실제 연결 설정에 결속하는 일은 P03.2 몫이다."""
+    sent = []
+
+    class Watcher:
+        def execute(self, sql, *a, **k):
+            sent.append(sql)
+            raise AssertionError("SQLite 전용 문장이 비-SQLite 연결로 갔다: " + sql)
+
+    assert ms.target_identity(Watcher(), backend="postgres") == ""
+    assert sent == [], sent
+
+
 def test_an_unreadable_target_is_refused_not_waved_through():
     """★★ 확인 «자체» 를 못 했으면 통과가 아니다.
 

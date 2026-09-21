@@ -2374,3 +2374,48 @@ docs/handoff/CLAUDE_P03_EXECUTION_RESULT.md (신규) · 이 상태 파일
 
 필요한 표·컬럼은 첫 경로가 **실제 쓰는 것**으로 정합니다(표 7개라는 사실을 호환 증거로
 쓰지 않습니다). PG installer 경로는 구현하되 **실제 PG 적용은 NOT_RUN** 으로 적습니다.
+
+---
+
+# 지시 CLAUDE-P05-LOCAL-01 수신 — 2026-09-21
+
+```
+단계 P05.1 사본 이관·백업·복원 도구 리허설 (+40점) · 상태 RUNNING
+HEAD 7972d9909 (codex/l2-unified-studio-20260912)
+P03.1 수용(1815/5300=34.2%) 확인. P03 착수/CR-1 지시는 이력으로 두고 반복하지 않습니다.
+```
+
+## 첫 체크포인트 — 기존 도구 재사용 판정 (읽기 아니라 **실행으로**)
+
+`scripts/session_data_snapshot.py` 를 **합성 루트에 실제로 돌려** 봤습니다.
+
+```
+export_snapshot(합성루트) → file_count 1 · database_count 1
+  · SQLite 일관 백업(source.backup) + PRAGMA quick_check
+  · manifest 에 표별 건수 (tenants 1 · entities 1 · nodes 2 · edges 1 · aliases 1)
+  · source_main_and_wal_unchanged: true   ← 원본 불변을 «도구가» 증명
+  · AES-256-GCM · 키는 별도 파일, 평문에 없음
+```
+
+→ **백업 엔진을 다시 만들지 않습니다.** 재사용할 것:
+`export_snapshot`(일관 백업·원본 불변) · `restore_snapshot`(비덮어쓰기 preflight) ·
+`regular`(심볼릭링크·junction·경로탈출 차단) · `exclusive_write`(덮어쓰기 금지) ·
+`safe_relative`/`allowed`(민감 파일 배제) · `EXCLUDED`(auth·credential 제외 목록).
+
+## 없는 것 — 이번에 만들 것
+
+기존 도구는 **파일 수송**이고, 지시가 요구한 **「별도 새 schema 로의 행 단위 이관 + 대사」**
+가 없습니다. 「단순 파일 복사만을 ETL 완료라고 보고하지 않는다」에 해당하는 자리입니다.
+
+```
+신규  scripts/first_path_copy_migration.py
+      ① 번들에서 행 추출 → ② 설치 도구로 «빈 새 schema» → ③ 명시 필드 대응으로 복사
+      ④ 키·건수·중요 필드·참조 대사 → ⑤ 재실행 계약 → ⑥ 실패 주입 시 원본·기존 대상 불변
+```
+
+## 경계
+
+입출력 **모두 새 임시 격리 경로**. 운영 `data/`·`library/`·실계정·`auth.db`·세션·토큰 무접촉.
+`scripts/data_migration.py` 는 **실행도 import 도 하지 않습니다**(import 만으로 실제 `data/`
+를 만들고 Chroma 경로가 따로 있어 이번 사본 이관 도구가 아닙니다).
+커밋·푸시는 이번 지시 범위 밖입니다. 다른 세션 변경 보존합니다.
