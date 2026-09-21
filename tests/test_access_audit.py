@@ -62,11 +62,22 @@ def test_unknown_event_is_marked_not_silently_accepted():
     assert audit.recent(1)[0]["event"].startswith("UNKNOWN:")
 
 
-def test_write_failure_is_counted_not_swallowed(monkeypatch):
-    """★ 감사 기록의 유실 자체가 사건이다 — 조용히 넘기면 '거부가 없었다'는 거짓 안심을 준다."""
-    monkeypatch.setattr(audit, "_LOG_PATH", os.path.join("Z:", "nope", "audit.jsonl"))
+def test_write_failure_is_counted_not_swallowed(monkeypatch, tmp_path):
+    """★ 감사 기록의 유실 자체가 사건이다 — 조용히 넘기면 '거부가 없었다'는 거짓 안심을 준다.
+
+    ⚠️ 예전에는 `os.path.join("Z:", "nope", "audit.jsonl")` 로 실패를 만들었다. 그런데
+      그 결과는 `Z:nopeudit.jsonl` 로 **백슬래시가 없는 드라이브 상대 경로**이고,
+      그 드라이브가 실제로 연결돼 있으면 **쓰기가 성공해 시험이 거꾸로 깨진다**
+      (2026-09-21 실측 — 이 PC 에 `Z:` 가 붙어 있었다).
+
+    ★ 환경에 기대지 않는 실패를 쓴다 — **디렉터리에는 쓸 수 없다.** 예외 종류는
+      OS 마다 다르지만(`IsADirectoryError` / `PermissionError`) `record()` 가
+      `except Exception` 으로 받으므로 어느 쪽이든 카운트된다.
+    """
+    monkeypatch.setattr(audit, "_LOG_PATH", str(tmp_path))      # 파일이 아니라 디렉터리다
+    before = audit.stats()["write_failures"]
     assert audit.denied_scope("external_system", "x", actor="a") is False
-    assert audit.stats()["write_failures"] >= 1
+    assert audit.stats()["write_failures"] >= before + 1
 
 
 def test_broken_line_is_skipped(tmp_path, monkeypatch):
