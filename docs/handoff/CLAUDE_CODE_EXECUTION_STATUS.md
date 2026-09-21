@@ -2312,3 +2312,65 @@ draft 진입도 남아 있다. 조각의 합이 올라가도 관통이 안 닫�
 그 전에 Codex 가 위 §8 의 결정 두 가지(프런트 엄격/관용 · 503 노출)를 봐 주면 좋겠다.
 
 제품 코드 단독 수정자는 Claude Code. Codex는 지시·진척·핵심 결과 검토 담당.
+
+---
+
+# 지시 CLAUDE-P03-R3-01 수신 — 2026-09-21
+
+```
+수신 시각  2026-09-21 KST
+지시       CLAUDE-P03-R3-01 · 단계 P03.1 · 상태 RUNNING
+HEAD       0d0789e97 (브랜치 codex/l2-unified-studio-20260912) — 지시서 기준 HEAD 와 일치
+```
+
+**추가 지시도 읽었습니다**: 단계마다 검증 묶음/검토 대기로 멈추지 않는다. P03.1 의 확인표는
+별도 시험을 전부 먼저 만들라는 명령이 아니라 **P03.1→2→3 을 연결해 확보할 증거 지도**다.
+위험 경계만 즉시 확인하고 관련 회귀는 묶음 끝 1회.
+
+## 다른 세션 변경 — **보존합니다**
+
+```
+ M .agents/DECISIONS.md          M AI_HANDOFF.md
+ M .agents/TEAM_BOARD.md         M PROGRESS.md
+ M docs/handoff/DECISION_CREATION_CONTRACT_REPAIR_2026-09-11.json
+ M docs/roadmap/WEB_DEMO_DEPLOYMENT_EXECUTION_PLAN_2026-08-21.md
+ M data/interaction_log.jsonl (운영 사용자 로그 — 늘 제외)
+```
+
+제가 선점하는 파일은 아래뿐입니다. 위 목록은 **열지도 고치지도 않습니다.**
+`.agents/TEAM_BOARD.md` 는 추가만 하고 남의 줄을 건드리지 않습니다.
+
+```
+core/db/**  ·  core/auth.py  ·  core/enterprise_context/repository.py
+scripts/install_first_db_schema.py (신규)  ·  tests/test_db_managed_schema_first_slice.py (신규)
+docs/handoff/CLAUDE_P03_EXECUTION_RESULT.md (신규) · 이 상태 파일
+```
+
+## As-Is 대조 결과 (실제 코드 확인)
+
+| 자리 | 지금 |
+|---|---|
+| `AuthStore._init` | ALTER 4건 → `executescript(_DDL)`. `_ready` 가 db_path 와 같으면 건너뜀 |
+| `EcmRepository.__init__` | `_init_db()` 를 **생성자에서** 부름 — `executescript` 2회 + ALTER 3건 |
+| `EcmRepository._ensure_tables` | 조회 실패 시 **`_init_db()` 를 다시** 부름(= 조회 경로의 DDL) |
+| `EcmRepository._query` | 그래도 안 되면 **`[]` 를 돌려줌** |
+
+★ 마지막 줄이 제일 나쁩니다. **스키마가 없는데 「자료가 없음」으로 보입니다** —
+지시서의 「빠진 기능을 빈 결과로 숨기지 않는다」에 정확히 걸립니다. 관리 모드에서는
+식별 가능한 실패여야 합니다.
+
+## P03.1 구현 경계 (승인 대기 없이 착수)
+
+```
+① 설치 CLI       scripts/install_first_db_schema.py
+                  --backend sqlite|postgresql · --plan(쓰기 없음) / --apply
+                  모르는 backend·접속정보 누락 → 실패. DSN·토큰 출력 금지
+② 관리 모드 선택  core/db 에 «저장소별» 선언 (전역 하나로 전부 ready 금지)
+                  기본값 없음 = 오늘 동작 그대로
+③ 관리 모드 계약  기동·첫 조회·재조회에 DDL 0. 미설치/불일치는 실패(빈 목록 금지)
+④ 계측           연결 wrapper 로 실행 SQL 을 세어 DDL 0 을 «관측» 한다
+⑤ 집중 시험      tests/test_db_managed_schema_first_slice.py
+```
+
+필요한 표·컬럼은 첫 경로가 **실제 쓰는 것**으로 정합니다(표 7개라는 사실을 호환 증거로
+쓰지 않습니다). PG installer 경로는 구현하되 **실제 PG 적용은 NOT_RUN** 으로 적습니다.
