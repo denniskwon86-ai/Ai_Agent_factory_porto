@@ -1,11 +1,12 @@
-# 인수인계 — 확산 적용 사전 검토 (2026-09-16 ~ 17)
+# 인수인계 — 확산 적용 사전 검토 (2026-09-16 ~ 21)
 
 - 브랜치: `claude/diffusion-readiness-20260916` (main 과 분리)
-- 범위: 커밋 20 건 · 코드 10 파일 · 시험 5 파일 · 문서 12 편
-- **2026-09-21 갱신** — `KIT_SHELF_SPEC` 1~3 · 6 완료(2.1 · 3.1)
-- ⚠️ **플랫폼 코드는 최소한만 건드렸다.** `core/data_preparation/kit_freeze.py`·
-  `kit_registry.py`·`demo_vertical_slice.py`, 그리고 `api/routes/
-  data_preparation_control.py` 의 **응답을 가르는 한 곳**(5.8). `main.py` 는 안 건드렸다
+- 범위: 커밋 **29 건** · 코드 13 파일 · 시험 18 파일 · 문서 10 편
+- **2026-09-21 대폭 갱신** — 선반을 채우고, 플랫폼이 읽게 하고, 이음매를 구현했다
+- ⚠️ **플랫폼 코드는 최소한만 건드렸다.** `core/data_preparation/` 둘 ·
+  `core/demo_vertical_slice.py`, 그리고 `data_preparation_control.py` 의
+  **응답을 가르는 한 곳**(5.8). **`main.py`·라우터는 안 건드렸다**
+- `tests/` 는 여럿 고쳤다 — **꺼져 있던 감시를 되살리려고**(5.9~5.11)
 
 ---
 
@@ -21,6 +22,8 @@
 | 확정 판본이 **보증되나** | ✅ 1.0.0~1.2.0 모두 봉인 + 지문 |
 | 플랫폼에 **늘려 넣을 수 있나** | ✅ 선반의 봉인 판본이 **등록부에 올라간다** — 조직에 붙일 수 있다 |
 | 선반에 **줄 물건이 있나** | ✅ **키트 3 종** — 제련 · 전지소재 · 조합. 전부 검증 420 PASS · 봉인 |
+| 키트가 **플랫폼 말로 옮겨지나** | ✅ 동인 11 · 계정 76. **계수는 만들지 않는다**(현업 몫) |
+| **산업 특성이 실려 있나** | ⚠️ **아니다.** 세 키트가 **같은 동인 11 개**를 준다 — 도메인 검토가 막고 있다 |
 
 ★ **`KIT_SHELF_SPEC` 1~7 과 등록 경로 잇기가 끝났다**(2026-09-21). 선반 상태는
   `python scripts/kit_shelf.py` 가 답한다. 남은 것은 **도메인 검토**(4.2)와
@@ -61,7 +64,12 @@
 | **키트 정체성** (09-21) | 사업이 **키트 이름을 정한다.** 전지소재를 뽑아도 이름표가 제련이던 것 | `3b723eb72` |
 | **선반을 채웠다** (09-21) | 제련·전지소재 키트를 각각 봉인 — **고려아연·켐코에 줄 수 있다** | `2212d9c74` |
 | **등록 경로** (09-21) | 선반의 봉인 판본이 **등록부에 올라간다.** 예전에는 시연 하나만 | `93355d534` |
-| **이음매** (09-21) | 키트의 동인·계정을 플랫폼 말로 옮긴다 (`scripts/kit_bridge.py`). **계수는 만들지 않는다** | 아래 |
+| **이음매** (09-21) | 키트의 동인·계정을 플랫폼 말로 옮긴다 (`scripts/kit_bridge.py`). **계수는 만들지 않는다** | `08766165d` |
+| **선반 카탈로그** (09-21) | `scripts/kit_shelf.py` — **무엇을 줄 수 있고 어디가 비었나.** 손으로 쓴 표는 낡는다 | `da73f24d3` |
+| **시험 수리 둘** (09-21) | 환경(`Z:` 드라이브)에 기대던 것 · **라우터 시험 10 건** | `426d45e31` `180d46364` |
+
+★ **덤으로 꺼져 있던 감시 둘을 되살렸다** — 라우터 등록 검사(10 건 전부 실패 중이었다)와,
+  **통과하면서 아무것도 보지 않던** 「데이터셋 없는 경로」 검사(5.11).
 | **경로 설정화** (09-21) | `AFS_KITS_DIR`·`AFS_STARTER_KITS_DIR` — 키트를 **코드 배포에서 떼어낼 수 있게** | 아래 |
 
 ### 2.2 판본
@@ -77,18 +85,17 @@
 
 | | |
 |---|---|
-| `tests/test_business_defs.py` | **27 건** — 사업 분리 · 산업 의미 · 키트 정체성 |
-| `tests/test_kit_freeze.py` | **15 건** — 봉인 · 지문 |
-| `tests/test_kit_registry_paths.py` | **7 건** — 키트 경로를 설정으로 (09-21 신규) |
-| `tests/test_kit_shelf.py` | **13 건** — 선반 카탈로그 (09-21 신규) |
-| `tests/test_kit_registry_starter.py` | **11 건** — 선반 → 등록부 (09-21 신규) |
-| `tests/test_kit_bridge.py` | **20 건** — 키트 → 플랫폼 이음매 (09-21 신규) |
-| 영향권 전체 | **약 430 건 통과** (`kit_freeze`·`starter_kit`·`business_defs`·`KIT-MFG` 를 쓰는 시험 전부) |
-| 검증기 | **420 건 PASS** (1.2.0) |
+| `tests/test_business_defs.py` | **26** — 사업 분리 · 산업 의미 · 키트 정체성 |
+| `tests/test_kit_bridge.py` | **18** — 키트 → 플랫폼 이음매 (09-21 신규) |
+| `tests/test_kit_freeze.py` | **15** — 봉인 · 지문 |
+| `tests/test_kit_shelf.py` | **13** — 선반 카탈로그 (09-21 신규) |
+| `tests/test_kit_registry_starter.py` | **11** — 선반 → 등록부 (09-21 신규) |
+| `tests/test_kit_registry_paths.py` | **7** — 키트 경로를 설정으로 (09-21 신규) |
+| 검증기 | **420 PASS** (키트 3 종 각각) |
 
-⚠️ `tests/` **전체는 통과하지 않는다** — **11 건**이 남는데 전부 플랫폼 영역이고
-  이 세션의 변경 전부터 그랬다. 10 건은 **시험이 낡은 것**이고(라우터는 정상이다)
-  1 건은 판본 불일치다 — 둘 다 인계 문서로 넘겼다(4.3).
+★ **`tests/` 전체에서 실패가 1 건뿐이다** (2026-09-21 기준). 09-17 에는 12 건이었다 —
+  둘을 고쳤고(환경 의존 · 라우터 10 건), 남은 하나는 **플랫폼이 쓸 판본을 정해야**
+  고칠 수 있다(4.3).
 
 ### 2.4 선반에 실제로 있는 것 — 정직하게
 
@@ -107,22 +114,30 @@
 
 ## 3. 다음에 할 것
 
-### 3.1 바로 (설계 끝남 — [`KIT_SHELF_SPEC`](../data-kits/KIT_SHELF_SPEC_2026-09-17.md) 7 장)
+### 3.1 코드로 할 수 있는 것은 **거의 끝났다**
 
-| | 무엇 | 상태 |
+| 계획 | 상태 |
+|---|---|
+| `KIT_SHELF_SPEC` 1~7 (키트 정체성 · 경로 · 선반 · 카탈로그) | ✅ **전부 완료** |
+| 등록 경로 잇기 (`KIT_DIFFUSION_IN_PLATFORM` 3.1) | ✅ **완료** |
+| 이음매 1~4 (`KIT_PLATFORM_BRIDGE_SPEC` 5 장) | ✅ **완료** |
+
+지금 선반 상태는 `python scripts/kit_shelf.py` 가 답한다.
+
+### 3.2 남은 것 — **전부 사람의 답을 기다린다**
+
+| | 무엇 | 무엇이 막나 |
 |---|---|---|
-| 1~3 | 사업 정의에 키트 정체성 + 생성기 + 시험 | ✅ **완료** (`3b723eb72`) |
-| 6 | 키트 경로를 환경변수로 | ✅ **완료** |
-| 7 | 선반 카탈로그 (`scripts/kit_shelf.py`) | ✅ **완료** — 문서가 아니라 도구로 |
-| **4·5** | 제련·전지소재를 각각 봉인해 선반에 | ✅ **완료** (119 MB → 189 MB) |
+| 1 | **도메인 검토 4 건** | 사람만 답할 수 있다 (4.2) — **이것이 가장 크다** |
+| 2 | 이음매 **5(연결)** — `seed_starter_data.py` 에 붙이기 | 「누가 구현하나」(명세 6 장) · 빈 설치본 결함 확인 |
+| 3 | 이음매 **6(시나리오)** | 파급 계수가 쌓인 뒤에만 뜻이 있다 |
+| 4 | 필드 계층 (`FieldExtension`) | 도메인 답 |
+| 5 | `ORDER:PROJECT` 축 · 전선 키트 | 결정 + 드라이버 4 |
+| 6 | 신규 사업 프로파일(램프업) | 램프업 수치 |
 
-### 3.2 그다음 (설계만 있음)
-
-| | 어디에 | 상태 |
-|---|---|---|
-| 키트 → 플랫폼 이음매 | `KIT_PLATFORM_BRIDGE_SPEC` | ✅ 1~4 완료. **5(연결)는 「누가 구현하나」가 먼저** |
-| 필드 계층 (`FieldExtension`) | `FIELD_LAYER_DESIGN` | 도메인 답 대기 |
-| `ORDER:PROJECT` 축 (수주형) | `FIELD_LAYER_DESIGN` 3.2 | 결정 대기 |
+★ **2·3 은 이 세션이 정할 수 없다.** 명세 6 장이 「누가 구현하나 — 이것이 먼저다」로
+  못 박았고, 그 파일은 다른 세션 영역에 가깝다. 그래서 이음매를 **별도 모듈**
+  (`scripts/kit_bridge.py`)로 두었다 — **연결은 언제든 한 줄**이다.
 
 ### 3.3 하지 않기로 한 것 — 되살리지 말 것
 
@@ -133,18 +148,17 @@
 | `POST /kits` | 키트는 우리가 주는 전문성이다. 업로드는 생성→검증→봉인 사슬을 우회한다 |
 | 배급 시스템 | 임계 전이다 — **키트 5 개 또는 설치 3 곳** |
 | `--profile-only` | 검증 420 건이 `samples/` 를 본다 |
-
----
+| **파급 계수를 키트가 만드는 것** | 계수는 **현업이 근거·출처와 함께** 등록한다. 키트가 만들면 창작이고 그 숫자가 경영 판단으로 간다 |
 
 ## 4. 결정 대기 — 사람만 답할 수 있는 것
 
 ### 4.1 이 작업을 막고 있는 것
 
-**없다.** 2026-09-21 에 셋 다 정해졌다 — 새 키트를 저장소에 넣었고(+70 MB),
-`kit_name`·`use_case` 는 기본안대로 갔다.
+**없다.** 2026-09-21 에 남아 있던 셋이 전부 정해졌다 — 새 키트를 저장소에 넣었고
+(+70 MB), `kit_name`·`use_case` 는 기본안대로 갔다.
 
-다음 결정은 **등록 경로를 이을 때** 온다 — 성격이 다른 두 키트(9 종 최소 경로 vs
-35 종 전체)가 한 목록에 뜨는 문제다(`KIT_DIFFUSION_IN_PLATFORM` 6 장 ③).
+다음 결정은 **이음매를 연결할 때** 온다 — 「누가 구현하나」(명세 6 장)와 빈 설치본
+결함 확인이다.
 
 ### 4.2 도메인 검토 — 나머지 설계가 전부 이것을 기다린다
 
@@ -272,6 +286,24 @@ info`)조차 없었다. 나는 그것을 「실패 8 건」으로 읽었다.
 ★ 고친 방법: **디렉터리에는 쓸 수 없다**는 성질을 쓴다(`tmp_path`). 예외 종류는
   OS 마다 달라도 `record()` 가 `except Exception` 으로 받으므로 어느 쪽이든 잡힌다.
 
+### 5.11 ★ 통과하는 시험이 **아무것도 보지 않을** 수 있다
+
+`test_host_runtime_wire` 의
+
+    bad = [r.path for r in app.routes if ...startswith(shape)]
+    assert not bad
+
+가 **언제나 빈 목록**이라 통과하고 있었다. FastAPI 0.139 에서 `app.routes` 에는
+`_IncludedRouter` 만 있고 `.path` 가 없기 때문이다(544 개 중 5 개만 보였다).
+
+★ **실패 목록에는 잡히지도 않는다.** 실패한 10 건은 「없다」를 확인하는 시험이었고,
+  이것은 「있으면 안 된다」를 확인하는 시험이라 **빈손일수록 초록**이었다.
+
+    tests/conftest.py  →  app_endpoints() · app_paths()
+
+한 곳에 모았고, 내부 구현이 사라지면 `app.openapi()` 로 떨어지게 했다 — **조용히
+빈손이 되지 않게.**
+
 ---
 
 ## 6. 재현 명령
@@ -291,6 +323,15 @@ info`)조차 없었다. 나는 그것을 「실패 8 건」으로 읽었다.
 
 # ★ 선반 — 무엇을 줄 수 있고 어디가 비었나
 .venv/Scripts/python.exe scripts/kit_shelf.py
+.venv/Scripts/python.exe scripts/kit_shelf.py --json     # 기계용
+
+# 사업만 바꿔 키트를 낸다 (검증기도 --kit 을 받는다)
+.venv/Scripts/python.exe scripts/generate_sample_company_starter_kit.py     --version 1.2.0 --business smelting_nonferrous
+.venv/Scripts/python.exe scripts/validate_sample_company_starter_kit.py     --version 1.2.0 --kit KIT-MFG-SMELTING-NONFERROUS
+.venv/Scripts/python.exe scripts/freeze_starter_kit.py KIT-MFG-SMELTING-NONFERROUS 1.2.0
+
+# 키트 자리를 옮겨 본다 (코드 배포에서 떼어내기)
+AFS_STARTER_KITS_DIR=/opt/afs/data/kits .venv/Scripts/python.exe scripts/kit_shelf.py
 
 # 시험 (영향권)
 .venv/Scripts/python.exe -m pytest tests/test_business_defs.py tests/test_kit_defs.py \
@@ -312,13 +353,28 @@ info`)조차 없었다. 나는 그것을 「실패 8 건」으로 읽었다.
 |---|---|---|
 | 1 | `DIFFUSION_READINESS_ANALYSIS` | **어느 범위까지 적용 가능한가** · 제공 경계 · 네 층 |
 | 2 | `TAXONOMY_TO_KIT_COVERAGE` | 분류에서 키트로 가는 연결고리 · 선정 기준 |
-| 3 | **`KIT_DIFFUSION_IN_PLATFORM`** | **플랫폼에서 어떻게 늘리나** · 선반 · 별도 시스템 |
-| 4 | **`KIT_SHELF_SPEC`** | **그 상세 설계** — 다음에 할 일이 여기 있다 |
-| 5 | `FIELD_LAYER_DESIGN` | 필드를 어느 층에 붙이나 |
-| 6 | `KIT_PLATFORM_BRIDGE_DESIGN`·`SPEC` | 키트 → 플랫폼 동인 이음매 |
+| 3 | **`KIT_DIFFUSION_IN_PLATFORM`** | **플랫폼에서 어떻게 늘리나** · 선반 · 별도 시스템 · 등록 경로 |
+| 4 | **`KIT_SHELF_SPEC`** | **그 상세 설계** — 결정 8 · 영향 · 시험 · 순서 (1~7 완료) |
+| 5 | `KIT_PLATFORM_BRIDGE_DESIGN`·`SPEC` | 키트 → 플랫폼 이음매 (1~4 완료) |
+| 6 | `FIELD_LAYER_DESIGN` | 필드를 어느 층에 붙이나 |
 | 7 | `LSMNM_BATTERY_NEWBIZ_REVIEW` | 실적 없는 신규 사업에 키트를 어떻게 |
 | 8 | `WIRE_CABLE_SPECIALIZATION_DRAFT` | 전선 3 단 특성화 (⏸ 보류) |
 | 9 | `NONFERROUS_SMELTING_SPECIALIZATION_DRAFT` | 제련 특성화 (앞 세션) |
+
+### 현업·플랫폼에 드린 것
+
+| 문서 | 받는 쪽 | 무엇 |
+|---|---|---|
+| [`decisions/DOMAIN_REVIEW_KIT_2026-09-21`](../decisions/DOMAIN_REVIEW_KIT_2026-09-21.md) | **현업** | 답이 필요한 물음 넷. 표만 채우면 된다 |
+| [`KIT_VERSION_1_2_0_NOTICE`](KIT_VERSION_1_2_0_NOTICE_2026-09-17.md) | 플랫폼 | 1.2.0 을 냈다 · 플랫폼은 여전히 1.0.0 을 본다 |
+| [`PLATFORM_REVIEW_ABSOLUTE_DRIVERS`](PLATFORM_REVIEW_ABSOLUTE_DRIVERS_2026-09-16.md) | 플랫폼 | 동인이 **절대량**을 담지 못한다 |
+| [`PLATFORM_ROUTER_TESTS_STALE`](PLATFORM_ROUTER_TESTS_STALE_2026-09-21.md) | 플랫폼 | 라우터는 정상, 시험이 낡았다 — ✅ 고쳤다 |
+
+### 도구
+
+    scripts/kit_shelf.py    선반 — 무엇을 줄 수 있고 어디가 비었나
+    scripts/kit_bridge.py   이음매 — 키트의 동인·계정을 플랫폼 말로
+    docs/business-taxonomy/engine/diffusion_report.py   분류 집계·커버리지
 
 ⚠️ 분류 문서 전체에 **「검토 중인 미확정 설계다. 현재 시스템에 연결·연계하지
   않는다」** 표시를 유지한다.
