@@ -1380,6 +1380,9 @@ function AppShell() {
                                   id: r.release_id,
                                   label: r.display_name || r.project_name || '이름 미등록 릴리스',
                                   projectId: r.project_id || '',
+                                  //: 같은 이름의 두 판을 가르는 값. 서버가 안 주면 빈 값으로
+                                  //:   두고 화면이 「시각 미기록」이라고 적는다(지어내지 않는다).
+                                  createdAt: r.created_at || '',
                                 }))} />
                             </OperationsGovernanceShell>
                           : space === 'company'

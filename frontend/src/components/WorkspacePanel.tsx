@@ -52,6 +52,8 @@ export type WorkspaceReleaseOption = {
   id: string;
   label: string;
   projectId?: string;
+  /** 게시 시각. **없으면 빈 문자열** — 화면이 지어내지 않고 「시각 미기록」으로 적는다. */
+  createdAt?: string;
 };
 
 type Props = { onClose: () => void; page?: boolean; releaseOptions?: WorkspaceReleaseOption[] };
@@ -243,7 +245,20 @@ export default function WorkspacePanel({ onClose, page = false, releaseOptions =
   const releaseNames = useMemo(() => new Map(
     releaseOptions.map((row) => [row.id, row.label || '이름 미등록 릴리스']),
   ), [releaseOptions]);
-  const releaseLabel = (id: string) => releaseNames.get(id) || '이름 미등록 릴리스';
+  const releaseTimes = useMemo(() => new Map<string, string>(
+    releaseOptions.map((row) => [row.id, row.createdAt || '']),
+  ), [releaseOptions]);
+  /** ★★ [2026-09-20] 이름만으로는 **같은 프로젝트의 두 판이 구별되지 않는다**(실측:
+   *  선택 목록에 같은 이름이 둘 떴다). 되돌리기 어려운 화면에서 «어느 판을 내리는지»
+   *  모르면 안 된다 — 이름 뒤에 **게시 시각과 릴리스 id** 를 함께 적는다.
+   *  ⚠️ 시각은 같을 수 있으므로 **시각만으로 구별하지 않는다** — id 를 항상 붙인다.
+   *  ⚠️ 시각이 없으면 「시각 미기록」이다. 없는 값을 만들어 채우지 않는다. */
+  const releaseLabel = (id: string) => {
+    if (!id) return '이름 미등록 릴리스';
+    const name = releaseNames.get(id) || '이름 미등록 릴리스';
+    const at = (releaseTimes.get(id) || '').trim();
+    return `${name} · ${at ? at.replace('T', ' ').slice(0, 19) : '시각 미기록'} · ${id}`;
+  };
   const scopeNames = useMemo(() => new Map(orgNodes.map((row) => [row.node_id, row.label])), [orgNodes]);
   const scopeLabel = (id: string) => {
     if (!id) return '미지정';
@@ -321,8 +336,10 @@ export default function WorkspacePanel({ onClose, page = false, releaseOptions =
                     confirmRollback.cancel(); setRollbackReason('');
                   }}>
                   <option value="">— 릴리스 선택 —</option>
+                  {/* ★ 확인창과 **같은** formatter 를 쓴다 — 목록과 확인창이
+                      다르게 보이면 사용자는 자기가 고른 것을 확인할 수 없다. */}
                   {releaseOptions.map((row) => (
-                    <option key={row.id} value={row.id}>{row.label || '이름 미등록 릴리스'}</option>
+                    <option key={row.id} value={row.id}>{releaseLabel(row.id)}</option>
                   ))}
                 </select>
                 <button className="primary-button" disabled={rollbackBusy}

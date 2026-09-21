@@ -3671,14 +3671,32 @@ async def get_release(release_id: str, p: Principal = Depends(current_principal)
 
     ⚠️ 사용 중단된 프로그램은 실행 payload 를 제외하고 준다(아래 lifecycle 블록 참조)."""
     _safe_id(release_id, "release_id")  # 경로 이탈로 임의 release.json 읽기 방지
+    #: ★★★ [RELEASE-READ-VISIBILITY-01 · 2026-09-20] 목록과 **같은 열람 경계**를 여기에도 건다.
+    #:
+    #: ⚠️⚠️ 종전에는 목록(`list_releases`)만 「보이는 프로젝트 집합」 밖을 건수까지 뺐고,
+    #:   **이 단건 조회에는 같은 검사가 없었다.** 릴리스 id 만 알면 그 프로젝트의 요구정의·
+    #:   기획서·아키텍처·코드까지 그대로 열렸다(2026-09-20 격리 실측: 목록 제외 + 단건 200).
+    #:   한쪽 문을 막고 **거울 쪽을 열어 둔** 형태다.
+    #: ★ 응답 계약은 **「없는 릴리스와 같은 404」** 다. 「다른 회사 것」·「소유자 없음」으로
+    #:   세분해 알려 주면 그 구분 자체가 존재를 누설한다.
+    #: ⚠️ 자료는 **건드리지 않는다** — 차단만 하고 보존한다. 고아 릴리스를 자동으로 귀속·
+    #:   삭제·공개하지 않는다(소유권 교정은 별도 승인 사안).
+    assert_identified(p, WHAT)
     rp = library_paths.release_json(release_id)
     if not os.path.exists(rp):
         raise HTTPException(status_code=404, detail="결과물을 찾을 수 없습니다.")
     try:
         with open(rp, "r", encoding="utf-8") as f:
             data = json.load(f)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"결과물 읽기 오류: {str(e)}")
+    except Exception:
+        #: ⚠️ 예외 원문·파일 경로를 싣지 않는다 — 손상 자료가 저장 구조를 알려 주면 안 된다.
+        raise HTTPException(status_code=500, detail="결과물을 읽지 못했습니다.")
+    #: 소유 프로젝트를 읽기 위한 JSON 로드까지만 하고, **가시성 확인 전에는** 승격·사용여부
+    #: 같은 부가 조회나 응답 구성을 하지 않는다.
+    _owner_project_id = str(data.get("project_id", "") or "").strip()
+    _visible_project_ids, _ = _visible_projects_with_reasons(p, viewing_context(p))
+    if not _owner_project_id or _owner_project_id not in set(_visible_project_ids):
+        raise HTTPException(status_code=404, detail="결과물을 찾을 수 없습니다.")
     # ★ [M3] 승격 이력과 **승격 시점의 게이트 판정 스냅샷**을 함께 준다.
     #   "지금 기준으로 다시 재면 통과할까"와 "그때 무엇을 근거로 승격했나"는 다른 질문이고,
     #   후자에 답할 수 없으면 승인 이력이 근거가 되지 못한다.
@@ -3720,9 +3738,20 @@ async def get_release(release_id: str, p: Principal = Depends(current_principal)
                              detail="library/item payload withheld")
             except Exception:
                 pass
-    except Exception as e:
-        # 사용여부를 못 읽었으면 "사용 가능"이라고 단정하지 않는다.
-        data["lifecycle"] = {"usable": None, "status": "unknown", "reason": str(e)}
+    except Exception:
+        #: ⚠️⚠️ [2026-09-20] 사용여부를 못 읽었으면 "사용 가능"이라고 단정하지 않는다 —
+        #:   종전에는 `unknown` 으로만 바꾸고 **실행 payload 는 그대로 돌려줬다.** 상태를
+        #:   확인하지 못한 것과 사용해도 되는 것은 다른 일이고, 이 경로는 재실행·프리뷰용이라
+        #:   코드를 주면 그 순간 통제가 없는 것과 같다. 아래 disabled 경로와 **같게** 막는다.
+        #: ⚠️ 예외 원문을 싣지 않는다. 메타데이터·이력은 그대로 둔다(삭제가 아니다).
+        for k in ("frontend_code_summary", "backend_code_summary",
+                  "artifacts", "artifact_summaries"):
+            data.pop(k, None)
+        data["lifecycle"] = {"usable": None, "status": "unknown",
+                             "reason": "사용여부를 확인하지 못했습니다."}
+        data["payload_withheld"] = (
+            "사용여부를 확인하지 못해 실행·프리뷰용 코드는 제공하지 않습니다. "
+            "메타데이터와 이력은 그대로 남아 있습니다(삭제된 것이 아닙니다).")
     return {"status": "success", "data": data}
 
 

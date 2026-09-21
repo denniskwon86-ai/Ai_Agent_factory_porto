@@ -2,9 +2,44 @@ import React, { useState, useEffect } from 'react';
 import { useFactoryStore } from '../store/useFactoryStore';
 // [트랙 E 7단계 전제] Sprint 명령의 조립·호출은 **한 곳**에서 한다. 새 Studio 와 같은
 //   함수를 부른다 — 각자 조립하면 두 화면이 서로 다른 payload 를 보내게 된다.
-import { downloadProjectArchive, newPlanningTaskId, replanWbs, resumeAfterQuota, startPlanning }
-  from '../factory/sprintActions';
+import { downloadProjectArchive, newPlanningTaskId, pauseSprint, replanWbs, resumeAfterQuota,
+  startPlanning } from '../factory/sprintActions';
 import { API_BASE_URL } from '../lib/api';
+//: ★ [2026-09-19 §1] «미확정» 판정과 원요청 조회 UI 는 **이미 있는 것을 그대로 쓴다.**
+//:   여기서 잠금 엔진을 새로 만들면 두 화면의 규칙이 갈리고, 한쪽만 고쳐지는 날이 온다.
+import { StudioExecutionRequests, useExecutionPending }
+  from '../factory/StudioExecutionRequests';
+
+/** 명령 결과를 «완료 시점의 화면» 에만, **세 갈래로** 말한다.
+ *
+ *  ⚠️⚠️ [2026-09-19 실측] 이 화면의 여덟 명령 자리가 각자 `res.ok`/`r.ok` 하나로 갈랐고,
+ *    몇 곳은 결과를 아예 버렸다. 그러면 **UNKNOWN 이 REJECTED 와 같은 말**이 된다 —
+ *    이 명령들의 UNKNOWN 은 「안 됐다」가 아니라 **「됐는지 모른다」**(응답 유실·5xx·문맥
+ *    변경)이고, 실패라고 들으면 사용자는 다시 누를 수 있다.
+ *  ★ [2026-09-20 정정] 실행 명령의 재전송은 **공용 계층이 이미 막는다**
+ *    (`executeStudioCommand` 가 PAUSE/STOP 외 새 명령을 거절). 따라서 「유료 LLM 재실행」·
+ *    「스냅샷 두 벌」은 **실측된 사건이 아니라 위험 가능성**이다 — 이 파일은 LLM 을
+ *    한 번도 실행하지 않았다. 위험과 관찰을 섞지 않는다.
+ *  ⚠️ `alert` 는 **전역**이다. 완료 시점의 열린 프로젝트가 아니면 **아무 말도 하지 않는다**
+ *    — 남의 화면 위에 뜨면 그 사람은 자기 작업이 실패한 줄 안다.
+ *  ★ 반환이 `'ok'` 일 때만 호출부가 후속 상태를 갱신한다. 나머지는 **상태를 건드리지 않는다**
+ *    — 특히 미확정에서 진행 중 손잡이(`activeSprintId`)를 버리면 사용자가 진행을 보지도,
+ *    멈추지도 못한다.
+ */
+type CommandVerdict = 'ok' | 'stale' | 'unknown' | 'failed';
+function tellCommandResult(
+  label: string, r: { ok: boolean; outcome?: string; message?: string }, requested: string,
+): CommandVerdict {
+  if (useFactoryStore.getState().currentProjectId !== requested) return 'stale';
+  if (r.ok) return 'ok';
+  const detail = r.message ? `\n\n${r.message}` : '';
+  if (r.outcome === 'UNKNOWN') {
+    alert(`⚠️ ${label} 요청의 결과를 확인하지 못했습니다. 다시 누르지 마십시오 — 같은 작업이 두 번 실행될 수 있습니다. 현재 상태를 먼저 확인하십시오.${detail}`);
+    return 'unknown';
+  }
+  alert(`❌ ${label} 요청이 받아들여지지 않았습니다.${detail}`);
+  return 'failed';
+}
 
 
 // 기본 실행 스프린트 전체 파이프라인 정의 (노드 id ↔ 라벨 ↔ 배정 에이전트명)
@@ -92,6 +127,8 @@ const PHASE_ICON: Record<string, string> = {
   draft: '✍️', critique: '🔍', revise: '♻️', scoring: '📊', scored: '✅',
 };
 
+const GUIDE_TEXT = "이 화면의 수정 요청 접수는 더 이상 쓰이지 않습니다.\n\n위쪽 「🏗 새 제작 화면」을 열고 「추가 작업 · 수정 요청」에서 어느 산출물을 고칠지 고른 뒤 제출하십시오.\n\n입력하신 내용은 이 화면에 그대로 두었습니다 — 자동으로 옮기지 않으니 **복사해서** 새 화면에 붙여 넣으십시오.";
+
 export default function ControlPanel() {
   const [idea, setIdea] = useState("");
   const [masterData, setMasterData] = useState("");
@@ -105,6 +142,18 @@ export default function ControlPanel() {
   const isWbsError = useFactoryStore((s) => s.isWbsError);
   const fetchWBS = useFactoryStore((s) => s.fetchWBS);
   const currentProjectId = useFactoryStore((s) => s.currentProjectId);
+  //: ★★ [§1] 결과가 «미확정» 인 요청이 있으면 새 쓰기를 내보내지 않는다.
+  //:   ⚠️ 공용 명령(`executeStudioCommand`)은 이미 첫 POST 전에 UNKNOWN 을 기록하고,
+  //:     PAUSE/STOP 외의 새 명령을 **거절**한다. 그러니 버튼이 열려 있다고 해서 서버로
+  //:     재전송되는 것은 아니다 — 문제는 사용자가 **왜 막혔는지 모르고, 원요청을 조회할
+  //:     입구도 이 화면에 없다**는 것이었다. 그래서 잠금이 아니라 «보이게» 하는 일이다.
+  //:   ⚠️ 일시정지·중단은 여기서 막지 않는다. 미확정 때야말로 멈출 수 있어야 한다
+  //:     (공용 계층도 그 둘만 예외로 둔다).
+  const executionPending = useExecutionPending(currentProjectId || '');
+  const pendingReason = executionPending
+    ? '결과가 미확정인 요청이 있습니다. 아래 «실행 요청 기록»에서 원래 요청을 조회한 뒤 진행하세요.'
+    : '';
+
   const saveRelease = useFactoryStore((s) => s.saveRelease);
   const stopSprint = useFactoryStore((s) => s.stopSprint);
   
@@ -231,17 +280,20 @@ export default function ControlPanel() {
     if (!currentProjectId) return alert("프로젝트가 선택되지 않았습니다.");
     
     setIsStarting(true);
+    const requested = currentProjectId;
     const uniquePlanningId = newPlanningTaskId();
     setActiveSprintId(uniquePlanningId);
     
     try {
       // ★ payload 조립은 `sprintActions.buildPlanningPayload` 하나가 담당한다.
       //   여기서 다시 적으면 새 Studio 와 스키마가 갈라진다.
-      const r = await startPlanning(currentProjectId, idea, masterData, uniquePlanningId);
-      if (!r.ok) {
-        // ⚠️ 예전에는 실패해도 «가동한 것처럼» 입력창을 비웠다. 실패를 말하고 입력을 남긴다.
-        alert(`기획 가동 실패: ${r.message}`);
-        setActiveSprintId(null);
+      const r = await startPlanning(requested, idea, masterData, uniquePlanningId);
+      // ⚠️ 예전에는 실패해도 «가동한 것처럼» 입력창을 비웠다. 실패를 말하고 입력을 남긴다.
+      const verdict = tellCommandResult('기획 가동', r, requested);
+      if (verdict !== 'ok') {
+        //: ⚠️⚠️ 미확정에서는 `activeSprintId` 를 **버리지 않는다.** 접수됐을 수도 있고,
+        //:   그 손잡이를 잃으면 사용자가 진행을 보지도 멈추지도 못한 채 다시 누르게 된다.
+        if (verdict === 'failed') setActiveSprintId(null);
         return;
       }
       // 입력창은 비우되, 접수된 요구사항은 별도 보존하여 WBS 생성 전까지 화면에 유지한다.
@@ -249,7 +301,10 @@ export default function ControlPanel() {
       setIdea("");
       setMasterData("");
     } catch (error) {
+      //: ⚠️ 종전에는 console 에만 남겨 «눌렀는데 아무 일도 없는» 화면이 됐다.
       console.error("기획 가동 실패:", error);
+      tellCommandResult('기획 가동',
+        { ok: false, outcome: 'UNKNOWN', message: '연결을 확인하지 못했습니다.' }, requested);
     } finally {
       setIsStarting(false);
     }
@@ -292,6 +347,7 @@ export default function ControlPanel() {
       if (!fb.trim()) return;
     }
     setIsStarting(true);
+    const requested = currentProjectId;
     clearSprintData(); // lastSprintFailure 포함 초기화
     setActiveSprintId(taskId);
     try {
@@ -317,10 +373,20 @@ export default function ControlPanel() {
           }
         })
       });
-      if (!res.ok) setActiveSprintId(null);
+      if (useFactoryStore.getState().currentProjectId !== requested) return;
+      //: ⚠️ 종전에는 거절당해도 **아무 말이 없었다** — 화면만 조용히 「가동 중 아님」으로
+      //:   돌아가고, 사용자는 재시도가 왜 안 되는지 알 길이 없었다.
+      if (!res.ok) {
+        setActiveSprintId(null);
+        alert(`❌ 재시도를 시작하지 못했습니다(서버 응답 ${res.status}).`);
+      }
     } catch (error) {
       console.error("실패 태스크 재시도 실패:", error);
+      if (useFactoryStore.getState().currentProjectId !== requested) return;
+      //: ⚠️ 여기서는 손잡이를 비운다 — 접수 자체를 확인하지 못했고, 이 옛 경로에는
+      //:   되찾을 원키가 없다. 대신 **다시 보내지 않는다**는 것을 말한다.
       setActiveSprintId(null);
+      alert("⚠️ 재시도 요청의 결과를 확인하지 못했습니다. 자동으로 다시 보내지 않습니다. 현재 상태를 먼저 확인하십시오.");
     } finally {
       setIsStarting(false);
     }
@@ -331,11 +397,14 @@ export default function ControlPanel() {
     if (!currentProjectId) return;
     
     setIsStarting(true);
+    const requested = currentProjectId;
     clearSprintData();
     setActiveSprintId(targetTask.task_id);
 
     try {
-      await fetch(`${API_BASE_URL}/api/v1/factory/${currentProjectId}/sprint/start`, {
+      //: ⚠️⚠️ 종전에는 `await fetch(...)` 로 **응답을 통째로 버렸다.** 서버가 409·403 을
+      //:   줘도 화면은 이미 `activeSprintId` 를 세워 「가동 중」으로 보였다.
+      const res = await fetch(`${API_BASE_URL}/api/v1/factory/${requested}/sprint/start`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -350,8 +419,16 @@ export default function ControlPanel() {
           }
         })
       });
+      if (useFactoryStore.getState().currentProjectId !== requested) return;
+      if (!res.ok) {
+        setActiveSprintId(null);
+        alert(`❌ 작업을 가동하지 못했습니다(서버 응답 ${res.status}).`);
+      }
     } catch (error) {
       console.error("스프린트 가동 실패:", error);
+      if (useFactoryStore.getState().currentProjectId !== requested) return;
+      setActiveSprintId(null);
+      alert("⚠️ 가동 요청의 결과를 확인하지 못했습니다. 자동으로 다시 보내지 않습니다. 현재 상태를 먼저 확인하십시오.");
     } finally {
       setIsStarting(false);
     }
@@ -359,59 +436,59 @@ export default function ControlPanel() {
 
   const handlePauseSprint = async (targetTask: any) => {
     if (!currentProjectId) return;
+    const requested = currentProjectId;
+    //: ★ 새 Studio 와 **같은 공용 명령**을 쓴다. 종전에는 이 화면만 `/sprint/pause` 로 직접
+    //:   POST 하고 **응답을 보지 않았다** — 실행 중 작업이 없어 409 가 와도 아래에서
+    //:   `activeSprintId` 를 비워 화면은 「멈췄다」로 보였다(2026-09-19 실측 409).
+    let r;
     try {
-      await fetch(`${API_BASE_URL}/api/v1/factory/${currentProjectId}/sprint/pause`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ task_id: targetTask.task_id })
-      });
-      setActiveSprintId(null);
+      r = await pauseSprint(requested, targetTask.task_id);
     } catch (error) {
       console.error("스프린트 일시정지 실패:", error);
+      r = { ok: false, outcome: 'UNKNOWN', message: '연결을 확인하지 못했습니다.' };
     }
+    if (tellCommandResult('일시정지', r, requested) !== 'ok') return;
+    setActiveSprintId(null);
   };
 
   // [R2] 쿼터 회복 후 SUSPENDED 지점부터 재개(처음부터 재실행이 아님)
   const handleResumeQuota = async () => {
     if (!currentProjectId) return;
     if (!suspendedTaskId) return alert("재가동할 보류 태스크 정보가 없습니다. 페이지를 새로고침해 주세요.");
+    const requested = currentProjectId;
     setIsStarting(true);
     try {
-      const r = await resumeAfterQuota(currentProjectId, suspendedTaskId);
-      if (r.ok) {
-        setActiveSprintId(suspendedTaskId);
-        clearSuspendedQuota();
-      } else {
-        alert(`재가동 실패: ${r.message}`);
-      }
+      const r = await resumeAfterQuota(requested, suspendedTaskId);
+      //: ⚠️ 미확정이면 `clearSuspendedQuota()` 를 **부르지 않는다** — 보류 지점을 지우면
+      //:   다음 재개가 「처음부터」로 떨어지고, 이미 쓴 LLM 비용을 다시 쓴다.
+      if (tellCommandResult('재가동', r, requested) !== 'ok') return;
+      setActiveSprintId(suspendedTaskId);
+      clearSuspendedQuota();
     } catch (error) {
       console.error("쿼터 재가동 실패:", error);
-      alert("재가동 요청 중 오류가 발생했습니다.");
+      tellCommandResult('재가동',
+        { ok: false, outcome: 'UNKNOWN', message: '연결을 확인하지 못했습니다.' }, requested);
     } finally {
       setIsStarting(false);
     }
   };
 
-  const handleSubmitFeedback = async () => {
+  /** ★★ [§10.1 「수정 요구」 · 2026-09-19] **여기서는 아무 데도 보내지 않는다.**
+   *
+   *  ⚠️⚠️ 종전에는 `/sprint/revision` 에 POST 했다. 그런데 서버는 기준 산출물·저장
+   *    초안·원키 없이 새 작업을 만드는 그 접수를 **닫았고**, 언제나 409 를 돌려준다
+   *    (격리 서버 실측). 화면은 그걸 삼켜서 «눌러도 아무 일도 안 일어나는» 상태였다.
+   *  ★ 안내를 보이려고 **실패할 요청을 보내지 않는다.** 닫힌 줄 아는 곳으로
+   *    두드리는 것은 서버에도 감사 로그에도 쓸데없는 자관을 남긴다.
+   *  ★ 새 편집기·새 계약을 이 화면에 **다시 구현하지 않는다.** 새 제작 화면의
+   *    수정 요청이 기준 산출물 선택·권한·원키까지 이미 다룬다 — 두 벌이 되면 그중
+   *    하나만 고쳐지는 날이 온다.
+   *  ⚠️ 입력을 **지우지 않는다.** 자동으로 옮기지도 않는다 — 기준 산출물을
+   *    사람이 골라야 하고, 새 화면의 기존 초안을 덮어쓰면 안 된다. */
+  const handleSubmitFeedback = () => {
     if (!feedback.trim()) return alert("수정 사항을 입력해주세요.");
     if (!currentProjectId) return;
-    
-    setIsStarting(true);
-    try {
-      const res = await fetch(`${API_BASE_URL}/api/v1/factory/${currentProjectId}/sprint/revision`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ feedback })
-      });
-      if (res.ok) {
-        setFeedback("");
-        fetchWBS();
-      }
-    } catch (error) {
-      console.error("피드백 전송 실패:", error);
-    } finally {
-      setIsStarting(false);
-    }
+    alert("ℹ️ " + GUIDE_TEXT);
   };
 
   const renderPipelineTracker = (isPaused: boolean, task: any) => {
@@ -487,8 +564,13 @@ export default function ControlPanel() {
   const handleStopSprint = async () => {
     if (!currentProjectId || !activeSprintId) return;
     if (!confirm("실행 중인 에이전트를 강제로 정지하시겠습니까? (이전 체크포인트까지만 저장됩니다)")) return;
-    await stopSprint(currentProjectId, activeSprintId);
-    alert("에이전트 가동을 강제로 정지했습니다.");
+    //: ⚠️⚠️ 종전에는 **결과를 통째로 버리고** 무조건 「정지했습니다」라고 말했다.
+    //:   실행 중 작업이 없으면 서버는 409 를 준다(실측) — 그런데 사용자는 멈춘 줄 안다.
+    //:   가동이 계속 도는 동안 멈췄다고 믿는 것이 이 화면에서 가장 위험한 거짓이다.
+    const requested = currentProjectId;
+    const r = await stopSprint(requested, activeSprintId);
+    if (tellCommandResult('가동 정지', r, requested) !== 'ok') return;
+    alert(`✅ 가동 정지를 접수했습니다.\n\n${r.message}`);
   };
 
   return (
@@ -503,6 +585,22 @@ export default function ControlPanel() {
           )}
         </h2>
       </div>
+
+      {/* ★★ [§1-2] 미확정이면 **기존** 원요청 조회·복구 UI 를 그대로 띄운다.
+          ⚠️ 새 패널·새 조회를 만들지 않는다. 자동 재전송도, 새 원키 발급도 하지 않는다 —
+            사용자가 할 일은 «원래 요청의 결과를 확정하는 것» 하나다.
+          ⚠️ 미확정일 때만 렌더한다. 새 제작 화면이 함께 떠 있으면 같은 컴포넌트가 둘이
+            되는데, 이 컴포넌트는 주기 조회를 하지 않으므로 마운트당 GET 한 번이다. */}
+      {currentProjectId && pendingReason && (
+        <div className="p-4 border-b border-amber-700/40 bg-amber-950/30 shrink-0">
+          <p className="text-xs font-bold text-amber-200 mb-2" role="status">⚠️ {pendingReason}</p>
+          <p className="text-[11px] text-amber-100/80 mb-2">
+            접수 여부가 확정될 때까지 새 작업 요청은 잠급니다. <b>일시정지·중단은 그대로 쓸 수
+            있습니다.</b> 같은 요청을 자동으로 다시 보내지 않습니다.
+          </p>
+          <StudioExecutionRequests projectId={currentProjectId} />
+        </div>
+      )}
 
       {currentActivity && (
         <div className="px-4 py-2 bg-blue-950/60 border-b border-blue-800 flex items-center gap-2 shrink-0">
@@ -532,8 +630,8 @@ export default function ControlPanel() {
             <div className="flex gap-2">
               <button
                 onClick={handleResumeQuota}
-                disabled={isStarting || !suspendedTaskId}
-                title="쿼터 회복 후, 처음부터가 아니라 중단된 지점부터 이어서 재가동합니다."
+                disabled={isStarting || !suspendedTaskId || !!pendingReason}
+                title={pendingReason || "쿼터 회복 후, 처음부터가 아니라 중단된 지점부터 이어서 재가동합니다."}
                 className="px-3 py-1.5 bg-orange-600 hover:bg-orange-500 disabled:opacity-50 disabled:cursor-not-allowed rounded text-xs font-bold text-white transition-colors"
               >▶️ 중단 지점부터 재가동</button>
               <button onClick={clearSuspendedQuota} className="px-3 py-1.5 bg-gray-700 hover:bg-gray-600 rounded text-xs font-bold text-gray-100 transition-colors">⏸️ 알림 닫기</button>
@@ -566,18 +664,18 @@ export default function ControlPanel() {
           {pipeStatus.key === "failed" && (
             <div className="mt-2 pt-2 border-t border-white/10 flex flex-wrap gap-2">
               <button
-                disabled={isStarting}
+                disabled={isStarting || !!pendingReason}
                 onClick={() => handleRetryFailedTask(false)}
                 className="px-2.5 py-1.5 bg-red-600 hover:bg-red-500 disabled:bg-gray-700 text-white rounded text-[11px] font-bold"
-                title="직전 빌드 오류 내용을 에이전트에게 전달하며 태스크를 재가동합니다."
+                title={pendingReason || "직전 빌드 오류 내용을 에이전트에게 전달하며 태스크를 재가동합니다."}
               >
                 🔁 오류 반영 재시도
               </button>
               <button
-                disabled={isStarting}
+                disabled={isStarting || !!pendingReason}
                 onClick={() => handleRetryFailedTask(true)}
                 className="px-2.5 py-1.5 bg-amber-600 hover:bg-amber-500 disabled:bg-gray-700 text-white rounded text-[11px] font-bold"
-                title="추가 지시(우회 방법, 범위 축소 등)를 입력해 함께 전달합니다."
+                title={pendingReason || "추가 지시(우회 방법, 범위 축소 등)를 입력해 함께 전달합니다."}
               >
                 💬 지시 추가 후 재시도
               </button>
@@ -696,7 +794,9 @@ export default function ControlPanel() {
               />
             </div>
             <button 
-              onClick={handleStartPlanning} disabled={isStarting || !idea.trim() || activeSprintId !== null}
+              onClick={handleStartPlanning}
+              disabled={isStarting || !idea.trim() || activeSprintId !== null || !!pendingReason}
+              title={pendingReason || undefined}
               className="mt-2 w-full bg-purple-600 hover:bg-purple-500 disabled:bg-gray-700 font-bold py-3 rounded transition-colors"
             >
               {isStarting ? "기획 중..." : "🎯 기획 및 작업분해 시작"}
@@ -727,14 +827,23 @@ export default function ControlPanel() {
                       if (!currentProjectId) return;
                       if (!confirm("기획 산출물(요구정의/기획서/화면설계/아키텍처)은 유지한 채 작업만 다시 나눕니다.\n(작업 분해가 실패했거나 구성이 적절하지 않을 때 사용)\n진행할까요?")) return;
                       try {
-                        const r = await replanWbs(currentProjectId);
-                        if (!r.ok) { alert(r.message); return; }
+                        const requested = currentProjectId;
+                        const r = await replanWbs(requested);
+                        //: ⚠️ 미확정이면 `clearSprintData()` 를 부르지 않는다 — 접수됐을 수도
+                        //:   있는 작업의 기록을 지우면 결과를 확인할 길이 사라진다.
+                        if (tellCommandResult('작업 재분할', r, requested) !== 'ok') return;
                         clearSprintData();
                         if (r.taskId) setActiveSprintId(r.taskId);
-                      } catch (e) { console.error("WBS 재분할 실패:", e); }
+                      } catch (e) {
+                        console.error("WBS 재분할 실패:", e);
+                        tellCommandResult('작업 재분할',
+                          { ok: false, outcome: 'UNKNOWN', message: '연결을 확인하지 못했습니다.' },
+                          currentProjectId);
+                      }
                     }}
-                    className="text-[11px] font-bold text-amber-200 bg-amber-900/50 hover:bg-amber-800/60 border border-amber-700/50 px-2.5 py-1 rounded transition-colors"
-                    title="기획은 유지하고 작업 분해만 다시 수행합니다."
+                    className="text-[11px] font-bold text-amber-200 bg-amber-900/50 hover:bg-amber-800/60 border border-amber-700/50 px-2.5 py-1 rounded transition-colors disabled:opacity-50"
+                    disabled={!!pendingReason}
+                    title={pendingReason || "기획은 유지하고 작업 분해만 다시 수행합니다."}
                   >
                     🔁 작업 다시 나누기
                   </button>
@@ -766,27 +875,45 @@ export default function ControlPanel() {
                 <button
                   onClick={async () => {
                     const accepted = state?.supervisor_verdict === "PASS";
+                    //: ★ [§1-6] 라벨을 새 화면과 맞춘다. 이 명령은 **검토용 버전 저장**이고
+                    //:   배포·운영 승격은 별도 절차다 — 「배포」라고 부르면 이것으로 끝난 줄 읽는다.
                     const msg = accepted
-                      ? "이 프로젝트의 최종 결과물을 라이브러리에 저장(배포)하시겠습니까?"
-                      : "⚠️ 고객 수용검수를 통과하지 못한 상태입니다 — 요구가 모두 충족되지 않았습니다.\n그래도 이 결과물을 라이브러리에 저장(배포)하시겠습니까?";
+                      ? "이 프로젝트의 결과물을 검토용 버전으로 저장하시겠습니까?\n\n배포·운영 승격은 별도 절차입니다."
+                      : "⚠️ 고객 수용검수를 통과하지 못한 상태입니다 — 요구가 모두 충족되지 않았습니다.\n그래도 검토용 버전으로 저장하시겠습니까?\n\n배포·운영 승격은 별도 절차입니다.";
                     if (!confirm(msg)) return;
                     // ⚠️ `saveRelease` 는 이제 **이유를 담은 객체**를 돌려준다. `if (r)` 로 검사하면
                     //   객체는 항상 truthy 라 실패해도 «저장되었습니다» 가 뜬다 — `tsc` 는 이것을
                     //   잡지 못한다(2026-08-07 실측). 반드시 `r.ok` 를 본다.
-                    const r = await saveRelease(currentProjectId);
+                    const requested = currentProjectId;
+                    const r = await saveRelease(requested);
+                    //: ⚠️ [검토 2026-09-19] `alert` 는 **전역**이다. 완료 «시점» 의 화면이 아직
+                    //:   그 프로젝트인지 보고 나서 말한다 — 아니면 남의 화면 위에 뜼다.
+                    if (useFactoryStore.getState().currentProjectId !== requested) return;
                     if (r.ok) {
-                      alert("✅ 최종 결과물이 라이브러리에 저장되었습니다.\n런처(프로젝트 선택) 화면의 '📦 결과물 라이브러리'에서 다시 실행/미리보기 할 수 있습니다.");
+                      //: 서버·공용 함수가 준 문구를 그대로 싣는다. 화면이 「저장되었습니다」로
+                      //:   **지어내지 않는다** — 접수와 저장 완료는 다르고, 목록이 정본이다.
+                      alert(`✅ 검토용 버전 저장을 접수했습니다.\n\n${r.message}`);
+                    } else if (r.outcome === 'UNKNOWN') {
+                      //: ⚠️⚠️ **미확정을 「실패」로 단정하지 않는다.** 이 명령의 UNKNOWN 은
+                      //:   「안 됐다」가 아니라 「됐는지 모른다」다(응답 유실·5xx·문맥 변경).
+                      //:   ★ [2026-09-19 Codex 정정] 미확정 «중» 의 재전송은 공용 계층이 이미
+                      //:     막는다(`executeStudioCommand` 가 PAUSE/STOP 외 새 명령을 거절).
+                      //:     그러니 「두 벌 저장된다」고 겁주지 않는다 — 사용자가 할 일은
+                      //:     **원요청을 조회해 결과를 확정하는 것**이다.
+                      alert(`⚠️ 저장 여부를 확인하지 못했습니다. 다시 누르지 말고 아래 «실행 요청 기록» 에서 원래 요청을 조회하십시오.\n\n${r.message}`);
                     } else {
-                      alert(`❌ 결과물 저장에 실패했습니다.\n\n${r.message}`);
+                      alert(`❌ 결과물을 저장하지 못했습니다.\n\n${r.message}`);
                     }
                   }}
-                  className={`w-full text-white font-bold py-3 rounded-lg shadow-lg transition-all border ${
+                  disabled={!!pendingReason}
+                  title={pendingReason || undefined}
+                  className={`w-full text-white font-bold py-3 rounded-lg shadow-lg transition-all border disabled:opacity-50 ${
                     state?.supervisor_verdict !== "PASS"
                       ? "bg-gradient-to-r from-orange-700 to-red-700 hover:from-orange-600 hover:to-red-600 border-red-400/30"
                       : "bg-gradient-to-r from-emerald-600 to-green-600 hover:from-emerald-500 hover:to-green-500 border-emerald-400/30"
                   }`}
                 >
-                  {state?.supervisor_verdict !== "PASS" ? "⚠️ 수용검수 미통과 — 그래도 배포(저장)" : "🚀 최종 결과물 저장 (배포)"}
+                  {state?.supervisor_verdict !== "PASS" ? "⚠️ 수용검수 미통과 — 그래도 검토용 버전 저장" : "💾 검토용 버전 저장"}
                 </button>
                 {/* 생성된 산출물(코드·문서)을 zip 으로 즉시 내려받기 — Content-Disposition 헤더가 파일명 지정.
                     ★★★ [2026-09-19 실측] 앵커 직접 이동은 **세션 헤더를 못 싣는다**(401).
@@ -800,7 +927,13 @@ export default function ControlPanel() {
                       //:   `alert` 는 **전역**이라 다른 화면 위에도 뜬다.
                       //: ★ 완료 시점의 열린 프로젝트와 비교한다.
                       if (useFactoryStore.getState().currentProjectId !== result.projectId) return;
-                      if (!result.ok) alert(result.reason);
+                      //: ⚠️⚠️ [2026-09-20 실측] 성공하면 **아무 말도 하지 않았다.**
+                      //:   브라우저가 저장을 조용히 시작하면 사용자는 「눌렀는데 아무 일도
+                      //:   없다」로 읽는다 — 새 Studio 는 「시작했습니다」라고 말한다.
+                      //: ★ 공용 함수가 준 파일명을 그대로 싣는다. 저장 완료를 단정하지
+                      //:   않고 「시작」까지만 말한다 — 디스크 저장은 브라우저가 한다.
+                      if (result.ok) alert(`✅ 내려받기를 시작했습니다 — ${result.filename}`);
+                      else alert(result.reason);
                     })();
                   }}
                   className="w-full mt-2 text-emerald-200 font-bold py-2.5 rounded-lg border border-emerald-700/50 bg-emerald-900/20 hover:bg-emerald-800/40 transition-all text-sm"
@@ -887,10 +1020,10 @@ export default function ControlPanel() {
                   <p className="text-xs text-gray-400 mb-3">{task.goal}</p>
                   
                   {isIdle && (
-                    <button onClick={() => handleStartSprint(task)} disabled={isStarting || activeSprintId !== null} className="w-full text-xs font-bold py-2 rounded bg-blue-600 hover:bg-blue-500 disabled:bg-gray-700 text-white">▶️ 작업 시작</button>
+                    <button onClick={() => handleStartSprint(task)} disabled={isStarting || activeSprintId !== null || !!pendingReason} title={pendingReason || undefined} className="w-full text-xs font-bold py-2 rounded bg-blue-600 hover:bg-blue-500 disabled:bg-gray-700 text-white">▶️ 작업 시작</button>
                   )}
                   {isPaused && (
-                    <button onClick={() => handleStartSprint(task)} disabled={isStarting || activeSprintId !== null} className="w-full text-xs font-bold py-2 rounded bg-orange-600 hover:bg-orange-500 disabled:bg-gray-700 text-white">▶️ 이어서 실행</button>
+                    <button onClick={() => handleStartSprint(task)} disabled={isStarting || activeSprintId !== null || !!pendingReason} title={pendingReason || undefined} className="w-full text-xs font-bold py-2 rounded bg-orange-600 hover:bg-orange-500 disabled:bg-gray-700 text-white">▶️ 이어서 실행</button>
                   )}
                   {isRunning && (
                     <div className="flex flex-col gap-2">
@@ -906,16 +1039,22 @@ export default function ControlPanel() {
             {doneTasks > 0 && (
               <div className="mt-4 pt-4 border-t border-gray-700 flex flex-col gap-2">
                 <label className="text-sm font-semibold text-yellow-500">🎯 3. 사용자 검토 및 수정 요청</label>
+                {/* ★ [§2] 이 자리에서 접수하지 않는다는 것을 «누르기 전에» 말한다. */}
+                <p className="text-[11px] text-yellow-200/80 leading-relaxed">
+                  수정 요청 접수는 <b>「🏗 새 제작 화면」 → 「추가 작업 · 수정 요청」</b>에서 합니다.
+                  어느 산출물을 고칠지 고른 뒤 제출해야 하기 때문입니다. 아래 입력은 메모로 남고
+                  <b> 자동으로 옮겨가지 않습니다</b> — 복사해서 붙여 넣으십시오.
+                </p>
                 <textarea 
                   value={feedback} onChange={(e) => setFeedback(e.target.value)} disabled={isStarting || activeSprintId !== null}
                   placeholder="디자인이나 기능 수정 요구사항을 입력하세요..."
                   className="w-full h-24 bg-gray-950 border border-gray-700 rounded p-3 text-sm focus:outline-none focus:border-yellow-500 resize-none disabled:opacity-50"
                 />
                 <button 
-                  onClick={handleSubmitFeedback} disabled={isStarting || !feedback.trim() || activeSprintId !== null}
+                  onClick={handleSubmitFeedback} disabled={!feedback.trim()}
                   className="mt-1 w-full bg-yellow-600 hover:bg-yellow-500 disabled:bg-gray-700 font-bold py-3 rounded text-white"
                 >
-                  {isStarting ? "처리 중..." : "📨 수정 요청 등록"}
+                  📍 수정 요청은 어디서 하나요?
                 </button>
               </div>
             )}

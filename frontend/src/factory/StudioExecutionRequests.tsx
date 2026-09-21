@@ -25,7 +25,9 @@ function subscribePending(listener: () => void) {
   const unsubscribeIdentity = subscribeIdentity(listener);
   return () => { unsubscribe(); unsubscribeIdentity(); };
 }
-function useExecutionPending(projectId: string) {
+/** ★ 구 통제실도 이 훅을 쓴다 — «미확정이 있는가» 를 세 번째로 다시 구독하지 않는다.
+ *  이미 기록 변경과 신원 변경을 함께 보고 있고, SSR 에서 개인 기록을 먼저 공개하지 않는다. */
+export function useExecutionPending(projectId: string) {
   const snapshot = useCallback(() => !!projectId && hasExecutionPending(projectId), [projectId]);
   // boolean snapshot은 같은 값에 같은 참조다. SSR에서 개인 기록을 미리 공개하지 않는다.
   return useSyncExternalStore(subscribePending, snapshot, () => false);
