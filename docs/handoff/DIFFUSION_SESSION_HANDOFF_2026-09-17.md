@@ -21,9 +21,9 @@
 | 플랫폼에 **늘려 넣을 수 있나** | ⏸ 이름표·경로는 됐고(09-21) **등록 경로 잇기**가 남았다 |
 | 선반에 **줄 물건이 있나** | ⚠️ **조합 키트 하나뿐.** 사업별로 뽑히기는 하나 봉인해 둔 적이 없다 |
 
-★ **다음 한 걸음**: [`KIT_SHELF_SPEC`](../data-kits/KIT_SHELF_SPEC_2026-09-17.md) 7 장
-  **7 번(선반 카탈로그)** — 1~3·6 이 끝나 `kit_id`·`sector` 가 생겼다.
-  4·5(새 키트를 실제로 봉인)는 **결정이 필요하다**(9 장 ③).
+★ **다음 한 걸음**: [`KIT_SHELF_SPEC`](../data-kits/KIT_SHELF_SPEC_2026-09-17.md) 7 장에서
+  **4·5(새 키트를 실제로 봉인)만 남았고, 그것은 결정이 필요하다**(9 장 ③).
+  나머지(1~3·6·7)는 끝났다. 지금 선반 상태는 `python scripts/kit_shelf.py` 가 답한다.
 
 ---
 
@@ -76,6 +76,7 @@
 | `tests/test_business_defs.py` | **27 건** — 사업 분리 · 산업 의미 · 키트 정체성 |
 | `tests/test_kit_freeze.py` | **15 건** — 봉인 · 지문 |
 | `tests/test_kit_registry_paths.py` | **7 건** — 키트 경로를 설정으로 (09-21 신규) |
+| `tests/test_kit_shelf.py` | **10 건** — 선반 카탈로그 (09-21 신규) |
 | 영향권 전체 | **약 430 건 통과** (`kit_freeze`·`starter_kit`·`business_defs`·`KIT-MFG` 를 쓰는 시험 전부) |
 | 검증기 | **420 건 PASS** (1.2.0) |
 
@@ -104,7 +105,7 @@
 | 1~3 | 사업 정의에 키트 정체성 + 생성기 + 시험 | ✅ **완료** (`3b723eb72`) |
 | 6 | 키트 경로를 환경변수로 | ✅ **완료** |
 | **4·5** | 제련·전지소재를 각각 생성 → 검증 420 → 봉인 | ⏸ **결정 필요**(+100 MB) |
-| **7** | 선반 카탈로그 | 바로 할 수 있다 — `kit_id`·`sector` 가 생겼다 |
+| 7 | 선반 카탈로그 (`scripts/kit_shelf.py`) | ✅ **완료** — 문서가 아니라 도구로 |
 
 ### 3.2 그다음 (설계만 있음)
 
@@ -231,6 +232,9 @@ Codex 인계 문서)이 내 커밋에 딸려 갔다. 푸시 전에 잡아
 
 # 쓸 수 있는 사업
 .venv/Scripts/python.exe scripts/generate_sample_company_starter_kit.py --list-businesses
+
+# ★ 선반 — 무엇을 줄 수 있고 어디가 비었나
+.venv/Scripts/python.exe scripts/kit_shelf.py
 
 # 시험 (영향권)
 .venv/Scripts/python.exe -m pytest tests/test_business_defs.py tests/test_kit_defs.py \
