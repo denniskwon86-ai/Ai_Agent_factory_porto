@@ -86,8 +86,9 @@
 | 영향권 전체 | **약 430 건 통과** (`kit_freeze`·`starter_kit`·`business_defs`·`KIT-MFG` 를 쓰는 시험 전부) |
 | 검증기 | **420 건 PASS** (1.2.0) |
 
-⚠️ `tests/` **전체는 통과하지 않는다** — 실패 8 건이 남는데 **전부 플랫폼 영역**이고
-  이 세션의 변경 전부터 그랬다(3.3).
+⚠️ `tests/` **전체는 통과하지 않는다** — **11 건**이 남는데 전부 플랫폼 영역이고
+  이 세션의 변경 전부터 그랬다. 10 건은 **시험이 낡은 것**이고(라우터는 정상이다)
+  1 건은 판본 불일치다 — 둘 다 인계 문서로 넘겼다(4.3).
 
 ### 2.4 선반에 실제로 있는 것 — 정직하게
 
@@ -167,7 +168,8 @@
 ### 4.3 플랫폼 쪽 (별도 문서로 넘겼다)
 
 [`KIT_VERSION_1_2_0_NOTICE`](KIT_VERSION_1_2_0_NOTICE_2026-09-17.md) ·
-[`PLATFORM_REVIEW_ABSOLUTE_DRIVERS`](PLATFORM_REVIEW_ABSOLUTE_DRIVERS_2026-09-16.md)
+[`PLATFORM_REVIEW_ABSOLUTE_DRIVERS`](PLATFORM_REVIEW_ABSOLUTE_DRIVERS_2026-09-16.md) ·
+[`PLATFORM_ROUTER_TESTS_STALE`](PLATFORM_ROUTER_TESTS_STALE_2026-09-21.md)
 
 ---
 
