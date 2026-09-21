@@ -22,6 +22,15 @@
   확인하지 못한 것을 통과로 두지 않는 것이 이 저장소의 관통 원칙이고, 반대로 「모른다」를
   「실패」로 접으면 원인을 못 찾는다.
 
+## ⚠️⚠️ 지금은 «실제 serving 증거» 가 아니다 — 읽기 전용 **판정 초안**이다
+
+[DEP-R3] 역할은 부르는 쪽이 준 문자열이고, digest·설정 지문은 탐침 프로세스의 환경변수다.
+**실행 중인 업무 프로세스가 스스로 낸 관측이 아니다.** 공유 저장소도 표식 «선언» 까지만 본다.
+그래서 이 모듈은 「판정 규칙」이고, 그 규칙에 값을 대는 **관측 공급자는 아직 없다.**
+
+★ 그 결과 **지금 구성에서 종합 판정은 `READY` 가 될 수 없다**(공유 저장소가 늘 `UNKNOWN`).
+  그것이 정직한 상태이고, 관측 공급자가 붙기 전에는 이 판정을 단독 승격 근거로 쓸 수 없다.
+
 ## 이 판정이 **하지 않는** 것
 
     · 외부 LLM 호출 0
@@ -58,6 +67,8 @@ REASON_SCHEMA_UNREADABLE = "schema_unreadable"
 REASON_STORE_QUERY_FAILED = "store_query_failed"
 REASON_SHARED_STORAGE_ABSENT = "shared_storage_absent"
 REASON_SHARED_STORAGE_UNVERIFIED = "shared_storage_unverified"
+#: 표식은 있으나 «같은 저장소인지» 는 증명되지 않았다 — 표식은 선언이지 결속이 아니다.
+REASON_SHARED_STORAGE_DECLARED_ONLY = "shared_storage_declared_only"
 REASON_INSTALL_CONTEXT_ABSENT = "install_context_absent"
 REASON_INSTALL_CONTEXT_MISMATCH = "install_context_mismatch"
 REASON_INSTALL_CONTEXT_UNREADABLE = "install_context_unreadable"
@@ -69,10 +80,19 @@ SHARED_MARKER = ".afs-shared"
 
 @dataclass(frozen=True)
 class Check:
-    """검사 하나. **사유는 코드**이고 세부는 담지 않는다."""
+    """검사 하나. **사유는 코드**이고 세부는 담지 않는다.
+
+    ⚠️ [DEP-R2] 판정값을 **여기서 막는다.** 오타나 새 값(`"TIMEOUT"` 같은)이 들어오면
+      집계가 「FAIL 도 UNKNOWN 도 아니네」 하고 **READY 로 떨어뜨렸다.** 실제 반례였다."""
     name: str
     verdict: str
     reason: str = REASON_OK
+
+    def __post_init__(self) -> None:
+        if self.verdict not in VERDICTS:
+            raise ValueError(
+                f"허용되지 않은 판정값입니다: {self.verdict!r} "
+                f"(허용: {', '.join(VERDICTS)})")
 
     def as_dict(self) -> Dict[str, str]:
         return {"name": self.name, "verdict": self.verdict, "reason": self.reason}
@@ -86,18 +106,24 @@ class Report:
 
     @property
     def verdict(self) -> str:
-        """★ 하나라도 FAIL 이면 FAIL. FAIL 이 없고 UNKNOWN 이 있으면 UNKNOWN.
+        """★ **모든 검사가 명시적으로 READY 일 때만 READY.**
 
-        ⚠️ UNKNOWN 을 READY 쪽으로도 FAIL 쪽으로도 **접지 않는다.**"""
-        kinds = {c.verdict for c in self.checks}
+        ⚠️ UNKNOWN 을 READY 쪽으로도 FAIL 쪽으로도 **접지 않는다.**
+
+        ⚠️⚠️ [DEP-R2] 예전 판은 「FAIL 도 UNKNOWN 도 없으면 READY」였다. 그건
+          **모르는 값이 통과하는 문**이다 — `Check("probe", "TIMEOUT")` 하나짜리
+          보고서가 `READY` 로 나왔다(Codex 가 실제로 재현). 이제는 **허용 목록 쪽**으로
+          뒤집는다: 아는 값만 세고, 전부 READY 여야 READY 다."""
         if not self.checks:
             #: 아무것도 보지 않고 「준비됨」이라고 말하지 않는다.
             return UNKNOWN
+        kinds = {c.verdict for c in self.checks}
+        if kinds - set(VERDICTS):
+            #: 모르는 판정값이 섞였다 — 통과시키지 않는다.
+            return UNKNOWN
         if FAIL in kinds:
             return FAIL
-        if UNKNOWN in kinds:
-            return UNKNOWN
-        return READY
+        return READY if kinds == {READY} else UNKNOWN
 
     def as_dict(self) -> Dict[str, Any]:
         return {"verdict": self.verdict,
@@ -206,17 +232,32 @@ def check_bounded_query(probes: Iterable[Tuple[str, str]],
 def check_shared_storage(directories: Iterable[str]) -> Check:
     """여러 노드가 **같은 것을 보고 있는가.**
 
-    ⚠️ 쓸 수 있는지는 **쓰기로 확인하지 않는다.** 대신 설치가 놓는 표식(`.afs-shared`)을
-      본다. 표식이 없으면 `UNKNOWN` 이다 — 「아마 공유겠지」로 승격하면 전환 뒤에
-      한쪽 노드만 파일을 못 보는 사고가 조용히 생긴다."""
-    verdict = READY
-    for folder in directories:
+    ⚠️ 쓸 수 있는지는 **쓰기로 확인하지 않는다.**
+    ⚠️⚠️ 그리고 표식(`.afs-shared`)이 있어도 **`READY` 를 주지 않는다** — 표식은 설치의
+      «선언» 이지 결속의 증거가 아니다. 이 검사가 낼 수 있는 최선은 `UNKNOWN` 이다.
+      따라서 **지금 구성에서 종합 판정은 READY 가 될 수 없다.** 그것이 정직한 상태다."""
+    folders = [d for d in directories]
+    if not folders:
+        #: ⚠️⚠️ [DEP-R2] 빈 목록은 «공유 저장소가 필요 없다» 가 아니라 **«확인하지
+        #:   않았다»** 다. 예전 판은 순회를 한 번도 안 돌고 READY 를 냈다 — CLI 의
+        #:   `--shared-dir` 기본값이 빈 목록이라, 아무 것도 주지 않으면 통과했다.
+        #:   ★ 역할 검사에서 같은 구멍을 고쳐 놓고 **반대편 문을 안 봤다.**
+        #:   정말 공유 저장소가 불필요한 역할이 있다면 그건 «승인된 설치 계약» 으로
+        #:   선언할 일이지, 인자를 빠뜨린 것을 불필요로 읽을 일이 아니다.
+        return Check("shared_storage", UNKNOWN, REASON_SHARED_STORAGE_UNVERIFIED)
+    declared = True
+    for folder in folders:
         if not folder or not os.path.isdir(folder):
             return Check("shared_storage", FAIL, REASON_SHARED_STORAGE_ABSENT)
         if not os.path.exists(os.path.join(folder, SHARED_MARKER)):
-            verdict = UNKNOWN
-    return Check("shared_storage", verdict,
-                 REASON_OK if verdict == READY else REASON_SHARED_STORAGE_UNVERIFIED)
+            declared = False
+    #: ⚠️⚠️ [결정 ⑥] **표식만으로 READY 를 주지 않는다.** 서로 다른 로컬 디렉터리에
+    #:   빈 파일을 각각 놓아도 이 검사는 통과했다 — 그건 «같은 저장소» 의 증거가 아니다.
+    #:   표식은 설치가 «선언» 한 것이고, 결속(mount·backend 동일성)은 아직 증명할
+    #:   방법이 없다. 그래서 잘해야 `UNKNOWN` 이다.
+    return Check("shared_storage", UNKNOWN,
+                 REASON_SHARED_STORAGE_DECLARED_ONLY if declared
+                 else REASON_SHARED_STORAGE_UNVERIFIED)
 
 
 # ── ⑤ 설치 문맥 — **읽기 검증만** (DEP-05) ───────────────────────────────

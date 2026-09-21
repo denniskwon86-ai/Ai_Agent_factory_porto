@@ -172,11 +172,57 @@ def test_shared_storage_without_a_marker_is_unknown_not_ready(tmp_path):
     assert check.reason == sr.REASON_SHARED_STORAGE_UNVERIFIED
 
 
-def test_shared_storage_with_marker_is_ready(tmp_path):
-    folder = tmp_path / "shared"
+def test_a_marker_alone_never_yields_ready(tmp_path):
+    """⚠️⚠️ [결정 ⑥] **빈 파일을 놓아 READY 를 만드는 안은 승인되지 않았다.**
+
+    표식은 설치가 «선언» 한 것이고 결속의 증거가 아니다. 잘해야 UNKNOWN 이다."""
+    folder = tmp_path / "library"
     folder.mkdir()
     (folder / sr.SHARED_MARKER).write_text("", encoding="utf-8")
-    assert sr.check_shared_storage([str(folder)]).verdict == sr.READY
+    check = sr.check_shared_storage([str(folder)])
+    assert check.verdict == sr.UNKNOWN
+    assert check.reason == sr.REASON_SHARED_STORAGE_DECLARED_ONLY
+
+
+def test_two_separate_local_dirs_with_markers_are_not_proof_of_sharing(tmp_path):
+    """★ [DEP-R3] 서로 다른 로컬 디렉터리에 빈 파일을 각각 놓아도 «같은 저장소» 가
+
+    아니다. 예전 판은 이것을 READY 로 통과시켰다."""
+    dirs = []
+    for name in ("node_a", "node_b"):
+        d = tmp_path / name
+        d.mkdir()
+        (d / sr.SHARED_MARKER).write_text("", encoding="utf-8")
+        dirs.append(str(d))
+    assert sr.check_shared_storage(dirs).verdict != sr.READY
+
+
+def test_an_empty_shared_dir_list_is_unknown_not_ready():
+    """★★ [DEP-R2 반례] 빈 목록은 «필요 없다» 가 아니라 **«확인하지 않았다»** 다.
+
+    ⚠️ CLI 의 --shared-dir 기본값이 빈 목록이라, 아무것도 주지 않으면 통과했다.
+      역할 검사에서 같은 구멍을 고쳐 놓고 **반대편 문을 안 봤다.**"""
+    check = sr.check_shared_storage([])
+    assert check.verdict == sr.UNKNOWN
+    assert check.reason == sr.REASON_SHARED_STORAGE_UNVERIFIED
+
+
+def test_an_unknown_verdict_value_is_refused_at_the_check():
+    """★★ [DEP-R2 반례] `Check("probe", "TIMEOUT")` 이 만들어지면 안 된다."""
+    with pytest.raises(ValueError):
+        sr.Check("probe", "TIMEOUT")
+
+
+def test_a_foreign_verdict_that_slips_in_is_still_not_ready():
+    """★ 두 층을 «따로» 증명한다 — 생성자를 우회해 들어와도 집계가 막아야 한다.
+
+    ⚠️ 예전 집계는 「FAIL 도 UNKNOWN 도 없으면 READY」였다. 그건 **모르는 값이
+      지나가는 문**이다. 이제 «전부 READY 일 때만 READY» 로 뒤집었다."""
+    sneaky = sr.Check("probe", sr.READY)
+    object.__setattr__(sneaky, "verdict", "TIMEOUT")
+    report = sr.build_report([sneaky])
+    assert report.verdict == sr.UNKNOWN
+    assert sr.may_promote(report) is False
 
 
 # ── 설치 문맥 — 읽기 검증만 (DEP-05) ────────────────────────────────────
@@ -286,13 +332,22 @@ def _collect(node, **over):
     return sr.collect(**kwargs)
 
 
-def test_collect_is_ready_on_a_healthy_synthetic_node(tmp_path):
-    """★ 「배선이 있는가」가 아니라 **「부를 수 있는가」**를 본다."""
+def test_collect_on_a_healthy_node_is_unknown_not_ready(tmp_path):
+    """★★ [DEP-R3] 지금 구성에서 종합 판정은 **READY 가 될 수 없다.**
+
+    공유 저장소 결속을 증명할 방법이 아직 없기 때문이다(표식은 선언일 뿐).
+    「배선이 있는가」가 아니라 «부를 수 있는가» 를 보되, 그 답이 READY 라고
+    말하지 않는다 — 관측 공급자가 붙기 전에는 이게 정직한 상태다."""
     report = _collect(_synthetic_node(tmp_path))
-    assert report.verdict == sr.READY, report.as_dict()
     assert {c.name for c in report.checks} == {
         "release_identity", "schema", "bounded_query", "shared_storage",
         "install_context", "roles"}
+    others = [c for c in report.checks if c.name != "shared_storage"]
+    assert all(c.verdict == sr.READY for c in others), [c.as_dict() for c in others]
+    shared = [c for c in report.checks if c.name == "shared_storage"][0]
+    assert shared.reason == sr.REASON_SHARED_STORAGE_DECLARED_ONLY
+    assert report.verdict == sr.UNKNOWN
+    assert sr.may_promote(report) is False
 
 
 def test_collect_catches_a_node_bound_to_another_tenant(tmp_path):
@@ -361,19 +416,27 @@ def _run_probe(monkeypatch, node, argv, digest="sha-A", config="cfg-1"):
     return probe.main(argv)
 
 
-def test_probe_exit_codes_tell_ready_fail_and_unknown_apart(tmp_path, monkeypatch,
+def test_probe_exit_codes_tell_ready_fail_and_unknown_apart(monkeypatch, capsys):
+    """★★ 승격 자동화가 읽는 것은 종료 코드다. `0 / 1` 둘로 접으면 「모른다」가
+
+    성공 쪽으로 새거나 원인을 잃는다.
+    ⚠️ 판정별 코드를 «판정을 직접 주어» 확인한다 — 지금 실제 노드는 READY 를 낼 수
+      없으므로(공유 저장소 결속 미증명) 합성 노드로는 0 을 만들 수 없다."""
+    for verdict, expected in ((sr.READY, 0), (sr.FAIL, 1), (sr.UNKNOWN, 2)):
+        report = sr.build_report([sr.Check("a", verdict)])
+        monkeypatch.setattr(probe.sr, "collect", lambda report=report, **kw: report)
+        assert probe.main([]) == expected, verdict
+        capsys.readouterr()
+
+
+def test_probe_on_a_real_synthetic_node_cannot_report_ready(tmp_path, monkeypatch,
                                                             capsys):
-    """★★ `0 / 1` 둘로 접으면 「모른다」가 성공 쪽으로 새거나 원인을 잃는다."""
+    """★ [DEP-R3] 관측 공급자가 없으므로 실제 경로로는 0 이 나오지 않는다."""
     node = _synthetic_node(tmp_path)
     argv = ["--shared-dir", node["shared"][0], "--role", "api", "--started", "api"]
-    assert _run_probe(monkeypatch, node, argv) == 0
+    assert _run_probe(monkeypatch, node, argv) == 2
     capsys.readouterr()
-
-    #: digest 를 못 말하면 UNKNOWN → **2** (0 이 아니다)
-    assert _run_probe(monkeypatch, node, argv, digest="") == 2
-    capsys.readouterr()
-
-    #: 요구 digest 와 다르면 FAIL → 1
+    #: 요구 digest 와 다르면 FAIL → 1 (음성 대조가 여전히 산다)
     assert _run_probe(monkeypatch, node, argv + ["--expect-digest", "other"]) == 1
     capsys.readouterr()
 
@@ -422,6 +485,25 @@ def _ledger(tmp_path, name="dl.db"):
 def _open(ledger, plan_id="P1", env=dl.STAGING, digest="sha-A", config="cfg-1",
           actor="ops@example.invalid", migration=""):
     return ledger.open_plan(plan_id, env, digest, config, actor, migration)
+
+
+def test_ledger_refuses_to_default_into_the_business_data_dir():
+    """★★ [DEP-R4] **폴더를 옮긴 것은 분리가 아니다.**
+
+    ⚠️ `ops_control/` 로 옮겨 놓고도 기본 경로가 `core.paths.data_path(...)` 여서,
+      인자를 빠뜨리면 관리 원장이 **업무 `data/` 안에** 만들어지고 생성자가 거기서
+      DDL 까지 돌았다. 의존과 기본값까지 끊어야 분리다."""
+    with pytest.raises(dl.DeployLedgerError):
+        dl.DeployLedger()
+    with pytest.raises(dl.DeployLedgerError):
+        dl.DeployLedger(db_path="   ")
+
+
+def test_ledger_module_no_longer_knows_the_business_data_dir():
+    """★ 두 층을 «따로» 본다 — 막는 것과 «부를 수 없게 하는 것» 은 다르다.
+
+    이름이 모듈에 묶여 있으면 누군가 기본값을 되살릴 수 있다."""
+    assert "data_path" not in vars(dl), "업무 경로 함수가 아직 모듈에 묶여 있다"
 
 
 def test_unknown_environment_is_refused(tmp_path):

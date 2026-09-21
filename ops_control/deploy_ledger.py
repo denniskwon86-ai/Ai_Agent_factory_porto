@@ -29,6 +29,12 @@
 4. 읽기·판정·쓰기를 **한 트랜잭션**으로 묶는다(`BEGIN IMMEDIATE` + 기대 상태 CAS).
    프로세스가 둘이면 응용 lock 은 소용이 없다.
 
+⚠️⚠️ **미연결 프로토타입이다 — 제품에 배선하지 않는다.**
+  독립 검토가 이 상태 기계를 정본과 다르다고 판정했고(과거 계획 되살리기는 수용 불가),
+  「폐기 예정 상태 기계를 먼저 완성하는 이중 작업」을 하지 않기로 했다. 살아 있는 것은
+  **정책 시나리오와 그 시험 의도**이며, 실제 domain/persistence 는 보완된 정본 위에서
+  다시 구현한다. 알려진 미해결 반례는 `ops_control/counterexamples_deploy_ledger.py`.
+
 ⚠️ 이 모듈은 **아무것도 배포하지 않는다.** 트래픽을 옮기지도, LB 를 건드리지도 않는다.
   NCP LB 의 가중치·연결 드레인 지원 여부는 **미확인**이므로 그것이 있다고 가정한 코드를
   쓰지 않는다. 여기 있는 것은 **상태 기계와 그 기록**뿐이다.
@@ -40,8 +46,6 @@ import os
 import sqlite3
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Mapping, Optional
-
-from core.paths import data_path
 
 #: 닫힌 목록이다. 오타로 «새 환경» 이 생기면 **환경 잠금이 통째로 우회된다.**
 STAGING, TRIAL, PRODUCTION = "staging", "trial", "production"
@@ -109,7 +113,16 @@ def approval_fingerprint(environment: str, artifact_digest: str,
 class DeployLedger:
     def __init__(self, db_path: Optional[str] = None, connect=None,
                  begin_immediate: str = ""):
-        self._db_path = db_path or data_path("deploy_ledger.db")
+        #: ⚠️⚠️ [DEP-R4] **업무 `data/` 로 떨어지지 않는다.**
+        #:   폴더를 `ops_control/` 로 옮겨 놓고도 기본 경로가 `data_path(...)` 여서,
+        #:   인자를 빠뜨리면 관리 원장이 **업무 저장소 안에** 만들어지고 생성자가 거기서
+        #:   DDL 까지 돌았다. 폴더 이동은 분리가 아니다 — 의존과 기본값까지 끊어야 한다.
+        #:   관리 DB 설정은 정식 OPS 구현의 몫이므로, 여기서는 **경로 없이 만들 수 없다.**
+        if not (db_path or "").strip() and connect is None:
+            raise DeployLedgerError(
+                "관리 원장의 저장 경로를 명시해야 합니다 — 업무 data/ 로 "
+                "돌아가지 않습니다.")
+        self._db_path = db_path or ""
         self._connect_factory = connect
         #: `BEGIN IMMEDIATE` 는 **SQLite 전용 문장**이다 — 부르는 쪽이 방언을 준다.
         self._begin_immediate = begin_immediate or "BEGIN IMMEDIATE"
@@ -121,6 +134,8 @@ class DeployLedger:
             #: ⚠️ 주입은 「연결을 어디서 얻는가」만 바꾼다 — 준비 절차를 건너뛰는 문이 아니다.
             conn = self._connect_factory()
         else:
+            if not self._db_path:
+                raise DeployLedgerError("관리 원장의 저장 경로가 없습니다.")
             folder = os.path.dirname(self._db_path)
             if folder:
                 os.makedirs(folder, exist_ok=True)
