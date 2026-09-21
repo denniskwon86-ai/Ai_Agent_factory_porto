@@ -1,5 +1,7 @@
 {
   "schema_version": 2,
+  "current_goal_superseded_by": "docs/roadmap/OPERATIONAL_TRIAL_GAP_BASELINE.json",
+  "historical_notice": "이 파일은 2026-09-11 당시21/40 판정 이력이다. 2026-09-21 변경된1단계 전체 목표의 현재 진척은 TRIAL-GAP-R2를 따른다. 기존 점수/증거는 역사 기록으로 보존한다.",
   "assessed_at": "2026-09-11T16:44:06+09:00",
   "basis_commit": "3ddf4be4ac4e78f6723d3c83ebd941287a70802c",
   "scope": "현재 작업트리의 제품 전체 10영역. 투입시간·기능 수·상용 준비도 확률이 아닌 동일 가중치 단계 진척.",

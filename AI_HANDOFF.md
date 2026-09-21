@@ -1,5 +1,23 @@
 # 🤝 AI 세션 인계 지시서 (READ THIS FIRST)
 
+> **다른 PC 재개 / Codex / 2026-09-22:** 브랜치 **codex/l2-unified-studio-20260912**. [상세 인수인계서 §10](docs/handoff/CLAUDE_SESSION_HANDOFF_2026-09-22.md)부터 읽는다. P03/W03코드는4af54ef42,조율정본은cee6423aa에 반영됨. C03철수 완료를 코드/커밋으로 확인했으므로 반복하지 않는다. 다음Claude W03.2, 다음Codex P03.2/3 수용검토→C02. **35.0% 유지**, W03.1은 로컬릴리스증거 제출·가산미확정. 합성데이터 재생성/새Windows자격증명 절차와 Git에 안 실리는 데이터 경계를 명시했다. 아래 dev안내/철수대기는 과거이력이다.
+
+> **현재 / Codex / 2026-09-21 23:55:** Claude의 P03.2/3 실PG 결과 제출은 수용검토 대기(+40), 반복착수하지 않는다. C03은 Codex 담당·정본 위배 오착수이므로 Claude는 [현행 지시](docs/handoff/CLAUDE_CURRENT_WORK_ORDER.md)에 따라 이번 C03 조각만 철수하고 W03.1→2로 진행. [정확한 보존/철수 범위](docs/handoff/CLAUDE_P03_EXECUTION_RESULT.md) 끝 참조. 계산기에 담당표시, 관리PG승인 ENV-PG-OPS 별도화. 현재35.0%·제품철수실행/수신미확인.
+
+> **최신 / Codex / 2026-09-21 17:27:** 사용자 승인 후 Docker 복구·격리 **ENV-PG 제공 완료**. [현행 업무지시](docs/handoff/CLAUDE_CURRENT_WORK_ORDER.md)에 따라 Claude는 installer→실제PG 로그인/문맥→티켓/재시작 연속 수행. [기존 결과 끝](docs/handoff/CLAUDE_P03_EXECUTION_RESULT.md)에 비밀 없는 실행 명령/중지·재개/격리 경계가 있다. 환경만 준비했으므로 **1855/5300=35.0%** 유지. 아래 환경대기는 이력. 로컬PG≠NCP 인수, 운영자료/커밋/푸시 없음.
+
+> **최신 / Codex / 2026-09-21 16:45:** P05.1 수용으로 **1855/5300=35.0%,20/139단계**. 다음은 [현행 지시](docs/handoff/CLAUDE_CURRENT_WORK_ORDER.md)의 PG 연결 로컬 준비1~2h→ENV-PG 제공 후 P03.2 실소비. [기존 결과에 수용 기록](docs/handoff/CLAUDE_P03_EXECUTION_RESULT.md). 아래 P05 보완/착수는 이력이며 반복하지 않는다.
+
+> **현재 수용/실행 — Codex / 2026-09-21 15:03:** **1815/5300=34.2%**, P03.1 +15 수용(집중36PASS). Claude 다음은 [현행 업무지시](docs/handoff/CLAUDE_CURRENT_WORK_ORDER.md) 최상단 **P05.1 사본 ETL/백업/복원**, PG 제공 시 P03.2 우선. [기존 결과에 수용 회신](docs/handoff/CLAUDE_P03_EXECUTION_RESULT.md). 아래1800점/P03.1착수는 이력이며 재수행하지 않는다. 새 P05 지시 수신은 미확인.
+
+> **검증 방식 최신 보완 — 사용자 지시 / 2026-09-21:** 다음 단계가 앞 산출물을 실제 소비하면서 검증한다. 단계별 별도 검증 묶음·리뷰 대기 금지. 병행 검토·증거 재사용, 흐름 끝 집중 회귀 1회. 위험 경계/외부승인만 실행 전 확인. [실행계획 §3](docs/roadmap/OPERATIONAL_TRIAL_DELIVERY_PLAN.md)과 [Claude 현행 지시](docs/handoff/CLAUDE_CURRENT_WORK_ORDER.md)에 반영했으며 분모/배점은 바꾸지 않았다.
+
+> **Claude 현재 구현 지시 — Codex / 2026-09-21 14:15:** [CLAUDE_CURRENT_WORK_ORDER.md](docs/handoff/CLAUDE_CURRENT_WORK_ORDER.md)를 읽고 수신 기록 후 **P03.1 설치/runtime DDL 분리**부터 실행한다. 수용·ENV-PG 승인 후 P03.2/3을 이어간다. C02/OPS-P1·D05는 Codex 담당. 공유 게시만 완료됐으며 Claude 수신/착수는 미확인이다. 아래 오래된 배정/진척보다 이 지시와 R3 규칙을 우선한다.
+
+> **R3 최신 진척 규칙 — Codex / 2026-09-21 14:02:** 전체는 수용된 중간 단계 배점으로 계산한다. 현재 **1800/5300점=34.0%**, 목표53개는 유지. [단계별 실행계획](docs/roadmap/OPERATIONAL_TRIAL_DELIVERY_PLAN.md)을 먼저 읽고, 단계 종료 즉시 계산/보고한다. 큰 목표 전체가 끝나야 점수를 주는 아래R2 방식은 대체됐다. 다음 C02.1/P03.1/D05.1; 계획/계산기 변경이지 제품 구현 완료 아님.
+
+> **진척 기준 최신 정정 — Codex / 2026-09-21:** 현재 전체는 [PROGRESS.md](PROGRESS.md)의 **TRIAL-GAP-R2, 18/53=34.0%**이다. [실제 목표/현행 Gap/다음 작업](docs/roadmap/OPERATIONAL_TRIAL_GAP_PLAN.md)을 먼저 읽는다. 아래 43/80·과거52.5%는 이력이며 현재 진척으로 인용하지 않는다. 이 정정은 제품 통합/배포 완료가 아니라 모수/작업 계획 교체다. Codex C02·Claude P03 다음 배치이며 새 Claude 착수는 미확인.
+
 > **다른 IDE/PC에서 이 저장소를 이어받는 AI 에이전트(또는 개발자)는 이 문서를 가장 먼저 읽으세요.**
 > 이 문서 하나로 (1) 무엇이 바뀌었는지, (2) 환경을 어떻게 맞추는지, (3) 다음 할 일이 무엇인지 파악할 수 있습니다.
 

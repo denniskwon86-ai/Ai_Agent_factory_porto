@@ -1,5 +1,7 @@
 # Claude Code 세션 인수인계서 — 2026-09-22
 
+> **다른 PC 재개 정본 보완 — Codex / 2026-09-22 00:50 KST.** 사용자 요청에 따라 남은 조율 문서·격리 시험 하네스·진척원장의 비데이터 증거6개를 함께 커밋/푸시하는 인계다. 아래 §10의 checkout/환경/데이터 재생성 절차부터 사용한다. 코드 기준 `cee6423aa`(조율), `4af54ef42`(P03/W03). 이 인계가 포함된 후속 커밋을 받는다. **현재수용35.0%, P03.2/3 +40 검토대기, W03.1은 제한된 로컬증거 제출이며 가산미확정**. 원격동기화와 실제기능수용을 구분한다.
+
 작성: Claude Code (구현 담당) / 대상: **다른 PC 의 Claude Code 세션**
 목적: 이 세션의 작업을 **처음부터 다시 하지 않고** 그대로 이어받는 것.
 
@@ -13,7 +15,7 @@
 ```
 전체 진척   1855/5300 = 35.0% (수용분)   수용 20/139단계 · 잔여 3445점/119단계
 제출·대기   P03.2 +20 · P03.3 +20  → Codex 수용검토 대기 (수용 시 35.8%)
-            W03.1 +45              → Codex 가산 대상
+            W03.1 +45              → 로컬 릴리스 공유 읽기 증거 제출·수용 범위 검토 대기(자동 가산 아님)
 지금 할 일  W03.2 원자 저장  ← 여기서 시작하면 된다
 ```
 
@@ -25,14 +27,14 @@
 ## 1. 먼저 읽어야 할 문서 — **이 순서로**
 
 ★★★ 이 세션에서 가장 비싼 실수가 **담당 확인 없이 점수 큰 항목을 집어 든 것**이었다.
-계산기의 「착수 가능」 목록에는 **담당이 없다.** 반드시 아래를 먼저 본다.
+당시 계산기의 「착수 가능」 목록에는 담당이 없었다. **현재는 Codex가 ready_work/Markdown에 정본 담당을 추가했다.** 목록은 업무배정이 아니므로 아래 문서도 함께 본다.
 
 | 순서 | 문서 | 여기서 얻을 것 |
 |---|---|---|
 | 1 | `docs/handoff/CLAUDE_CURRENT_WORK_ORDER.md` | **현재 지시.** 맨 위 인용구가 최신이다 |
 | 2 | `docs/roadmap/OPERATIONAL_TRIAL_GAP_PLAN.md` | 항목별 **담당/선행** 과 **「할 일」 칸 안의 금지문** |
 | 3 | `docs/handoff/CLAUDE_P03_EXECUTION_RESULT.md` **끝 절** | 이 세션 결과 전부(P03.2/3 · C03 철수 · W03.1) |
-| 4 | `.agents/TEAM_BOARD.md` 끝 | Codex 와의 최신 주고받음 |
+| 4 | `.agents/TEAM_BOARD.md` 맨 위 | Codex 와의 최신 주고받음(아래는 이력) |
 | 5 | `docs/design/DEPLOYMENT_CONTROL_PLANE_V1_2026-09-21.md` | 배포관리 정본 — **내 lane 아님**. 경계 확인용 |
 
 ⚠️ **금지문은 제목이나 점수에 안 보이고 「Gap/할 일」 칸 «안» 에 숨어 있다.** 예:
@@ -69,7 +71,7 @@ C03 은 **Codex 담당**이고 「구 원장 재완성 금지」였는데 내가
 - `core/db/managed_schema.py` · `scripts/install_first_db_schema.py` → C03 분기만 제거,
   **`DEFAULT_STORES=(auth, enterprise_context)` 는 유지**(지시)
 
-### 2.3 W03.1 — 공유 읽기 ✅ 완료
+### 2.3 W03.1 — 로컬 릴리스 공유 읽기 구현·증거 제출 (단계 수용 미확정)
 
 **결함**: `projects/` 는 저장소 기준 절대경로인데 **`library/` 만 작업 디렉터리 상대**였다.
 루트에 릴리스 29건이 있어도 다른 디렉터리에서 뜬 프로세스는 **0건**으로 본다.
@@ -86,10 +88,10 @@ C03 은 **Codex 담당**이고 「구 원장 재완성 금지」였는데 내가
 
 | 항목 | 상태 | 다른 PC 에서 |
 |---|---|---|
-| 격리 로컬 PostgreSQL | **이 PC 에만 있다** | 컨테이너 없음. P03 증거를 재현하려 하지 말 것 |
-| Codex launcher 자격증명 | 이 PC 의 MSIX 경로 | `local_pg_trial.py` 못 씀 |
+| 격리 로컬 PostgreSQL | **이 PC 에만 있다** | Git으로 이동 안 됨. 필요 시 §10으로 새 격리환경/합성데이터 재생성 |
+| launcher 자격증명 | 현재 Windows 사용자 DPAPI/LOCALAPPDATA에 결속 | 복사 불가. 새 PC에서 setup으로 새 자격증명 생성 후 같은 launcher 사용 가능 |
 | `library/` 릴리스 29건 · `projects/` 73건 | 이 PC 의 로컬 자료 | 개수가 다르다. **개수를 단언하는 시험을 쓰지 말 것** |
-| HEAD 기존 실패 111건 | §6 참조 | 재현될 것이다. **내 작업 탓 아님** |
+| 기존 실패 111건 | §6의 Claude A/B 보고 | 새PC 재현은 미확인. 동일원인이라고 단정하지 말고 당시 보고와 새관측을 구분 |
 
 ★ P03.2/3 은 **이미 제출**됐다. 다른 PC 에서 PG 가 없다고 해서 **다시 하지 않는다.**
 Codex 수용검토 결과만 받으면 된다.
@@ -136,8 +138,8 @@ Codex 수용검토 결과만 받으면 된다.
 ### 검증 (어디서나 가능)
 
 ```powershell
-venv/Scripts/python.exe -X utf8 -B scripts/verify_data_usage_holds.py --strict-writes ^
-  --target tests/test_w03_shared_release_read.py ^
+venv/Scripts/python.exe -X utf8 -B scripts/verify_data_usage_holds.py --strict-writes `
+  --target tests/test_w03_shared_release_read.py `
   --target tests/test_program_lifecycle.py --target tests/test_release_readiness.py
 ```
 
@@ -150,7 +152,7 @@ venv/Scripts/python.exe -X utf8 -B scripts/verify_data_usage_holds.py --strict-w
 venv/Scripts/python.exe -X utf8 -B scripts/w03_shared_read_probe.py compare
 ```
 
-### PG (이 PC 전용 — 다른 PC 에서는 건너뛴다)
+### PG (원래 PC의 경로 차이 사례 — 다른 PC는 §10을 사용)
 
 컨테이너 `afs-pg-local` / `127.0.0.1:55432` / db `afs_trial_local` / schema `app` /
 역할 `afs_installer`·`afs_runtime`.
@@ -227,3 +229,105 @@ test_release_rollback_api 10 · test_p4_recommendations 4 · test_project_deleti
 
 ⚠️ 다른 PC 에서 `git pull` 한 뒤, 위 «들어가지 않은 것» 들은 **HEAD 판본**이다.
 이 PC 에 남아 있는 미커밋 변경과 다르다.
+
+> **§9 정정 / Codex:** 위 목록은 Claude의 앞선 커밋 당시 구분이다. 이번 사용자 승인 커밋에는 `.agents/DECISIONS.md`, `AI_HANDOFF.md`, `PROGRESS.md`, 과거지표 대체표시2파일, `tests/b6_sse_probe.py`도 포함한다. **data/interaction_log.jsonl은 런타임 대화·업무로그라 제외·로컬보존**한다. 운영DB/자료/비밀은 커밋하지 않는다.
+
+## 10. 다른 PC에서 그대로 이어가는 실행 순서 — Codex 보완
+
+### 10.1 소스 받기와 첫 10분
+
+- 원격: `https://github.com/denniskwon86-ai/Ai_Agent_factory_porto.git`
+- **브랜치: codex/l2-unified-studio-20260912**. 오래된 AI_HANDOFF 본문의 dev/main 안내는 이번 인계 대상이 아니다.
+- 새 디렉터리:
+
+```powershell
+git clone --branch codex/l2-unified-studio-20260912 --single-branch https://github.com/denniskwon86-ai/Ai_Agent_factory_porto.git
+Set-Location Ai_Agent_factory_porto
+git status --short
+git log -3 --oneline
+```
+
+기존checkout은 먼저 dirty/현재branch를 확인한다. 보존할 변경이 있으면 덮어쓰거나 reset하지 않는다. clean일 때만 `git switch codex/l2-unified-studio-20260912` 후 `git pull --ff-only origin codex/l2-unified-studio-20260912`. fast-forward가 안 되면 병합/force하지 말고 차이부터 확인한다. 새 PC의 절대경로는 달라도 된다. 원래PC의 `C:\WorkSpace`/사용자폴더/워크트리를 하드코딩하지 않는다.
+
+읽기순서: AI_HANDOFF 최신블록→본서→현행업무지시→원장/결과문서 해당절. 최신지시의 **C03철수는 이미4af54ef42에 반영**돼 있으므로 다시 철수하지 않는다. 아래 파일/기호가 없는 것이 정상이다: `ops_control/db_target.py`, `core/db/schema/002_deploy_ledger.sql`, `STORE_DEPLOY_LEDGER`. 원래 미연결 `ops_control/deploy_ledger.py`는 남는 것이 정상이다.
+
+### 10.2 의존성·데이터 없는 재개 확인
+
+이 PC 실측: **Python3.14.3, psycopg/psycopg-binary3.3.4**. 새 환경은 같은 Python을 우선하며 다른버전 성공을 미리 주장하지 않는다. Docker Desktop은 아래Windows경로 전제의 로컬도구다. Linux/macOS에서는 그대로 실행할 수 없으므로 Windows전용helper를 임의로 우회하지 말고 역할/네트워크/비밀경계를 유지하는 별도 준비가 필요하다.
+
+```powershell
+py -3.14 -m venv venv
+venv/Scripts/python.exe -m pip install -r requirements-pg-trial.txt
+venv/Scripts/python.exe -X utf8 -B scripts/check_trial_progress.py --self-test --markdown
+```
+
+Python/의존성 설치는 새PC의 정책/허용망을 따른다. pip실패를 건너뛴 채 준비됐다고 쓰지 않는다. UI 작업 시에만 별도로 `frontend`에서 기존 lockfile 기준 `npm ci`를 실행한다. LLM/API키는 이번 로컬합성 재현에 불필요하며 실키를 요청하지 않는다.
+
+진척계산 예상: **1855/5300=35.0%,20/139,잔여3445점/119단계**. 수용증거 경로를 검사하므로 이번 커밋에 원장이 참조하는 기존 output보고서6개를 명시적으로 포함했다(검사명/결과/경로/해시만; DB/자료 본문 아님). 원래 절대경로는 당시 증거의 출처이며 새PC에서 그 경로가 존재해야 한다는 뜻이 아니다. 이 보고서를 새PC에서 실행한 결과로 재표기하지 않는다.
+
+### 10.3 PG 환경·합성 데이터 재생성(새 PC에서만 최초1회)
+
+**Git pull은 Docker volume·DB·토큰·로컬자료를 복사하지 않는다.** 이번 인계는 원래인증토큰/세션을 이식하지 않고, Git에 있는 installer/seed성격 소비script로 동일한 합성 업무시나리오를 재생성한다. 시각/세션ID/티켓값까지 byte동일복제가 아니다. 기존 운영29릴리스/73프로젝트를 옮기지 않으며, 해당실자료가 필요한 후속작업은 승인된 별도 데이터인계가 필요하다.
+
+사용자 승인 범위는 로컬loopback·합성자료·전용volume·설치/runtime역할 분리다. 새PC 설치/서비스기동에 OS관리승인 등이 필요하면 그 권한만 요청한다. **NCP/관리용PG/운영자료/유료LLM 생성승인은 포함되지 않는다.** 새PC에서 같은 이름의 자산이 있으면 확인 없이 덮어쓰지 않는다.
+
+```powershell
+docker version
+docker ps -a --format '{{.Names}}'
+docker volume ls --format '{{.Name}}'
+# 원래 검증 이미지. 빈 준비환경에서만 postgres:16 별칭을 이digest로 맞춘다.
+docker pull postgres@sha256:a3b7f434b2dc57ce85a67e171163eb8ab1a1ebcb39d27484661f26b1dfbe30d6
+docker tag postgres@sha256:a3b7f434b2dc57ce85a67e171163eb8ab1a1ebcb39d27484661f26b1dfbe30d6 postgres:16
+venv/Scripts/python.exe -X utf8 -B scripts/local_pg_trial.py setup
+venv/Scripts/python.exe -X utf8 -B scripts/local_pg_trial.py check
+```
+
+Docker가 없으면 공식 설치/기동 및 관리자권한이 선행이다. 기존postgres:16을 쓰는 작업이 있으면 위tag를 자동변경하지 않는다. `setup`은 기존`afs-pg-local`/`afs-pg-local-data`/비밀폴더가 있으면 거절한다. **원래PC에서는 setup하지 않는다.** localhost55432 충돌도 자동점유해제하지 않는다. setup실패 시 생성된 일부자산은 보존되므로 무조건재실행/삭제하지 않는다.
+
+`LOCALAPPDATA/AFS/pg-trial-local`에 **그 PC/그 사용자**의 새 자격증명을 만든다. DPAPI파일·admin.password·DSN을 복사/Git추가/출력하지 않는다. setup과run은 같은Windows사용자 및 같은LOCALAPPDATA환경에서 실행해야 한다. MSIX앱/일반터미널의 LOCALAPPDATA가 다르면 새 비밀을 또 만들지 말고 실제 생성 위치를 확인해 해당프로세스에만 결속한다. 앞 §5의denni/MSIX경로를 다른PC에 붙여넣지 않는다.
+
+새 격리DB에서 다음 순서로 schema/합성조직/합성계정/세션을 재생성한다. 소비script는 제품API를 호출하며 login단계가 다음 concurrent/restart의 입력을 만든다.
+
+```powershell
+# import 시 글로벌 ECM singleton의 SQLite 자동DDL을 막는다. 자식들에만 전달된다.
+$taskManagedBefore = $env:AFS_DB_MANAGED_STORES
+try {
+  $env:AFS_DB_MANAGED_STORES = 'auth,enterprise_context'
+  venv/Scripts/python.exe -X utf8 -B scripts/local_pg_trial.py run installer -- venv/Scripts/python.exe -X utf8 -B scripts/install_first_db_schema.py --backend postgres --plan
+  if ($LASTEXITCODE -ne 0) { throw 'PG plan failed' }
+  venv/Scripts/python.exe -X utf8 -B scripts/local_pg_trial.py run installer -- venv/Scripts/python.exe -X utf8 -B scripts/install_first_db_schema.py --backend postgres --apply
+  if ($LASTEXITCODE -ne 0) { throw 'PG apply failed' }
+  foreach ($taskPhase in @('identity','login','concurrent','restart')) {
+    venv/Scripts/python.exe -X utf8 -B scripts/local_pg_trial.py run runtime -- venv/Scripts/python.exe -X utf8 -B scripts/p03_pg_consumption.py $taskPhase
+    if ($LASTEXITCODE -ne 0) { throw "PG phase failed: $taskPhase" }
+  }
+} finally { $env:AFS_DB_MANAGED_STORES = $taskManagedBefore }
+```
+
+runtime 대상은 afs_trial_local/app/afs_runtime, installer는 afs_installer다. PG 사양 차이와 미지원 ECM 관리표는 기존 결과의 미해결 항목을 따른다. 전체 저장소 이관·NCP 실행·제품 로그인 UI까지 검증한 것은 아니다. 다른 PC 재현은 기존 결과를 처음부터 다시 심사하라는 지시가 아니라 후속 구현 환경을 준비하는 절차다. Codex는 필요한 출력을 P03 수용 판단에 사용한다.
+
+W03 합성 릴리스는 DB 복사 없이 `venv/Scripts/python.exe -X utf8 -B scripts/w03_shared_read_probe.py compare`로 임시 디렉터리에 재생성한다. 원래29/73건은 불필요하다. 같은PC의 두 프로세스 증거이지 두 호스트 공유 증거는 아니다. 기존 `library/`에 합성물을 섞지 않는다.
+
+### 10.4 담당별 재개 지점
+
+| 담당 | 첫 작업 | 주의사항 |
+|---|---|---|
+| 다음 Codex | P03.2/3 제출 증거·harness를 기존 출구로 수용 판단, 충족 시 각20점 즉시 반영. 이후 C02.1 정식manifest→C02후속→C03 | 시험 수·문서만으로 가산하지 않는다. 관리PG는 ENV-PG-OPS pending |
+| 다음 Claude | C03 철수를 반복하지 않고 W03.2로 진행. W03.1의 프로젝트측·접근거절·공유실체 등 부족분은 기존 조건과 대조해 같은 소비 과정에서 보완 | 릴리스1건의digest 일치만으로 W03.1 전체조건 충족이라 하지 않는다 |
+| 공통 | 같은 파일 동시편집 금지. P03 제품수정은 Claude, 진척원장·수용은 Codex | READY목록은 담당 지시가 아니다. 새 관리 상태 어휘를 발명하지 않는다 |
+
+W03.2 예상2~4시간, P03 수용 검토30~60분(환경 미준비·새 결함은 별도). 다음 단계가 앞 산출물을 소비하는 순서로 진행하며, 단계마다 새 검토문서·변이 캠페인을 만들지 않는다. 중간 연락은 주요 결정·안전·외부권한·실제 장애에 집중하고, 완료 보고에는 인정 진척·잔여·다음 예상 시간을 함께 적는다.
+
+### 10.5 미해결 사항·사고 예방
+
+- P03.2/3 미수용, W03.1 클라우드공유·프로젝트측·권한 검증 범위 미수용. C03 미구현, C02/C04 후속은 원장 참조.
+- DEC-PG-TRIGGER는 PG에서도 불변성 통제를 유지할 방침 결정이 필요하다. 첫 경로 출구에 전체제품 조건을 뒤늦게 덧붙이지 않는다.
+- 111실패는 Claude의 원래 환경 A/B 보고다. 새PC에서는 미재현이며 원인을 모른 채 skip/xfail·보호해제를 하지 않는다.
+- Docker 소켓 재발 시 엔진 종료·정확한 run/Secrets Engine 경로 확인 후 승인된 백업rename 범위로 한정한다. WSL전체종료·volume삭제·공장초기화 금지. 원래PC 사용자 경로를 새PC 대상으로 오인하지 않는다.
+- 이전 SSE하네스 `tests/b6_sse_probe.py`는 격리 런처 전용이다. `main.py` 등 정상 제품 라우터에 등록하지 않는다.
+- 이번 공유 제외: interaction_log 변경, DB/volume, DPAPI/admin비밀, .env, library/projects실자료, scratch. 삭제하지 않았으며 원래PC에 남긴다.
+- 과거의 「커밋없음/미승인/미착수」는 당시 이력이다. 현재는 이 인덱스와 최신HEAD를 우선한다. 수용 증거와 push 완료는 별개이며 Git동기화만으로 진척을 가산하지 않는다.
+
+### 10.6 이번 인계 검증
+
+Codex가 **Git index에 담긴 계산기·원장·수용증거만** 새 임시 폴더로 checkout-index하여 `check_trial_progress.py --self-test --markdown`을 실행했다. 로컬의 미추적 output에 의존하지 않고1855/5300=35.0% 계산/자기검사 통과. 포함 보고서6개는 자격증명 패턴 검사와 구조 확인을 했으며 기존실행 증거임을 유지했다. 실제 다른PC의 Docker/PG 재구성 및 전체제품회귀는 이번 인계에서 NOT_RUN이다. 커밋은16파일 범위(본문·인덱스·개발의존성·격리하네스·선별증거), runtime interaction_log 변경은 제외한다.

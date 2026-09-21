@@ -1,0 +1,4 @@
+# 로컬 P03 재현 전용. 자동 도출되는 runtime requirements.txt는 수정하지 않는다.
+-r requirements.txt
+-r requirements-dev.txt
+psycopg[binary]==3.3.4
