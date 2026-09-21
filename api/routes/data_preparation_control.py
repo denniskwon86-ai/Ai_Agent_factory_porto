@@ -195,9 +195,19 @@ async def list_kits(p: Principal = Depends(current_principal)):
         packages = kit_registry.starter_package_catalog()
     except m.DataPreparationError as e:
         raise HTTPException(status_code=503, detail=f"샘플 패키지 카탈로그를 읽을 수 없습니다: {e}")
+    #: ★ 등록부에 **두 갈래**가 들어온다 — `docs/data-kits/*.kit.json`(운영 템플릿)과
+    #:   `starter_kits/`(샘플 기업 패키지). 한 목록으로 그리면 **옛 9 종 Profile 이
+    #:   두 번째 샘플 회사처럼 보인다**(`kit_registry.starter_package_catalog` 머리말).
+    #:   그래서 `profile.kit_source` 로 갈라 낸다 — `kits` 는 종전 그대로다.
+    _rows = store.list_kit_versions()
+    _from_shelf = [r for r in _rows if (r.get("profile") or {}).get("kit_source") == "STARTER_KIT"]
+    _templates = [r for r in _rows if (r.get("profile") or {}).get("kit_source") != "STARTER_KIT"]
     return {"status": "success", "data": {
         # `kits` 는 조직 적용용 운영 템플릿. `starter_packages` 와 섞지 않는다.
-        "kits": store.list_kit_versions(),
+        "kits": _templates,
+        #: 선반에서 온 판본 — 조직에 붙일 수 있다(등록돼 있다). 카탈로그
+        #: (`starter_packages`)는 **파일 상태**를 보여주고, 이것은 **등록 상태**다
+        "starter_kit_versions": _from_shelf,
         "starter_packages": packages,
     }}
 

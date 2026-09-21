@@ -95,7 +95,33 @@
 
 ## 3. 제안
 
-### 3.1 【1단계】 생성기가 낸 키트를 정식 경로에 올린다 — 작다
+### 3.1 【1단계】 생성기가 낸 키트를 정식 경로에 올린다 — ✅ **완료 (2026-09-21)**
+
+    kit_registry.discover_starter_kits()   선반의 **봉인된 판본**을 프로파일로 읽는다
+    kit_registry.register_all()            두 곳(Profile · 선반)을 함께 등록한다
+
+| | |
+|---|---|
+| 무엇이 올라가나 | **봉인된 판본만.** 작업 중인 것을 조직에 붙이면 그 뒤 내용이 바뀌어도 붙인 쪽은 모른다 |
+| 이름 | `kit_name` → `company_name` → `kit_id` 로 떨어진다(D4). 옛 판본에 회사명이 뜨는 사실을 감추지 않는다 |
+| `mode` | `data_class` 매핑 — `SYNTHETIC`→`DEMO/SYNTHETIC`, `REAL`→`REAL`. **모르는 값은 올리지 않는다** |
+| 깨진 manifest | 건너뛴다 — 옛 키트 하나 때문에 쓸 수 있는 키트까지 못 쓰면 안 된다 (`discover()` 는 반대로 던진다) |
+
+★ **지문은 manifest 원문에서 뽑는다 — 대장이 아니다.** `demo_vertical_slice` 가 같은
+  판본을 manifest 지문으로 이미 등록하는데, 둘이 다르면 등록부가 「동결 판본의 지문이
+  달라졌다」로 **거부**한다(P3-2). 먼저 부른 쪽이 이기는 싸움이 된다.
+
+⚠️ **API 응답을 갈라야 했다.** `GET /kits` 의 `kits` 에 선반 판본이 섞이면
+  **「옛 9 종 Profile 이 두 번째 샘플 회사처럼 보인다」** — `starter_package_catalog`
+  머리말이 막으려던 바로 그 일이다. `profile.kit_source` 로 갈라
+  `starter_kit_versions` 를 따로 낸다. **`kits` 는 종전 그대로다.**
+
+시험 11 건 (`tests/test_kit_registry_starter.py`). 그중
+`test_시연_등록과_섞여도_거부되지_않는다` 가 위 지문 문제를 지킨다.
+
+---
+
+### 3.1-옛 【1단계】 계획 (그대로 둔다 — 무엇을 정했는지 보이게)
 
 `profile_from_manifest()` 를 시연 밖으로 꺼내고, `discover()` 가 `starter_kits/` 도
 보게 한다.

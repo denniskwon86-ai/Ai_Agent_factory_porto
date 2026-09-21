@@ -148,7 +148,12 @@ def test_the_demo_kit_in_the_repo_loads():
 
 
 # ── 등록 ─────────────────────────────────────────────────────────────────
-def test_registering_is_idempotent_and_follows_the_document(store, tmp_path):
+def test_registering_is_idempotent_and_follows_the_document(store, tmp_path, monkeypatch):
+    #: ⚠️ 선반(`starter_kits/`)도 등록 대상이 된 뒤로는 **격리해야 한다.** 그러지
+    #:   않으면 이 시험이 실제 선반의 키트까지 세어 「두 번 등록됐다」로 읽는다.
+    shelf = tmp_path / "빈선반"
+    shelf.mkdir()
+    monkeypatch.setenv(kr.STARTER_KITS_DIR_ENV, str(shelf))
     path = _write(tmp_path, _profile())
     kr.register_all(store, str(tmp_path))
     kr.register_all(store, str(tmp_path))

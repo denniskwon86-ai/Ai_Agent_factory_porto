@@ -273,10 +273,95 @@ def discover(directory: str = "") -> List[LoadedKit]:
     return out
 
 
-def register_all(store: Any, directory: str = "") -> List[Dict[str, Any]]:
-    """찾은 키트를 전부 등록한다(멱등). 반환은 등록된 판본들."""
+#: `manifest.data_class` → 등록부의 `mode`. **지어내지 않는다** — 모르는 값은 거부한다
+_DATA_CLASS_TO_MODE = {"SYNTHETIC": m.KIT_MODE_DEMO, "REAL": m.KIT_MODE_REAL}
+
+
+def _starter_kit_profile(vdir: str) -> Optional[LoadedKit]:
+    """선반의 판본 하나를 **등록 가능한 프로파일**로 읽는다. 아니면 `None`.
+
+    ⚠️ **봉인된 것만 올린다.** 작업 중인 판본을 조직에 붙이면, 그 뒤 내용이 바뀌어도
+      붙인 쪽은 모른다. 등록부가 「동결 판본의 지문이 달라지면 거부」(P3-2)로 지키는
+      것도 **동결됐다고 적힌 판본**에 한해서다.
+    """
+    import json
+    from core.data_preparation import kit_freeze
+
+    if not kit_freeze.is_frozen(vdir):
+        return None
+    mpath = os.path.join(vdir, "manifest.json")
+    if not os.path.isfile(mpath):
+        return None
+    try:
+        with open(mpath, encoding="utf-8") as f:
+            manifest = json.load(f)
+        profile = profile_from_manifest(manifest)
+    except (OSError, ValueError, KitLoadError):
+        #: ⚠️ **조용히 건너뛴다.** 선반에는 구조가 다른 옛 키트도 있고, 그것 때문에
+        #:   등록 전체가 멈추면 쓸 수 있는 키트까지 못 쓴다. (`discover()` 는 반대로
+        #:   던진다 — 거기 있는 파일은 전부 등록 대상이기 때문이다.)
+        return None
+
+    kit_id = str(manifest.get("kit_id") or "").strip()
+    version = str(manifest.get("version") or "").strip()
+    if not kit_id or not _VERSION.match(version):
+        return None
+    mode = _DATA_CLASS_TO_MODE.get(str(manifest.get("data_class") or "").strip().upper())
+    if not mode:
+        return None
+    #: ★ 이름은 `kit_name` → `company_name` → `kit_id` 로 떨어진다. 옛 판본에는
+    #:   `kit_name` 이 없어 **회사 이름이 카탈로그에 뜬다** — 그 사실을 감추지 않는다.
+    name = (str(manifest.get("kit_name") or "").strip()
+            or str(manifest.get("company_name") or "").strip() or kit_id)
+    #: ⚠️ **지문은 manifest 원문에서 뽑는다 — 대장(`fingerprint.json`)이 아니다.**
+    #:
+    #:   대장이 내용 전체를 담아 더 정확해 보이지만, `demo_vertical_slice.register_kit()`
+    #:   이 **같은 판본을 manifest 지문으로 이미 등록한다.** 둘이 다르면 등록부가
+    #:   「동결 판본의 지문이 달라졌다」로 **거부**한다(P3-2) — 먼저 부른 쪽이 이기는
+    #:   싸움이 된다. 내용이 조용히 바뀌는 것은 `kit_freeze.verify()` 가 대장으로 막고,
+    #:   여기 지문은 **변경 감지**가 일이다.
+    fp = file_fingerprint(mpath)
+    profile["kit_source"] = "STARTER_KIT"        # Profile(`*.kit.json`) 과 갈라 보이게
+    return LoadedKit(kit_id=kit_id, version=version, name=name, mode=mode,
+                     source_path=mpath, fingerprint=fp, profile=profile, frozen=True)
+
+
+def discover_starter_kits(directory: str = "") -> List[LoadedKit]:
+    """선반(`starter_kits/<KIT_ID>/<판본>/`)에서 등록 가능한 것을 찾는다.
+
+    ★ 이것이 **생성기가 낸 키트를 플랫폼이 읽는 자리**다. 예전에는
+      `profile_from_manifest()` 를 `demo_vertical_slice` 만 불러, 시연 수직 경로
+      하나에만 쓰였다 — 선반에 무엇을 올려도 조직에 붙일 수 없었다.
+    """
+    root = directory or starter_packages_dir()
+    if not os.path.isdir(root):
+        return []
+    out: List[LoadedKit] = []
+    for kit_id in sorted(os.listdir(root)):
+        kdir = os.path.join(root, kit_id)
+        if not os.path.isdir(kdir):
+            continue
+        for ver in sorted(n for n in os.listdir(kdir)
+                          if os.path.isdir(os.path.join(kdir, n))):
+            kit = _starter_kit_profile(os.path.join(kdir, ver))
+            if kit is not None:
+                out.append(kit)
+    return out
+
+
+def register_all(store: Any, directory: str = "",
+                 starter_directory: str = "") -> List[Dict[str, Any]]:
+    """찾은 키트를 전부 등록한다(멱등). 반환은 등록된 판본들.
+
+    **두 곳에서 찾는다** — `docs/data-kits/*.kit.json`(운영 템플릿)과
+    `starter_kits/`(샘플 기업 패키지). 둘은 성격이 다르므로 프로파일의
+    `kit_source` 로 갈라 둔다.
+
+    ⚠️ 자리를 둘 다 인자로 받는다. **Profile 만 인자를 받고 선반은 못 받으면**,
+      임시 디렉터리로 격리하려는 쪽이 실제 선반까지 끌어온다.
+    """
     rows = []
-    for kit in discover(directory):
+    for kit in list(discover(directory)) + list(discover_starter_kits(starter_directory)):
         rows.append(store.upsert_kit_version(
             kit_id=kit.kit_id, version=kit.version, name=kit.name, mode=kit.mode,
             source_path=kit.source_path, fingerprint_value=kit.fingerprint,
