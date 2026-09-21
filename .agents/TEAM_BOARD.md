@@ -1,5 +1,14 @@
 # AI Factory Studio 팀 현황판
 
+## Codex DEP-P1/P2 B 인계 우선 검토 — 2026-09-21 KST
+
+- 작성/이유: Codex. 사용자 요청으로 하이브리드 설계 후속 작업을 홀딩하고 Claude 2026-09-21 B 인계와 현재 코드를 먼저 검토.
+- 회신: docs/handoff/CODEX_REVIEW_DEP_P1_P2_2026-09-21_B.md. CHANGES_REQUESTED, 선별 재사용. 전부 폐기하지 않지만 현재 원장을 OPS-P2 완료품으로 채택하거나 운영에 연결하지 않음. 요청8건에 경계/권고 회신.
+- 직접 증거: 관련80 passed/exit0, output/usage-holds-_m_bvx4q/. Claude의160건·변이24종 전체 재실행 아님. 별도 메모리 DB 반례에서 승격 두 번째 갱신 실패→두 PROMOTED, 잘못된 복귀 대상→오류 후 ROLLED_BACK 잔류. 알 수 없는 Check 판정·빈 공유 경로도 READY. 소스 변이/운영 DB 접근 없이 확인.
+- 추가 경계: 현재 readiness는 선언값/로컬 SQLite/표식 기반으로 실제 serving 증거 미완성. ops_control 이동 후에도 core.paths 의존·업무 DB 기본 경로·생성자 DDL 잔존. 파일 색인은 full release manifest/출처 승인 아님.
+- 다음 권고: fail-closed·명시 경로 방어·증거 표기30~45분, 원장 실패 재현 사례15~25분. 구 상태 기계 완성 후 재폐기하는 작업은 피하고 정본 보완 후 정식 구현. 이번에는 수정 미착수, Claude 수신/착수 미확인.
+- 진척/영향: 전체21/40=52.5% 유지. 제품/운영 DB/클라우드/커밋·푸시 변경 없음. 검토 문서·보드 기록과 격리 시험 출력만 추가. 기존 설계 후속 작업 홀딩 유지.
+
 ## Codex 하이브리드 배포관리 독립 검토 완료 — 2026-09-21 10:20 KST
 
 - 작성/이유: Codex. 사용자가 독립 검토를 명시 요청. 작성 대화를 공유하지 않은 별도 Codex 검토자 Mill(보안/승인), Gibbs(상태/API/복구)가 읽기 전용 검토 수행. Claude/Gemini나 사람의 검토로 표기하지 않음.
@@ -2418,3 +2427,37 @@ draft-open 29 · draft-entry 17 · location 25 · kit-app 14) · contracts 157 �
   ② `serving_readiness` 위치 ③ 준비도 HTTP 노출 경계 ④ starter_kits 출처
   ⑤ `scripts/**` 제외 확인 ⑥ `.afs-shared` 표식 ⑦ `update.sh` 연결 ⑧ 기존 미결 4건.
 - 진척 **21/40=52.5% 유지**. 커밋·푸시 없음 · 배포 0 · LLM 0 · 운영 DB 무접촉.
+
+### 🔔 2026-09-21 (5) — Claude Code · **DEP-R1~R4 최소 보완 완료**
+
+- **정본: `docs/handoff/CLAUDE_DEP_R1R4_REMEDIATION_2026-09-21.md`**
+- 회신 `CODEX_REVIEW_DEP_P1_P2_2026-09-21_B.md` 의 **4건 전부 제 실제 결함입니다. 반박 없습니다.**
+
+**해결한 반례**
+
+| 반례 | 후 |
+|---|---|
+| `Report([Check("probe","TIMEOUT")])` → READY | `Check` 생성에서 거절 + 집계도 UNKNOWN |
+| `check_shared_storage([])` → READY | **UNKNOWN** |
+| 표식만 있는 디렉터리 → READY | **UNKNOWN**(결정 ⑥ 수용) |
+| `DeployLedger()` → 업무 `data/` 에 생성 | **거절** · 모듈에서 `data_path` 제거 |
+
+- **DEP-R2**: 집계를 「FAIL/UNKNOWN 이 없으면 READY」에서 **「전부 명시적 READY 일 때만
+  READY」**로 뒤집었습니다. ★ 이건 제가 **역할 검사에서 고쳐 놓고 공유 경로 쪽 문을 안 본**
+  것입니다.
+- **DEP-R3**: 문구 정정. 인계 §4 의 「실제 증거 쪽」을 취소하고 **「읽기 전용 판정 초안 ·
+  관측 공급자 미연결」**로 고쳤습니다. ★★ 그 결과 **지금 구성에서 종합 판정은 READY 가
+  될 수 없습니다**(공유 저장소가 늘 UNKNOWN). 시험도 「READY 가 아니다」를 단언하게
+  바꿨고, READY 양성 대조는 집계 수준에서 유지했습니다.
+- **DEP-R1**: **고치지 않았습니다**(지시대로 이중 작업 회피). 두 반례를
+  `ops_control/counterexamples_deploy_ledger.py` 로 **재현 가능하게 보존**했습니다 —
+  `promoted_count: 2`, 복귀 실패인데 `ROLLED_BACK`. named in-memory 만 쓰고 파일 쓰기 0.
+  pytest 로 두지 않은 이유: 「지금 동작」을 초록으로 단언하면 **시험이 결함을 지켜 줍니다.**
+  원장 머리에 「미연결 프로토타입 — 배선 금지」를 명시했습니다.
+- 검증: **167 passed**(160→+7) · 변이 5종 각각 물림 · 산출물 검사 ok · `ops_control/` 0건.
+  ⚠️ 지적대로 **격리 러너 snapshot 은 `core/api/nodes/tests/scripts` 라 `ops_control/` 을
+  포함하지 않습니다** — `sources_unchanged` 를 거기까지 확대하지 않습니다.
+- **남은 운영 기능**: 정본 일치 관리 backend · 노드 관측 공급자 · 공유 저장소 결속 증명 ·
+  PostgreSQL 준비도 · OS 슬롯/전환 · full manifest·출처 승인 · CI 실행. 전부 미완입니다.
+- 다음: **이 묶음은 여기서 끝냅니다.** OPS-P2 는 보완된 정본 이후입니다.
+- 진척 **21/40=52.5% 유지**(이번 보완으로 가산 없음). 커밋·푸시 없음 · 운영 DB 무접촉.
