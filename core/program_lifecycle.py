@@ -111,19 +111,29 @@ def _now() -> str:
 
 
 class ProgramLifecycle:
-    def __init__(self, db_path: str = None):
+    def __init__(self, db_path: str = None, connect=None, begin_immediate: str = ""):
         self.db_path = db_path or _DB_PATH
+        #: ★ [DB-1 · 2026-09-21] 연결 획득과 «쓰기 잠금 시작 문장» 만 주입 가능하게 둔다.
+        #:   SQL 은 그대로다 — 방언 차이는 `core/db` 한 곳에서 온다.
+        self._connect_fn = connect
+        self._begin_immediate = begin_immediate or "BEGIN IMMEDIATE"
         # 라이브러리 경로 주입 인자(`library_dir`)는 제거했다 — 그 인자는 세 모듈이 경로를
         #   각자 선언하던 시절에 테스트가 어긋남을 우회하려고 있던 것이고, 단일 지점
         #   (`library_paths`)이 생긴 뒤로는 **우회 경로가 곧 새로운 어긋남**이다.
         self._ready = ""
 
     def _connect(self):
-        os.makedirs(os.path.dirname(self.db_path) or ".", exist_ok=True)
-        conn = sqlite3.connect(self.db_path, timeout=15.0)
-        conn.row_factory = sqlite3.Row
-        conn.execute("PRAGMA journal_mode=WAL")
-        conn.execute("PRAGMA busy_timeout=15000")
+        #: ⚠️ [DB-1] 주입된 연결도 **같은 부트스트랩을 지나야 한다.** 여기서 바로 돌려주면
+        #:   DDL 을 건너뛰고 「no such table」이 난다(실제로 한 번 그렇게 났다).
+        #:   주입은 «연결을 어디서 얻는가» 만 바꾸는 것이지 준비 절차를 건너뛰는 문이 아니다.
+        if self._connect_fn is not None:
+            conn = self._connect_fn()
+        else:
+            os.makedirs(os.path.dirname(self.db_path) or ".", exist_ok=True)
+            conn = sqlite3.connect(self.db_path, timeout=15.0)
+            conn.row_factory = sqlite3.Row
+            conn.execute("PRAGMA journal_mode=WAL")
+            conn.execute("PRAGMA busy_timeout=15000")
         # 경로가 런타임에 바뀌면(테스트 격리) DDL 을 다시 돌려야 한다 — 안 하면 "no such table".
         if self._ready != self.db_path:
             conn.executescript(_DDL)
@@ -140,6 +150,21 @@ class ProgramLifecycle:
         return conn
 
     # ── 조회 ──────────────────────────────────────────────────────────
+    @staticmethod
+    def _read_status(conn, release_id: str) -> Dict[str, Any]:
+        """**이미 열린 연결**로 현재 상태를 읽는다 — 트랜잭션 안에서 쓰기 위한 것.
+
+        ⚠️ 기본값은 `get_status` 와 **같아야 한다**(미기록 = active·recorded False).
+          여기서 다르게 판단하면 같은 질문에 두 답이 생긴다."""
+        r = conn.execute("SELECT * FROM program_status WHERE release_id=?",
+                         (release_id,)).fetchone()
+        if not r:
+            return {"release_id": release_id, "status": ACTIVE, "recorded": False,
+                    "reason": "", "replacement_release_id": "", "data_fingerprint": ""}
+        d = dict(r)
+        d["recorded"] = True
+        return d
+
     def get_status(self, release_id: str) -> Dict[str, Any]:
         """현재 사용여부. 미기록은 `active` + `recorded=False`.
 
@@ -262,7 +287,8 @@ class ProgramLifecycle:
     def set_status(self, release_id: str, status: str, actor: str, reason: str = "",
                    replacement_release_id: str = "",
                    acknowledge_dependents: bool = False,
-                   data_fingerprint: str = "") -> Dict[str, Any]:
+                   data_fingerprint: str = "",
+                   expected_status: Optional[str] = None) -> Dict[str, Any]:
         """사용여부를 바꾼다. IT 관리자 권한 검사는 **API 계층**에서 한다.
 
         ★★★ `data_fingerprint` 는 이 결정이 **어느 업무 데이터 위에서** 내려졌는지다.
@@ -320,9 +346,25 @@ class ProgramLifecycle:
                 + (f" ⚠️ 세지 못한 항목: {'; '.join(dep['unmeasured'])}"
                    if dep["unmeasured"] else ""))
 
-        prev = self.get_status(release_id)
         conn = self._connect()
         try:
+            #: ★★★ [R3 · 2026-09-20] **직전 상태 읽기와 쓰기를 한 트랜잭션에 넣는다.**
+            #:   ⚠️ 종전에는 밖에서 `get_status` 로 읽고 안에서 썼다. 그 사이 다른 요청이
+            #:     상태를 바꾸면 **낡은 판단으로 덮어쓴다.** append-only 이력은 「과거 행이
+            #:     안 바뀐다」는 뜻이지 「현재 상태가 그대로다」가 아니다.
+            #:   ★ `BEGIN IMMEDIATE` 로 쓰기 잠금을 먼저 잡는다 — 프로세스가 달라도 유효하다.
+            conn.isolation_level = None
+            #: ⚠️ [DB-1] `BEGIN IMMEDIATE` 는 **SQLite 전용 문장**이다 — PostgreSQL 에는 없다.
+            #:   문자열로 박아 두면 이관할 때 이 한 줄이 조용히 남아 터진다. 쓰기 잠금을
+            #:   먼저 잡는 «같은 효과» 를 어떻게 낼지는 저장소마다 다르므로 부르는 쪽이 준다.
+            conn.execute(self._begin_immediate)
+            prev = self._read_status(conn, release_id)
+            #: ★ CAS — 부른 쪽이 「이 상태일 때만 바꿔라」를 건 경우, **여기서** 확인한다.
+            if expected_status is not None and prev["status"] != expected_status:
+                conn.execute("ROLLBACK")
+                raise ProgramLifecycleError(
+                    f"그 사이 사용여부가 '{prev['status']}' 로 바뀌었습니다 — 낡은 판단으로 "
+                    f"덮어쓰지 않았습니다. 현재 상태를 다시 확인한 뒤 요청하십시오.")
             conn.execute(
                 "INSERT INTO program_status(release_id,status,reason,"
                 "replacement_release_id,changed_by,changed_at,dependents_at_change,"
@@ -344,7 +386,7 @@ class ProgramLifecycle:
                 (uuid.uuid4().hex[:16], release_id, prev["status"], status, reason or "",
                  replacement_release_id or "", actor, _now(),
                  json.dumps(dep, ensure_ascii=False), str(data_fingerprint or "")))
-            conn.commit()
+            conn.execute("COMMIT")
         finally:
             conn.close()
 
@@ -366,9 +408,107 @@ class ProgramLifecycle:
         return self.set_status(release_id, DISABLED, actor, reason,
                                replacement_release_id, acknowledge_dependents)
 
+    def _restore_point(self, release_id: str, conn=None) -> Dict[str, str]:
+        """사용 중단 «직전» 스냅샷 — 상태·지문·대체 대상을 **한 행에서 통째로** 읽는다.
+
+        ★★★ [R2 · 2026-09-20] 세 값은 **같은 시점**의 것이어야 한다.
+          ⚠️⚠️ 종전에는 지문을 「이력 전체에서 마지막으로 비어 있지 않은 값」으로 골랐다.
+            그러면 지문 F1 뒤에 **빈 지문을 가진 상태 기록**이 오고 그 뒤 중단한 경우,
+            빈 값을 건너뛰고 F1 을 붙인다 — **다른 시점의 데이터가 현재 상태에 결속된다.**
+          ★ **빈 값도 값이다.** 과거의 비어 있지 않은 값으로 채우지 않는다.
+
+        중단 «직전» 의 값은 그 중단 바로 앞 이력 행이 남긴 것이다(그 행이 그때
+        `program_status` 에 쓴 값이 곧 중단 시점의 현재 값이었다).
+
+        ⚠️ 중단이 그 릴리스의 **첫 기록**이면 앞 행이 없다 — 그때는 지문·대체 대상이
+          «없었던» 것이므로 빈 값으로 둔다. 만들어 채우지 않는다.
+        ⚠️ 이력이 어긋나면(앞 행의 도착 상태 ≠ 중단 행의 출발 상태) **모른다**로 답한다.
+        """
+        own = conn is None
+        conn = conn or self._connect()
+        try:
+            rows = [dict(r) for r in conn.execute(
+                "SELECT from_status,to_status,replacement_release_id,data_fingerprint "
+                "FROM program_status_history WHERE release_id=? ORDER BY at, rowid",
+                (release_id,))]
+        finally:
+            if own:
+                conn.close()
+        last = -1
+        for idx, row in enumerate(rows):
+            if row["to_status"] == DISABLED:
+                last = idx
+        if last < 0:
+            return {"status": "", "data_fingerprint": "", "replacement_release_id": ""}
+        target = str(rows[last].get("from_status") or "").strip()
+        if last == 0:
+            #: 중단이 첫 기록 — 그 앞에는 스냅샷이 없다. 지문·대체 대상은 «없었다».
+            return {"status": target, "data_fingerprint": "", "replacement_release_id": ""}
+        snap = rows[last - 1]
+        if str(snap.get("to_status") or "").strip() != target:
+            #: 이력이 어긋난다 — 추정하지 않는다.
+            return {"status": "", "data_fingerprint": "", "replacement_release_id": ""}
+        return {"status": target,
+                "data_fingerprint": str(snap.get("data_fingerprint") or ""),
+                "replacement_release_id": str(snap.get("replacement_release_id") or "")}
+
     def reactivate(self, release_id: str, actor: str, reason: str = "") -> Dict[str, Any]:
-        """다시 켠다. 되돌릴 수 있어야 관리자가 겁내지 않고 끌 수 있다."""
-        return self.set_status(release_id, ACTIVE, actor, reason or "사용 재개")
+        """**중단 해제**다 — 승격 명령이 아니다.
+
+        ★★★ 중단 «직전» 상태로 되돌린다. 무조건 `ACTIVE` 가 아니다.
+
+        ⚠️⚠️ 종전에는 `set_status(ACTIVE)` 하나였다. 그러면 `candidate`(아직 승인되지 않은
+          Preview 후보)를 껐다 켜는 것만으로 **운영 청중**이 된다 —
+          `core/app_preview.audience_for_state` 가 candidate→Preview, active→운영으로 갈라
+          놓은 의미가 이 문으로 사라진다.
+        ⚠️⚠️ [R1 · 2026-09-20] **중단 상태가 아니면 아무것도 바꾸지 않는다.** 앞선 판은
+          「중단이 아니면 종전대로 ACTIVE」였는데, 그것이 같은 구멍을 다시 열었다 —
+          `candidate` 로 복원한 **뒤 한 번 더** 부르면(또는 중단한 적 없는 후보에 바로
+          부르면) `active` 가 됐다. 관리자의 재시도·중복 요청만으로 청중이 바뀐다.
+          이제 **상태·지문·대체 대상을 그대로 둔 채** 돌려주고, 복원하지 않았으면
+          복원했다고 **말하지도 않는다.**
+        ★ `deprecated` 의 경고 해제도 이 명령으로 하지 않는다 — 중단 해제와 명시적 상태
+          변경은 다른 일이다. 필요하면 `set_status` 로 명시한다.
+        ⚠️ 이력이 없거나 어긋나면 **추정하지 않고 거절한다.** 「모르면 활성」이 그 사고다.
+        ★ [R3] 읽기·판정·쓰기는 `set_status` 의 CAS(`expected_status`)로 묶는다 — 그 사이
+          다른 요청이 상태를 바꿨으면 **덮어쓰지 않고 거절**한다.
+        """
+        base = (reason or "").strip() or "사용 재개"
+        #: 존재·행위자 검증을 조기 반환으로 건너뛰지 않는다.
+        if not (actor or "").strip():
+            raise ProgramLifecycleError(
+                "변경자 식별 정보가 없습니다 — 누가 켰는지 모르는 재개는 감사 대상이 "
+                "될 수 없습니다.")
+        if not self._release_exists(release_id):
+            raise ProgramLifecycleError(
+                f"존재하지 않는 프로그램입니다: {release_id} — 라이브러리에 게시된 "
+                f"릴리스만 사용여부를 제어할 수 있습니다.")
+
+        current = self.get_status(release_id)
+        if current["status"] != DISABLED:
+            #: ★ 불변 반환 — 오류 계약을 늘리지 않되 **아무것도 바꾸지 않는다.**
+            out = dict(current)
+            out["from_status"] = current["status"]
+            out["restored"] = False
+            out["note"] = ("사용 중단 상태가 아니어서 아무것도 바꾸지 않았습니다 — "
+                           "이 명령은 중단 해제이며 상태를 올리는 명령이 아닙니다.")
+            return out
+
+        point = self._restore_point(release_id)
+        restored = point["status"]
+        if restored not in STATUSES or restored == DISABLED:
+            raise ProgramLifecycleError(
+                "중단 직전 상태를 확인할 수 없어 재개하지 않았습니다 — 무엇으로 되돌릴지 "
+                "모르는 채 활성으로 켜면 승인되지 않은 판이 운영으로 열릴 수 있습니다. "
+                "상태를 직접 지정해 변경하십시오.")
+        out = self.set_status(
+            release_id, restored, actor,
+            f"{base} — 중단 직전 상태로 되돌림({restored})",
+            replacement_release_id=point["replacement_release_id"],
+            data_fingerprint=point["data_fingerprint"],
+            expected_status=DISABLED)
+        out["restored"] = True
+        return out
 
     # ── 내부 ──────────────────────────────────────────────────────────
     def _release_exists(self, release_id: str) -> bool:

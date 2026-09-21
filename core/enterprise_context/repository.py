@@ -144,13 +144,26 @@ CREATE INDEX IF NOT EXISTS idx_prof_industry ON enterprise_profiles(industry_cod
 
 
 class EcmRepository:
-    def __init__(self, db_path: str = _DB_PATH):
+    """★ [DB-1 · 2026-09-21] 연결 획득만 **주입 가능**하게 열어 둔다.
+
+    ⚠️ SQL·DDL 은 한 글자도 바꾸지 않았다. 첫 수직 경로(로그인→세션→SSE 티켓)가
+      조직 계층을 타므로 **auth 표만 옮기면 화면이 성립하지 않는다** — 그래서 이 저장소도
+      같은 주입점을 갖는다.
+    ⚠️ 기본값은 **지금 그대로**다. 아무것도 주입하지 않으면 동작이 달라지지 않는다.
+    ⚠️ `PRAGMA` 는 SQLite 전용이다 — 주입된 연결에는 걸지 않는다(PostgreSQL 에서는
+      알 수 없는 문장이고, 조용히 삼키면 「걸린 줄 아는」 상태가 된다).
+    """
+
+    def __init__(self, db_path: str = _DB_PATH, connect=None):
         self.db_path = db_path
+        self._connect_fn = connect
         self._lock = threading.Lock()
         self._init_db()
 
     # ── 인프라 ────────────────────────────────────────────────────────────
-    def _connect(self) -> sqlite3.Connection:
+    def _connect(self):
+        if self._connect_fn is not None:
+            return self._connect_fn()
         os.makedirs(os.path.dirname(self.db_path) or ".", exist_ok=True)
         conn = sqlite3.connect(self.db_path)
         conn.row_factory = sqlite3.Row

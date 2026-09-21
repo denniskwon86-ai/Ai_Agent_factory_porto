@@ -124,12 +124,23 @@ def _digest(password: str, salt: str) -> str:
 
 
 class AuthStore:
-    def __init__(self, db_path: str = _DB_PATH):
+    """★ [DB-1 · 2026-09-21] 연결 획득만 **주입 가능**하게 열어 둔다.
+
+    ⚠️ SQL 은 한 글자도 바꾸지 않았다. 자리표시자 차이는 `core/db` 의 연결 wrapper 가
+      실행 직전에 흡수한다 — 로그인 경로의 SQL 을 손으로 다시 쓰는 것이 이관에서
+      가장 위험한 일이다.
+    ⚠️ 기본값은 **지금 그대로**다. 아무것도 주입하지 않으면 동작이 달라지지 않는다.
+    """
+
+    def __init__(self, db_path: str = _DB_PATH, connect=None):
         self.db_path = db_path
+        self._connect_fn = connect
         self._lock = threading.RLock()
         self._ready = ""
 
-    def _connect(self) -> sqlite3.Connection:
+    def _connect(self):
+        if self._connect_fn is not None:
+            return self._connect_fn()
         os.makedirs(os.path.dirname(self.db_path) or ".", exist_ok=True)
         conn = sqlite3.connect(self.db_path, timeout=5)
         conn.row_factory = sqlite3.Row
