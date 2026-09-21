@@ -154,14 +154,36 @@ class EcmRepository:
       알 수 없는 문장이고, 조용히 삼키면 「걸린 줄 아는」 상태가 된다).
     """
 
-    def __init__(self, db_path: str = _DB_PATH, connect=None):
+    def __init__(self, db_path: str = _DB_PATH, connect=None, managed=None):
         self.db_path = db_path
         self._connect_fn = connect
         self._lock = threading.Lock()
+        #: [P03.1] 관리 스키마 모드. `None` 이면 부를 때 환경에서 읽는다.
+        self._managed = managed
+        self._schema_verified = False
+        if self._is_managed():
+            #: ★★ [P03.1] 관리 모드에서는 생성자가 **아무것도 하지 않는다.**
+            #:   ⚠️ 여기서 검증해 예외를 내면 `ecm_repository = EcmRepository()` 가
+            #:     모듈 수준이라 **import 자체가 죽는다.** 확인은 실제로 연결할 때
+            #:     한 번 한다(§_connect) — 늦게 실패하되 «조용히» 실패하지 않는다.
+            return
         self._init_db()
+
+    def _is_managed(self) -> bool:
+        if self._managed is not None:
+            return bool(self._managed)
+        from core.db.managed_schema import STORE_ENTERPRISE_CONTEXT, is_managed
+        return is_managed(STORE_ENTERPRISE_CONTEXT)
 
     # ── 인프라 ────────────────────────────────────────────────────────────
     def _connect(self):
+        if self._is_managed() and not self._schema_verified:
+            #: ★★ [P03.1] 읽기·쓰기 **모든 길이 여기를 지난다** — 한 곳에서 막는다.
+            #:   설치 안 됐으면 여기서 멈춘다. 만들지 않는다.
+            from core.db.managed_schema import (STORE_ENTERPRISE_CONTEXT,
+                                                assert_installed)
+            assert_installed(self.db_path, STORE_ENTERPRISE_CONTEXT)
+            self._schema_verified = True
         if self._connect_fn is not None:
             return self._connect_fn()
         os.makedirs(os.path.dirname(self.db_path) or ".", exist_ok=True)
@@ -191,7 +213,12 @@ class EcmRepository:
 
     def _ensure_tables(self) -> bool:
         """`org_directory._ensure_tables` 와 같은 복원력 규약 — 상대 경로 DB 라 작업 디렉터리가
-        바뀌면 테이블 없는 파일을 가리킨다. 조회 경로에서 한 번 복구를 시도한다."""
+        바뀌면 테이블 없는 파일을 가리킨다. 조회 경로에서 한 번 복구를 시도한다.
+
+        ⚠️⚠️ [P03.1] **관리 모드에서는 복구하지 않는다.** 이 «조회 경로의 DDL» 이
+          생성자만 막았을 때 남는 뒷문이다 — 여기로 들어오면 기동 DDL 0 이 거짓이 된다."""
+        if self._is_managed():
+            return False
         try:
             self._init_db()
             return True
@@ -204,6 +231,12 @@ class EcmRepository:
                 with self._connect() as conn:
                     return [dict(r) for r in conn.execute(sql, params).fetchall()]
             except sqlite3.OperationalError:
+                if self._is_managed():
+                    #: ★★ [P03.1] **빈 목록으로 숨기지 않는다.**
+                    #:   스키마가 없는데 `[]` 를 돌려주면 화면에는 「자료가 없음」으로
+                    #:   보인다. 사람은 「아직 안 넣었나 보다」라고 읽고 설치 실패를
+                    #:   아무도 모른다. 관리 모드에서는 식별 가능한 실패여야 한다.
+                    raise
                 if attempt == 0 and self._ensure_tables():
                     continue
                 return []

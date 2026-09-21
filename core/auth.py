@@ -132,11 +132,14 @@ class AuthStore:
     ⚠️ 기본값은 **지금 그대로**다. 아무것도 주입하지 않으면 동작이 달라지지 않는다.
     """
 
-    def __init__(self, db_path: str = _DB_PATH, connect=None):
+    def __init__(self, db_path: str = _DB_PATH, connect=None, managed=None):
         self.db_path = db_path
         self._connect_fn = connect
         self._lock = threading.RLock()
         self._ready = ""
+        #: [P03.1] 관리 스키마 모드. `None` 이면 **부를 때** 환경에서 읽는다 —
+        #:   기본값에 박아 두면 파이썬이 정의 시점에 한 번 묶어 나중 변경을 못 따라간다.
+        self._managed = managed
 
     def _connect(self):
         if self._connect_fn is not None:
@@ -146,8 +149,23 @@ class AuthStore:
         conn.row_factory = sqlite3.Row
         return conn
 
+    def _is_managed(self) -> bool:
+        if self._managed is not None:
+            return bool(self._managed)
+        from core.db.managed_schema import STORE_AUTH, is_managed
+        return is_managed(STORE_AUTH)
+
     def _init(self) -> None:
         if self._ready == self.db_path:
+            return
+        if self._is_managed():
+            #: ★★ [P03.1] 관리 모드에서는 **한 줄의 DDL 도 돌리지 않는다.**
+            #:   대신 요구한 표·컬럼이 실제로 있는지 «읽기만» 하고, 없으면 멈춘다.
+            #:   ⚠️ 확인에 실패하면 `_ready` 를 세우지 않는다 — 세우면 다음 호출이
+            #:     그냥 통과해서 «설치 실패» 가 캐시 뒤에 숨는다.
+            from core.db.managed_schema import STORE_AUTH, assert_installed
+            assert_installed(self.db_path, STORE_AUTH)
+            self._ready = self.db_path
             return
         with self._lock, self._connect() as conn:
             # ★★★ [2026-08-13 실측 회귀 수정] **컬럼 보강을 `executescript` 보다 먼저** 한다.
