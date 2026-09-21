@@ -246,3 +246,61 @@ def test_하나만_넣으면_남의_품목도_없다(tmp_path):
                         hits.append(f"{prof}/{name}")
                         break
     assert not hits, f"제련만 넣었는데 전지소재 품목이 남아 있다: {hits[:6]}"
+
+
+# ── 키트 정체성 (선반에 올리기 위한 이름표)
+
+def test_사업은_키트_정체성을_갖는다():
+    """★ 이름표가 없으면 **전지소재만 뽑아도 manifest 가 제련 키트**로 나온다.
+    데이터는 맞는데 이름이 틀리면, 그대로 켐코에 「비철 조달 키트」를 주는 셈이다."""
+    for d in B.load([SMELT, BATTERY]):
+        assert d.kit_id.startswith("KIT-"), f"{d.code} 에 kit_id 가 없다"
+        assert d.kit_name, f"{d.code} 에 kit_name 이 없다"
+        assert d.use_case, f"{d.code} 에 use_case 가 없다"
+
+
+def test_키트_식별자가_겹치지_않는다():
+    """겹치면 선반에서 **한 칸이 다른 칸을 덮는다.**"""
+    ids = [d.kit_id for d in (B.load([c])[0] for c in B.available())]
+    assert len(ids) == len(set(ids)), f"겹치는 kit_id: {ids}"
+
+
+def test_사업_하나면_그_사업의_이름이_나온다():
+    for code, kit in ((SMELT, "KIT-MFG-SMELTING-NONFERROUS"),
+                      (BATTERY, "KIT-MFG-BATTERY-MATERIALS")):
+        kid, name, use = B.kit_identity(B.load([code]))
+        assert kid == kit and name and use
+
+
+def test_조합은_키트_이름을_명시해야_한다():
+    """★ 「제련+전지소재」에 **자동으로 붙일 옳은 이름이 없다.** 앞 사업 것을 쓰거나
+    이어 붙이면 그럴듯한 오답이 나온다 — 사람이 정할 일이다."""
+    defs = B.load([BATTERY, SMELT])
+    with pytest.raises(SystemExit) as e:
+        B.kit_identity(defs)
+    assert "명시" in str(e.value)
+    kid, name, use = B.kit_identity(defs, "KIT-X", "엑스 키트")
+    assert kid == "KIT-X" and name == "엑스 키트" and use      # use_case 는 이어 붙인다
+
+
+def test_이름이_없는_사업은_거부한다(monkeypatch):
+    """복사해서 새 사업을 만들 때 `kit_id` 를 안 적는 실수."""
+    d = B.load([SMELT])[0]
+    monkeypatch.setattr(type(d), "kit_id", "", raising=False)
+    with pytest.raises(SystemExit) as e:
+        B.kit_identity([d])
+    assert "kit_id" in str(e.value)
+
+
+@pytest.mark.slow
+def test_사업_하나면_그_키트가_나온다(tmp_path):
+    """★★★ **선반에 올릴 수 있는가.** manifest 의 이름표가 그 사업 것이어야 한다."""
+    import json
+    out = _generate(tmp_path, [SMELT])
+    m = json.load(io.open(os.path.join(out, "manifest.json"), encoding="utf-8"))
+    assert m["kit_id"] == "KIT-MFG-SMELTING-NONFERROUS"
+    assert m["kit_name"] == "비철 제련·정련 업무키트"
+    assert m["company_name"] == "AFS 메탈 주식회사"       # 그룹 이름이 아니다
+    assert m["sector"] == ["B:금속>비철금속>제련·정련"]
+    #: ⚠️ KSIC 는 **법인 구조가 정한다** — 켐코 C2820 vs LS MnM C24. 키트 속성이 아니다
+    assert "industry_codes" not in m

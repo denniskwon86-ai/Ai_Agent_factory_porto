@@ -39,7 +39,14 @@ KIT_ID = "KIT-MFG-NONFERROUS-PROCUREMENT"
 #:   안에 한 덩어리로 박혀 있어, 고려아연(제련만)·켐코(황산니켈만)에 줄 수 없었다.
 #:   `--business` 로 갈아 끼운다 — `scripts/business_defs/` 참고.
 DEFAULT_BUSINESSES = ("smelting_nonferrous", "battery_materials")
+#: 기본 조합(LS MnM 형 — 한 법인이 두 사업)의 정체성. **하위호환을 위해 그대로 둔다** —
+#: 1.0.0~1.2.0 이 이 이름으로 봉인돼 있다.
+DEFAULT_KIT = ("KIT-MFG-NONFERROUS-PROCUREMENT", "비철 제련·전지소재 통합 업무키트",
+               "원료 구매·도입계획에서 경영 영향과 실행 결정까지")
+DEFAULT_COMPANY = "AFS 데모소재그룹"
 BUSINESSES: list = []
+KIT_NAME: str = DEFAULT_KIT[1]
+USE_CASE: str = DEFAULT_KIT[2]
 
 
 #: 품목 → 그 품목이 속한 사업의 공장. **품목 마스터(`MDM-01`)가 정본이다.**
@@ -56,10 +63,33 @@ def scope_of(material_id: str) -> str:
     return _MATERIAL_SCOPE.get(material_id) or business_defs.owner_of(BUSINESSES, material_id)
 
 
-def use_businesses(codes) -> None:
-    """이 키트가 담을 사업을 정한다. **순서가 지문을 좌우하므로 바꾸지 않는다.**"""
-    global BUSINESSES
+def use_businesses(codes, kit_id: str = "", kit_name: str = "") -> None:
+    """이 키트가 담을 사업과 **그 키트의 이름**을 정한다.
+
+    순서가 지문을 좌우하므로 사업 순서는 바꾸지 않는다.
+
+    ⚠️ 이름을 사업에서 받지 않으면, 전지소재만 뽑아도 manifest 가
+      `KIT-MFG-NONFERROUS-PROCUREMENT` 로 나온다 — **데이터는 전지소재인데 이름표가
+      제련**이고, 그대로 주면 켐코에 「비철 조달 키트」를 주는 셈이다.
+    """
+    global BUSINESSES, KIT_ID, KIT_NAME, USE_CASE
     BUSINESSES = business_defs.load(list(codes))
+    #: 기본 조합은 **기존 이름을 그대로 쓴다** — 1.0.0~1.2.0 이 그 이름으로 봉인돼 있다
+    if not kit_id and tuple(codes) == DEFAULT_BUSINESSES:
+        kit_id, kit_name = DEFAULT_KIT[0], DEFAULT_KIT[1]
+        KIT_ID, KIT_NAME, USE_CASE = DEFAULT_KIT
+        return
+    KIT_ID, KIT_NAME, USE_CASE = business_defs.kit_identity(BUSINESSES, kit_id, kit_name)
+
+
+def company_name() -> str:
+    """샘플 회사 이름. **사업이 하나면 그 법인**, 여럿이면 그룹.
+
+    ⚠️ 이 값이 지금 **카탈로그의 키트 이름**으로 쓰인다
+      (`kit_registry.py:126` · `demo_vertical_slice.py:431`). 제련만 담은 키트에
+      「AFS 데모소재그룹」이 뜨면 고르는 사람이 무엇인지 알 수 없다.
+    """
+    return BUSINESSES[0].legal_entity[2] if len(BUSINESSES) == 1 else DEFAULT_COMPANY
 #: **판본은 `--version` 으로 받는다** (P2). 예전에는 여기에 "1.0.0" 이 박혀 있어서,
 #: 1.1.0 을 내려면 이 줄을 고쳐야 했고 고치는 순간 1.0.0 을 재현할 수 없게 됐다.
 #: `main()`/`build()` 이 아래 셋을 판본에 맞게 다시 세운다.
@@ -68,12 +98,23 @@ KIT_ROOT = ROOT / "starter_kits" / KIT_ID / KIT_VERSION
 OVERLAY: kit_defs.KitOverlay = kit_defs.KitOverlay()
 
 
+#: `--out` 으로 경로를 직접 준 경우. **이때는 `KIT_ID` 가 바뀌어도 경로를 다시 잡지
+#: 않는다** — 부른 쪽이 정한 자리를 존중한다.
+_OUT_OVERRIDE: Path | None = None
+
+
 def use_version(version: str, out: Path | None = None) -> None:
-    """판본을 갈아 끼운다 — 정의(오버레이)와 출력 경로를 함께 바꾼다."""
-    global KIT_VERSION, KIT_ROOT, OVERLAY
+    """판본을 갈아 끼운다 — 정의(오버레이)와 출력 경로를 함께 바꾼다.
+
+    ⚠️ `KIT_ROOT` 는 **`KIT_ID` 로 조립된다.** 사업이 키트 이름을 정하므로
+      `use_businesses()` 뒤에 다시 불러야 한다(`build()` 가 그렇게 한다).
+    """
+    global KIT_VERSION, KIT_ROOT, OVERLAY, _OUT_OVERRIDE
     OVERLAY = kit_defs.load(version)
     KIT_VERSION = version
-    KIT_ROOT = Path(out) if out else (ROOT / "starter_kits" / KIT_ID / version)
+    if out is not None:
+        _OUT_OVERRIDE = Path(out)
+    KIT_ROOT = _OUT_OVERRIDE or (ROOT / "starter_kits" / KIT_ID / version)
 TENANT_ID = "tenant-afs-demo-materials"
 GROUP_SCOPE = "org-afs-demo-group"
 METALS_SCOPE = "org-afs-metals"
@@ -1351,9 +1392,14 @@ def quarantine_fixture() -> tuple[List[Dict[str, Any]], Dict[str, Any]]:
 use_businesses(DEFAULT_BUSINESSES)
 
 
-def build(clean: bool = True, force: bool = False, businesses=None) -> Dict[str, Any]:
+def build(clean: bool = True, force: bool = False, businesses=None,
+          kit_id: str = "", kit_name: str = "") -> Dict[str, Any]:
     #: ★ 키트는 **사업의 조합**이다. 안 주면 기본 조합(제련 + 전지소재 = LS MnM 모델).
-    use_businesses(businesses or DEFAULT_BUSINESSES)
+    use_businesses(businesses or DEFAULT_BUSINESSES, kit_id, kit_name)
+    #: ★ `KIT_ROOT` 는 `KIT_ID` 로 조립된다 — 사업이 이름을 정한 **뒤에** 다시 잡는다.
+    #:   `--out` 으로 경로를 직접 준 경우는 그대로 둔다.
+    if _OUT_OVERRIDE is None:
+        use_version(KIT_VERSION)
     # **확정 판본은 다시 만들지 않는다** (P1). 아래 `rmtree` 가 판본 디렉터리를 통째로
     # 지우므로, 검증이 끝난 판본에 이것을 돌리면 그 판본이 사라졌다가 다른 내용으로
     # 되살아난다. 실제로 1.0.0 이 그렇게 바뀌었고 아무 오류도 나지 않았다.
@@ -1405,9 +1451,15 @@ def build(clean: bool = True, force: bool = False, businesses=None) -> Dict[str,
     ])
     manifest = {
         "kit_id": KIT_ID, "version": KIT_VERSION, "status": "GENERATED_UNDER_VALIDATION",
-        "company_profile_id": "AFS-DEMO-MATERIALS-GROUP", "company_name": "AFS 데모소재그룹",
+        #: ★ 사람이 고르는 이름. 없으면 카탈로그가 `company_name` 을 대신 쓴다
+        "kit_name": KIT_NAME,
+        "company_profile_id": "AFS-DEMO-MATERIALS-GROUP", "company_name": company_name(),
         "entity_mode": "VIRTUAL", "data_class": "SYNTHETIC", "not_for_management_decision": True,
-        "industry_codes": ["C24"], "primary_use_case": "원료 구매·도입계획에서 경영 영향과 실행 결정까지",
+        #: ⚠️ `industry_codes`(KSIC)를 뺐다. 같은 황산니켈 제조라도 **켐코는 C2820,
+        #:   LS MnM 사업부는 C24** 로 간다 — **법인 구조가 정하는 값**이지 키트 속성이
+        #:   아니다. 분류와 잇는 열은 우리 좌표 `sector` 다.
+        "sector": [b.sector for b in BUSINESSES],
+        "primary_use_case": USE_CASE,
         "profiles": {name: {k: v for k, v in vars(p).items()} for name, p in PROFILES.items()},
         "datasets": [{"dataset_id": ds, **DATASETS[ds], "required": ds not in {"KNW-01"}}
                      for ds in DATASETS],
@@ -1443,15 +1495,21 @@ def main() -> None:
     parser.add_argument("--no-clean", action="store_true", help="기존 키트 디렉터리를 지우지 않음")
     parser.add_argument("--force", action="store_true",
                         help="확정 판본이어도 덮어쓴다 — 왜 그래야 하는지 커밋에 남길 것")
+    parser.add_argument("--kit-id", default="", metavar="ID",
+                        help="키트 식별자. 사업이 여럿이면 필요하다(하나면 사업 정의가 준다)")
+    parser.add_argument("--kit-name", default="", metavar="NAME",
+                        help="카탈로그에 뜨는 이름. `--kit-id` 와 함께 준다")
     args = parser.parse_args()
     if args.list_businesses:
         for c in business_defs.available():
             d = business_defs.load([c])[0]
-            print("%-24s %-10s %s" % (c, d.name, d.sector))
+            print("%-24s %-10s %-30s %s" % (c, d.name, d.kit_id, d.sector))
         return
     use_version(args.version, Path(args.out) if args.out else None)
-    manifest = build(clean=not args.no_clean, force=args.force, businesses=args.business)
+    manifest = build(clean=not args.no_clean, force=args.force, businesses=args.business,
+                     kit_id=args.kit_id, kit_name=args.kit_name)
     print(json.dumps({"status": "generated", "version": args.version,
+                      "kit_id": KIT_ID, "kit_name": KIT_NAME,
                       "businesses": [b.code for b in BUSINESSES],
                       "kit_root": str(KIT_ROOT),
                       "dataset_count": manifest["dataset_count"],

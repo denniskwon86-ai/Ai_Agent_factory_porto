@@ -22,6 +22,12 @@ class Smelting(BusinessDef):
     name = "제련·정련"
     sector = "B:금속>비철금속>제련·정련"
 
+    kit_id = "KIT-MFG-SMELTING-NONFERROUS"
+    kit_name = "비철 제련·정련 업무키트"
+    #: ★ **제련사는 금속 가격으로 벌지 않는다.** 가격은 헤지로 중립화하고
+    #:   제련수수료(TC/RC)·회수율·부산물이 손익을 가른다.
+    use_case = "정광 구매에서 제련수수료·회수율·부산물까지"
+
     legal_entity = ("org-afs-metals", "AFS_METALS", "AFS 메탈 주식회사")
     shared = ("org-afs-metals-shared", "METALS_SHARED", "AFS 메탈 전사공통")
     division = ("org-afs-smelting-bu", "SMELTING_BU", "제련사업부")

@@ -32,6 +32,12 @@ class BatteryMaterials(BusinessDef):
     name = "전지소재"
     sector = "B:전자·정밀>전지·전원부품>전지소재"
 
+    kit_id = "KIT-MFG-BATTERY-MATERIALS"
+    kit_name = "전지소재(황산니켈) 업무키트"
+    #: ★ 양극재사 규격을 통과하지 못하면 도금용·촉매용으로 훨씬 싸게 나간다 —
+    #:   **품질과 인증이 손익을 가른다.**
+    use_case = "원료 확보에서 배터리급 품질·고객 인증까지"
+
     legal_entity = ("org-afs-advanced", "AFS_ADVANCED", "AFS 첨단소재 주식회사")
     shared = ("org-afs-advanced-shared", "ADV_SHARED", "AFS 첨단소재 전사공통")
     division = ("org-afs-battery-bu", "BATTERY_BU", "배터리소재사업부")

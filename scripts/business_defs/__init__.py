@@ -52,8 +52,22 @@ class BusinessDef:
     #: `B1 3단`에 대응한다 — 분류의 「공정·형태」가 곧 사업의 단위다
     code: str = ""
     name: str = ""
-    #: 필드 확장이 붙는 좌표 (`FieldExtension.scope`)
+    #: 필드 확장이 붙는 좌표 (`FieldExtension.scope`). **분류와 잇는 열이기도 하다**
     sector: str = ""
+
+    # ── 키트 정체성 — 이 사업 **하나로** 키트를 낼 때
+    #
+    # ⚠️ 이것이 없으면 전지소재만 뽑아도 manifest 가 `KIT-MFG-NONFERROUS-PROCUREMENT`
+    #   (비철 조달 키트)로 나온다. 데이터는 전지소재인데 이름표가 제련인 것이고,
+    #   그대로 선반에 올리면 **켐코에 「비철 조달 키트」를 주는 셈**이다.
+
+    #: 키트 식별자. **유도하지 않고 명시한다** — `sector` 는 B 축만 담아 A 축(업태)을
+    #: 알 수 없고, 조합일 때는 어차피 규칙이 없다
+    kit_id: str = ""
+    #: 사람이 고르는 이름. **카탈로그에 뜬다** — 지금은 그 자리에 회사 이름이 뜬다
+    kit_name: str = ""
+    #: 이 사업의 **손익이 무엇으로 정해지는가**. manifest 의 `primary_use_case`
+    use_case: str = ""
 
     #: 조직 — (법인, 사업부, 공장). 각 항목은 (node_id, code, name)
     legal_entity: Tuple[str, str, str] = ("", "", "")
@@ -295,6 +309,33 @@ def sale_qty_scale_of(defs: Sequence[BusinessDef], material_id: str) -> float:
         if material_id in d.sale_qty_scale:
             return d.sale_qty_scale[material_id]
     return 1.0
+
+
+def kit_identity(defs: Sequence[BusinessDef], kit_id: str = "", kit_name: str = "",
+                 use_case: str = "") -> Tuple[str, str, str]:
+    """`(kit_id, kit_name, use_case)`. **사업이 여럿이면 이름을 명시해야 한다.**
+
+    | 경우 | 어떻게 |
+    |---|---|
+    | 사업 1 개 | 그 사업의 셋. 비어 있으면 **거부** — 이름 없는 키트가 조용히 나온다 |
+    | 여럿 | `kit_id`·`kit_name` 을 받아야 한다 — **자동으로 붙일 옳은 이름이 없다** |
+
+    ⚠️ 「제련+전지소재」에 어떤 이름을 붙일지는 **사람이 정할 일**이다. 앞 사업 것을
+      쓰거나 이어 붙이면 그럴듯한 오답이 나온다.
+    """
+    if kit_id and kit_name:
+        return kit_id, kit_name, use_case or " · ".join(
+            d.use_case for d in defs if d.use_case)
+    if len(defs) == 1:
+        d = defs[0]
+        if not (d.kit_id and d.kit_name):
+            raise SystemExit(
+                f"{d.code} 에 kit_id·kit_name 이 없습니다 — "
+                f"scripts/business_defs/{d.code}.py 에 적으십시오.")
+        return d.kit_id, d.kit_name, use_case or d.use_case
+    raise SystemExit(
+        "사업이 여럿이면 키트 이름을 명시해야 합니다 — `--kit-id` 와 `--kit-name` 을 "
+        f"주십시오 (지금 사업: {', '.join(d.code for d in defs)}).")
 
 
 def grade_of(defs: Sequence[BusinessDef], material_id: str) -> str:
