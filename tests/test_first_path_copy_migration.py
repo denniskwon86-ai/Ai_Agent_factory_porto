@@ -222,6 +222,65 @@ def test_the_operational_data_dir_is_refused(tmp_path):
     assert not (mig._OPERATIONAL / "p051_should_not_exist").exists()
 
 
+# ═══ ③-b [CR-P05-1] 출력 경로의 링크 — **진짜 junction 으로** ════════════
+#   ⚠️ 처음에는 «입력만» 막고 출력을 열어 뒀다. `resolve()` 는 링크를 풀어 원래 모양을
+#     지우므로, 지정된 경로가 junction 이어도 통과했고 뒤이어 mkdir·설치 도구가 그
+#     링크 너머에 썼다. 한쪽 문만 막고 반대편을 안 본 것이다.
+#   ⚠️ mock·문자열 검사로 대체하지 않는다. 실제 junction 을 만들어 누른다.
+def _make_junction(link: "os.PathLike", target: "os.PathLike") -> bool:
+    try:
+        import _winapi
+    except ImportError:
+        return False
+    if not hasattr(_winapi, "CreateJunction"):
+        return False
+    _winapi.CreateJunction(str(target), str(link))
+    return True
+
+
+@pytest.mark.parametrize("where", ["target-itself", "parent"])
+def test_a_real_junction_on_the_output_path_is_refused(tmp_path, where):
+    """★★ [CR-P05-1] 출력 «자체» 든 **상위** 든 링크면 적용 전에 거절한다."""
+    root = _synthetic_source(tmp_path)
+    source_db = root / "data" / "enterprise_context.db"
+    bundle, key, _ = _backup(root)
+    source_before, bundle_before = _sha(source_db), _sha(bundle)
+
+    actual = tmp_path / "actual_target"
+    actual.mkdir()
+    if where == "target-itself":
+        link = tmp_path / "link_target"
+        if not _make_junction(link, actual):
+            pytest.skip("이 플랫폼에서 junction 을 만들 수 없습니다")
+        requested = link
+    else:
+        link_parent = tmp_path / "link_parent"
+        if not _make_junction(link_parent, actual):
+            pytest.skip("이 플랫폼에서 junction 을 만들 수 없습니다")
+        requested = link_parent / "new_target"
+
+    #: 링크가 실제로 만들어졌는지부터 본다 — 계측기가 맞는지 먼저 증명한다.
+    probe = requested if where == "target-itself" else requested.parent
+    assert probe.is_junction() or probe.is_symlink(), "junction 이 안 만들어졌다"
+
+    with pytest.raises(mig.MigrationRefused):
+        mig.run(bundle, key, requested)
+
+    #: 거절 뒤 — 실제 대상에 **새 파일 0**, 원본·번들 불변.
+    assert list(actual.iterdir()) == [], f"링크 너머에 썼다: {list(actual.iterdir())}"
+    assert _sha(source_db) == source_before
+    assert _sha(bundle) == bundle_before
+
+
+def test_an_ordinary_new_path_still_works(tmp_path):
+    """★ 음성 대조 — 링크 검사가 **평범한 새 경로까지** 막으면 도구가 못 쓰게 된다."""
+    root = _synthetic_source(tmp_path)
+    bundle, key, _ = _backup(root)
+    deep = tmp_path / "a" / "b" / "c" / "migrated"
+    assert mig.run(bundle, key, deep)["ok"] is True
+    assert (deep / "migration_report.json").is_file()
+
+
 # ═══ ④ 실패 주입 — 원본도 기존 대상도 그대로 ═══════════════════════════
 def test_a_mid_migration_failure_leaves_everything_as_it_was(tmp_path, monkeypatch):
     """★★ 중단·충돌 시 **부분 산출물을 ready 로 표시하지 않는다.**

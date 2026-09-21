@@ -2419,3 +2419,13 @@ export_snapshot(합성루트) → file_count 1 · database_count 1
 `scripts/data_migration.py` 는 **실행도 import 도 하지 않습니다**(import 만으로 실제 `data/`
 를 만들고 Chroma 경로가 따로 있어 이번 사본 이관 도구가 아닙니다).
 커밋·푸시는 이번 지시 범위 밖입니다. 다른 세션 변경 보존합니다.
+
+> 🔧 **변이 구간 시작** 16:49 — `core/db/managed_schema.py`·`scripts/install_first_db_schema.py`
+>   이 구간에는 소스 해시가 잠시 달라집니다. 검토 실행은 이 표시가 사라진 뒤에 해 주십시오.
+>
+> ✅ **변이 구간 종료** — 소스 원복 해시 일치 확인.
+
+> 🔧 **변이 구간 종료** 2026-09-22 00:4x — 위 16:49 구간을 포함해 이 세션의 모든 변이를
+>   원복했습니다. 해시 일치 확인: `core/db/__init__.py` `6ab379c0…d756e5`,
+>   `ops_control/db_target.py` `f5a4ccb9…4758`, `ops_control/deploy_ledger.py` `5c11688f…bc0c`.
+>   **지금 소스는 안정 상태이며 검토 실행이 가능합니다.**

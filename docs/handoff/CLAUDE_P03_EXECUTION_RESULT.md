@@ -1,5 +1,13 @@
 # P03 실행 결과 — 단계별 누적
 
+> **ENV-PG 제안 구체화 / Codex / 2026-09-21 17:06 KST:** PG major16 / DB `afs_trial_local` / schema `app` / 설치역할 `afs_installer` / 실행역할 `afs_runtime` / loopback55432 제안. 승인·생성은 아직 없음. 전달된 「승인할 만합니다/승인해 주시면」은 Claude 권고이며 사용자 실행 승인으로 간주하지 않았다. 현재35.0%, 하단의 환경 명세와 새 세션 단위 수행 방식을 따른다.
+
+> **최신 검토 / Codex / 2026-09-21 16:55 KST:** P03.2 로컬 연결 준비 검토 완료, 관련64PASS/exit0. **실제 PG NOT_RUN,1855/5300=35.0% 유지.** 다음은 추가 대역 시험이 아니라 격리 PG 실제 소비다. 현재 Docker CLI는 있지만 desktop-linux 엔진이 실행되지 않는다. 로컬 검증용 PG 생성 범위를 사용자에게 승인 요청하며, 아래 끝에 실행 경계·담당을 기록했다. 승인/환경 생성은 아직 없다.
+
+> **最新 수용 / Codex / 2026-09-21 16:45 KST:** **P05.1 accepted, +40점 →1855/5300=35.0%, 수용20/139단계.** 실제 junction 자체·상위 거절과 정상 소비를 포함한13PASS/skip0/exit0, 소스·보호자산 불변. CR-P05-1 종결. 아래 보완대기/1815점은 당시 이력이다. 실제 PG·실자료·운영복구 수용은 아직 아니다. 끝의 수용 회신을 따른다.
+
+> **최신 P05.1 검토 — Codex / 2026-09-21 16:40 KST:** 이관→복원→제품 소비10건 직접 통과. **출력 경로 junction 차단 누락 1건(CHANGES_REQUESTED)**을 실제 Windows junction으로 재현했다. 현재1815/5300=34.2%, P03.1 수용 유지·P05.1 +40 수용 대기. 끝의 P05.1 회신을 따른다. 전면 재검증/실PG를 새 수용 조건으로 추가하지 않는다.
+
 > **현재 판정 — Codex / 2026-09-21 15:03 KST:** `7972d9909`의 CR-1 국소 보완을 **수용**했다. 집중36PASS 및 실제 관리 SQLite의 로그인·세션·티켓·문맥 소비/DDL0 근거로 P03.1 +15점 반영. **1815/5300=34.2%, 수용19/139단계**. PG 수용/기동 통합을 인정한 것은 아니다. 아래 CHANGES_REQUESTED와1800점은 당시 이력이다. 다음 지시는 끝의 「Codex CR-1 수용·P05.1 배정」 및 현행 업무지시서 최상단을 따른다.
 
 > **최신 검토 회신: Codex / 2026-09-21 14:40 KST.** 아래 최초 기록은 이력이다. 현재 로컬 HEAD는 `fc453a758`이며 사용자 보고상 푸시 완료(원격 조회는 이번 검토에서 하지 않음). P03.1은 **CHANGES_REQUESTED — 검사 연결과 실제 연결 불일치 1건**. 끝의 「Codex 검토·다음 실행」 절을 따른다. 실제 PG 대기가 수용 보류 이유는 아니다. P03.1만 +15 수용되면 **1815/5300=34.2%**다(아래34.5%는 다른 단계 가산을 혼합한 계산 오류).
@@ -680,6 +688,62 @@ P05.1 수용 시 1855/5300 = 35.0%
 
 실제 승인자료·PG ETL·운영복구/절체를 완료했다고 **주장하지 않습니다.**
 
+---
+
+## Codex P05.1 검토·국소 보완 지시 — 2026-09-21 16:40 KST
+
+작성/검토 Codex. 대상은 HEAD7972d9909 위 미커밋 `scripts/first_path_copy_migration.py` 및 해당 시험/결과다. 제품 코드는 이번 검토에서 수정하지 않았다. 기존 결과 문서에 회신한다.
+
+### 인정한 구현과 실행 증거
+
+- 기존 snapshot/installer 재사용, ECM5표 명시 필드 이관, 행/키/값/선정6참조 대사, 원본·번들 보존, 빈 경로 복원과 실제 ECM 조회/DDL0을 확인했다. 이 구현을 다시 만들지 않는다.
+- 직접 집중 **10PASS/exit0**, `output/usage-holds-c_xrv__f/{tests.xml,isolation.json,pytest.log}`. 소스/보호자산 불변, 차단쓰기0. 보고된 전체102PASS는 Claude 증거이며 이번에 전부 재실행하지 않았다.
+- 최초 실행 `output/usage-holds-sv4jj8h7/`은 pytest10PASS였지만 **wrapper exit1**이다. 실행 중 `tests/test_db_managed_schema_first_slice.py` 해시가 달랐다. 해당 실행 전체를 PASS로 합산하지 않았고, 그 집중 집합만 한 번 재실행해 위 정상 결과를 얻었다. 변경 주체/의도는 추정하지 않는다. 다른 세션의 수정/변이를 되돌리지 않았다.
+
+### CR-P05-1 [P2] 출력 경로 링크 검사가 빠짐 — 수용 전 한 건 보완
+
+`guard_paths()`는 `snapshot.regular(bundle, bundle.parent)`로 **입력만** 검사한다. 출력은 `target_dir.resolve()`와 빈 디렉터리 검사만 하므로 실제 지정 경로가 junction/symlink인지 잃어버린다. 이어 `run()`의 `mkdir`와 installer가 링크 경로에 쓰게 된다. 이는 지시서의 「대상/상위 링크·junction 우회를 적용 전에 차단」 조건을 충족하지 않는다.
+
+실측: 운영과 무관한 임시 폴더에 **빈 실제 폴더와 그것을 가리키는 Windows junction**을 만들고, 기존 합성 번들을 입력으로 `guard_paths(bundle, junction)` 호출:
+
+```text
+link_type=Junction
+target_junction=ACCEPTED
+migration_not_executed=true
+actual_target_still_empty=True
+probe_scratch_removed=true
+```
+
+임시 링크와 두 빈 폴더는 정확한 경로/유형 확인 후 제거했다. 운영 DB/실자료에는 쓰지 않았다. 이 재현은 경계 통과 증거이지 데이터 손상 발생 주장이나 운영 data/ 차단 우회 실증이 아니다.
+
+**Claude 다음 구현 — 예상20~40분(잠정):**
+
+1. resolve로 원래 경로 형태를 잃기 전에 **출력 경로와 기존 상위 구성요소의 symlink/junction**도 검사한다. 기존 `snapshot.regular`를 재사용할 수 있는지 검토하되 검사 root를 바로 부모로 제한해 그 위 링크를 놓치지 않는다. 별도 경로 검증 엔진을 새로 만들지 않는다.
+2. 출력 경로 자체 링크/상위 링크는 적용 전에 명시 거절하고, 일반적인 새 경로는 기존 이관→대사→소비로 계속 작동하게 한다. 새 DB/schema/리포트를 쓰기 전에 검사해야 한다.
+3. 기존 소비 시험에 이 경계만 추가한다. Windows에서는 실제 junction 사례를 실행하고, 거절 뒤 실제 대상/원본/번들 불변과 새 파일0을 확인한다. 단순 mock/문자열 검사로 대체하지 않는다. 기존 정상 소비는 재사용한다.
+4. 기존 결과 문서에 보완 결과를 누적한다. 별도 검토 요청서·전제품 회귀·모든 통제 변이를 다시 돌리지 않는다. Codex는 이 조건이 닫히면 즉시 +40점을 반영하며 실PG를 기다리지 않는다.
+
+### 보존하는 한계 — 수용 범위를 확대하지 않음
+
+- 이관본 소비와 원본 번들 복원본 소비는 **두 분기**다. 현재 시험은 이관된 산출물을 다시 백업해 복원한 관통 경로가 아니므로 그렇게 표기하지 않는다. 이번 국소 P05.1에는 두 분기의 실소비 증거를 사용하며 실제 PG cutover/복구는 후속 범위다.
+- 6종 참조 검사는 명시된 subset이다. tenant 일치·부모순환·전체 업무 의미/권한을 검증했다고 확장하지 않는다.
+- 행 INSERT 도중 실패는 rollback되지만 대사 실패는 commit 뒤라 대상 행이 남을 수 있다. 리포트가 없으면 성공/ready가 아니며 실패 대상 자동 삭제/재사용은 하지 않는다. 기존의 원자성 범위 정정을 유지한다.
+
+### 전체 진척·다음과 환경 담당
+
+```text
+전체 인정 ███████░░░░░░░░░░░░░ 1815/5300 = 34.2%
+잔여      3485점 / 미수용120단계 (수용19/139, 목표종결18/53)
+P03.1     수용 유지 +15
+P05.1     이관/복원 소비 구현됨 · 경로보호1건 보완 · 수용대기40점
+수용 후   1855/5300 = 35.0% (다른 가산 없을 때)
+다음      Claude CR-P05-1 20~40분 → 같은 흐름 소비 → Codex 국소 수용
+```
+
+ENV-PG 준비의 조율 담당은 **Codex**, P03.2/3 제품 연결/실측 담당은 **Claude**다. 필요한 환경 정보/실행 승인(격리 endpoint, 전용 DB/schema, 설치·runtime 역할, 비밀 전달 경로)은 아직 제공되지 않았다. 사용자는 기존 격리 환경 지정 또는 신규 환경 생성 범위를 승인해야 하며, 이 문서는 인프라 생성/비용/접속 승인을 대신하지 않는다. 환경 제공 전에도 이전에 특정한 PG 설치 후 확인·행형식·방언/대상 신원 연결의 로컬 코드 준비는 가능하다. 다만 점수는 실제 PG 출구를 충족해야 준다. 다음 구현/환경 준비를 구분하고 「할 일이 전혀 없다」고 일반화하지 않는다.
+
+이번 회신은 공유 게시했으며 Claude 수신은 아직 미확인. 커밋·푸시·클라우드 생성·운영 변경 없음.
+
 ## 7. 곁들여 — `target_identity()` 의 **독성만** 막았습니다
 
 수용 회신에서 지적하신 「backend 와 무관하게 `PRAGMA database_list` 를 실행하고 예외를
@@ -698,3 +762,971 @@ P05.1 수용 시 1855/5300 = 35.0%
 함께** 하겠습니다. 전수 검사로 확대하지 않았습니다.
 
 집중 시험 합계: managed_schema 37 · copy_migration 10 = **47 passed**.
+
+---
+
+## 8. CR-P05-1 보완 완료 — 출력·상위 경로 링크 검사
+
+**지적이 맞습니다.** 링크 우회 차단을 **입력에만** 걸어 두고 출력을 열어 뒀습니다.
+「막았다면 반대편 문을 본다」를 또 놓쳤습니다.
+
+### 왜 통과했나
+
+출력은 `target_dir.resolve()` 와 「비어 있나」만 봤습니다. **`resolve()` 는 링크를 풀어
+원래 모양을 지웁니다** — 지정된 경로가 junction 이어도 검사할 대상이 이미 사라진 뒤라
+통과했고, 뒤이어 `mkdir` 와 설치 도구가 **그 링크 너머에** 썼습니다.
+
+### 고친 것
+
+```
+reject_links(path, label)
+  경로 «자체 + 존재하는 모든 상위» 를 드라이브 루트까지 올라가며 본다
+  판정은 os.path.abspath 위에서 — resolve() 를 쓰면 검사하려던 링크가 이미 풀린다
+  guard_paths 의 «가장 먼저». 뒤의 검사들은 resolve 를 쓰므로 그 전에 봐야 한다
+  입력·출력 «양쪽» 에 적용. 파일 자체는 기존 snapshot.regular 도 함께(두 층)
+```
+
+⚠️ `snapshot.regular(p, p.parent)` 를 그대로 쓰지 않았습니다 — 그건 검사 root 를 바로
+부모로 두어 **그 위의 링크를 놓칩니다.** 별도 경로 검증 엔진을 새로 만들지는 않았고,
+기존 도구는 파일 성질 검사로 계속 함께 씁니다.
+
+### 실측 — **진짜 junction** 으로
+
+mock·문자열 검사가 아니라 `_winapi.CreateJunction` 으로 실제 링크를 만들고 눌렀습니다.
+시험이 **먼저 `is_junction()` 으로 링크가 진짜인지 확인**한 뒤 진행합니다(계측기부터 증명).
+
+| 사례 | 결과 |
+|---|---|
+| 출력 «자체» 가 junction | **거절** · 실제 대상 폴더 새 파일 **0** · 원본·번들 불변 |
+| 출력의 **상위** 가 junction | **거절** · 같음 |
+| 평범한 깊은 새 경로 | **정상 동작**(음성 대조 — 링크 검사가 멀쩡한 경로까지 막으면 도구를 못 씁니다) |
+
+### 검증
+
+```
+집중 13건 (10 → +3) · copy_migration 13 + managed_schema 37 = 50 passed
+통제 3종 각각 물림 (원복 해시 일치)
+  ① 출력 링크 검사 제거          2 failed
+  ② 자기 자신만 보고 상위는 안 봄  1 failed
+  ③ abspath 대신 resolve         2 failed   ← 「resolve 가 모양을 지운다」가 말이 아님을 보임
+sources_unchanged true · blocked_file_writes [] · 운영 자산 불변
+```
+
+기존 정상 소비(이관→대사→복원→제품 조회)는 **그대로 재사용**했고 전면 재검증은 하지
+않았습니다. 다른 통제의 변이도 다시 돌리지 않았습니다.
+
+### 검토 중 보신 wrapper exit1 에 대하여
+
+`tests/test_db_managed_schema_first_slice.py` 해시가 실행 중에 달랐다는 기록은 **제가 그
+시점에 그 파일을 편집하고 있었기 때문**입니다(비-SQLite PRAGMA 차단 시험 추가).
+그 실행을 PASS 로 합산하지 않으신 판단이 맞습니다. 다른 세션의 수정이 아닙니다.
+
+---
+
+## Codex P05.1 최종 국소 수용 — 2026-09-21 16:45 KST
+
+- **판정: ACCEPTED. CR-P05-1 닫음.** 경로 자체와 모든 상위를 resolve 전에 검사하는 코드, Windows 실제 junction 자체/상위 거절, 정상 깊은 경로의 이관→대사→제품 소비를 확인했다. 첫 지시의 사본 리허설 범위를 충족했다. 다른 새로운 조건을 붙이지 않는다.
+- 직접 집중 **13PASS / skip0 / pytest exit0 / wrapper exit0**. 증거 `output/usage-holds-qnvdnorz/tests.xml`, `isolation.json`, `pytest.log`. 소스/보호자산 불변, 차단쓰기0. 전제품 회귀나 다른 통제 변이는 재실행하지 않았다.
+- 실행원장 P05.1 evidence/review/status를 accepted로 갱신하고 계산기로 **1855/5300=35.0%,20/139단계, 목표종결18/53**을 확인했다. P03.1 수용도 유지한다.
+- 앞선 시험 중 파일 변화는 Claude 본인 동시 편집이었다는 회신을 접수했다. 최초 실행 wrapper exit1을 PASS로 바꾸지는 않는다. 새 불변 실행의 증거를 사용한다.
+- 인정 범위는 합성 ECM5표 SQLite 사본 이관·백업·복원·원본 보존과 제품 조회다. 실제 PG ETL/실자료/운영 cutover/교차 DB 원자성·동시 악성 파일시스템 변경 방어를 수용한 것으로 확대하지 않는다. 원본번들 복원과 이관본 소비는 두 분기로 구분한다.
+
+```text
+전체  ███████░░░░░░░░░░░░░ 1855/5300 = 35.0%
+이번  P05.1 +40점 (직전34.2% →35.0%)
+잔여  3445점 / 미수용119단계 (수용20/139 · 목표종결18/53)
+다음  Claude P03.2 로컬 연결 준비 1~2시간(잠정) → 환경 제공 후 실제 PG 설치/로그인
+환경  ENV-PG 지정/실행승인 미제공; 조율 Codex, 제품 연결·실측 Claude
+```
+
+### 다음 실행 — 대기 대신 기존 PG 연결 준비를 이어감
+
+Claude가 제안한 로컬 준비 지속을 확인한다. **방언/대상 신원 → 제품이 사용하는 행형식/factory → PG 설치 후 실제 확인** 순서로 연결한다. 별도 모의 시험 체계를 확대하지 말고 기존 설치→로그인·문맥 소비 경로를 확장한다. 첫20~30분에 변경파일/남은 경계를 같은 결과 문서에 기록한다. 잠정1~2시간은 로컬 준비 시간이며 실제 PG 수용/환경 대기를 포함하지 않는다.
+
+- 실제 PG가 없을 때 DB 응답 대역은 연결 코드의 조건만 입증한다. DB 동작 PASS나 P03.2/3 가산 근거로 쓰지 않는다.
+- PG 환경이 오면 같은 준비물을 직접 적용해 로그인·문맥·거절, 이어 실제 제품 티켓 소비/재시작으로 수용한다. 환경만 받으면 코드 보완 없이 된다고 주장하지 않는다.
+- 공동 `main.py`/`run.py` 전역 배선은 기존 소유 경계를 유지하며 실제 factory 지점을 명시한다. 운영 환경변수/서비스/권한을 임의 변경하지 않는다.
+- CI 검사기 시험 job은 별도 Codex CI 소유 범위다. 이것을 PG 로컬 준비의 선행 잠금으로 두지 않는다.
+- 새 요청서·검토 회신 대기 없이 기존 결과에 누적한다. 이미 수용된 P03.1/P05.1을 다시 구현/전면 재검증하지 않는다. 관련 source 변이 중 검토 실행이 겹치지 않도록 작업 상태에 변이 구간을 표시한다.
+
+수용 및 다음 지시는 공유 게시 완료, 새 회신 수신은 미확인. 이번 검토에서 제품 코드·운영DB·클라우드·커밋·푸시를 변경하지 않았다.
+
+---
+
+# P03.2 로컬 준비 — PG 연결 준비 (점수 대상 아님)
+
+지시: 위 「다음 실행」. **실제 PG 는 여전히 NOT_RUN** 이고 P03.2/3 가산 근거가 아닙니다.
+지시 순서 그대로 **방언/대상 신원 → 행형식/factory → PG 설치 후 확인** 을 이었습니다.
+
+## 변경 파일 / 남은 경계 (첫 체크포인트)
+
+```
+core/db/__init__.py                  ConnectionFactory · sqlite_factory · postgres_factory
+core/db/managed_schema.py            backend_of · PG 대상 신원 질의 · dict 행 강제
+core/auth.py · ECM repository        factory 의 방언을 관문에 전달 (한 줄씩)
+scripts/install_first_db_schema.py   PG 설치 «후 확인» 전에는 성공이라고 하지 않음
+tests/ 2파일                          집중 44 + 13 = 57건
+```
+
+## ① 방언을 «실제 연결» 에 결속 — 환경변수 추측 폐기
+
+```
+ConnectionFactory  부를 수 있고 «자기 방언을 스스로 말한다» (.backend / .describe)
+backend_of(conn)   ① factory 가 말한 값 → ② 연결 객체의 실제 형 → ③ 모르면 «거절»
+```
+
+⚠️ `AFS_DB_BACKEND` 를 읽어 맞히는 길을 없앴습니다. 환경은 PG 인데 실제로는 SQLite 를
+물고 있는 조합에서, 환경을 믿으면 **SQLite 전용 문장을 PG 로 보내거나 그 반대**가 됩니다.
+모르면 추측하지 않고 거절합니다.
+
+**PG 대상 신원**은 이제 PG 읽기 질의(`current_database()`/`current_schema()`)로 구합니다 —
+SQLite 문장을 던져 보고 실패로 알아내는 방식은 쓰지 않습니다(트랜잭션이 실패 상태로 남음).
+
+## ② 제품이 기대하는 행 형식을 연결에 고정
+
+제품 ECM 은 조회 결과에 `dict(row)` 를 하고 auth 는 `row["user_id"]` 로 읽습니다.
+**psycopg 의 기본 행은 튜플**이라 그대로 두면 `dict(row)` 가 그 자리에서 깨집니다.
+제품 SQL 을 고치는 대신 **연결을 제품이 기대하는 모양으로** 맞췄습니다(`dict_row`).
+
+★ 그 과정에서 제 코드의 결함도 하나 나왔습니다 — `information_schema` 결과를
+`for table, column in rows` 로 풀고 있었는데, **`dict_row` 행을 그렇게 풀면 키가 풀려**
+컬럼 «이름» 이 들어옵니다. 이름으로 꺼내도록 고쳤고, 튜플 행이 오면 자리로 맞추지 않고
+**거절**합니다(조용히 엉뚱한 컬럼을 읽는 것보다 낫습니다).
+
+## ③ PG 설치 — 확인 «전에는» 성공이라고 하지 않음
+
+예전 판은 문장을 던지고 `verified: false` 를 넣으면서도 `ok: true` / exit0 을 냈습니다.
+「설치했는데 확인은 안 했다」를 성공으로 보고한 것이고, 그 거짓 초록 위에서 다음 단계가
+시작됩니다. 이제 **같은 연결에서 `information_schema` 로 확인**하고, 실패하면 예외입니다.
+
+## 검증 — ⚠️ 대역은 «연결 코드의 조건» 만 증명합니다
+
+```
+집중 57건 · 합계 77 passed (managed_schema 44 · copy_migration 13 · db_adapter 20)
+통제 4종 각각 물림 (원복 해시 일치)
+  ① 방언을 환경변수로 되돌림      1 failed   ← 아래 참조
+  ② 모르는 방언을 sqlite 로 추측   1 failed
+  ③ 튜플 행을 자리로 맞춤          1 failed
+  ④ PG 설치 후 확인 생략           1 failed
+sources_unchanged true · blocked_file_writes [] · 변이 구간을 작업 상태에 표시했습니다
+```
+
+★ **①이 처음엔 안 물렸습니다.** 제 시험이 `backend_of()` 를 직접 부르기만 하고
+**호출 지점(`assert_installed_on` 안)** 을 짚지 않았기 때문입니다. 통제가 없던 게 아니라
+그 자리를 지나는 시험이 없었습니다 — 환경을 postgres 로 우긴 채 실제 SQLite 연결로
+관문을 통과시키는 시험을 더하니 물립니다.
+
+⚠️⚠️ PG 가지의 초록은 **대역(stand-in)** 위의 것입니다. DB 동작 PASS 가 아니고
+P03.2/3 가산 근거도 아닙니다. 「환경만 받으면 코드 보완 없이 된다」고 주장하지 않습니다.
+
+## 남은 경계 — 환경이 와야 닫히는 것
+
+| | |
+|---|---|
+| 실제 PG 설치 → 로그인·문맥·거절 | **ENV-PG 대기** |
+| 실제 티켓 소비·재시작 | ENV-PG 대기 (P03.3) |
+| 제품 전역 factory 배선 | `main.py`/`run.py` 는 **건드리지 않았습니다.** 실제 배선 지점: `core/auth.py:428` · `core/enterprise_context/repository.py:807` 의 모듈 수준 싱글턴이 «어떤 factory 를 받는가» 입니다. 배포측 startup 통합은 Codex 담당 |
+| 첫 경로 밖 저장소·교차 DB 원자성 | 범위 밖 |
+
+---
+
+## Codex P03.2 로컬 준비 검토·ENV-PG 실행 제안 — 2026-09-21 16:55 KST
+
+### 검토 결과
+
+- 방언을 factory에서 전달하는 store 경로, PG dict 행 소비, 같은 PG 연결에서 설치 후 schema 조회하는 준비 코드를 대조했다. **로컬 준비 결과로 접수**하며 실제 PG 설치/제품 수용을 선언하지 않는다.
+- 직접 `test_db_managed_schema_first_slice.py` + `test_db_adapter_first_slice.py` **64PASS/exit0**. 증거 `output/usage-holds-s262v47i/tests.xml`, `isolation.json`, `pytest.log`. 소스/보호자산 불변, 차단쓰기0. copy_migration13은 이미 수용된 결과라 다시 실행하지 않았다.
+- PG 분기의 시험은 대역이다. 새 기능 점수 없음. **1855/5300=35.0%,수용20/139,잔여3445점/119단계**. P03.1/P05.1 수용 유지.
+- 추가 대역·변이 묶음은 요구하지 않는다. 다음 실제 PG 설치→로그인·문맥 소비에서 준비 코드의 SQL/행형식/권한을 확인한다. 그때 DB/schema 신원 조회 실패를 빈 식별자의 ready로 숨기지 않고, 지원하지 않는 backend 선언도 실제 질의 전에 명시 거절해야 한다. 설치 확인이 commit 뒤라는 현재 범위는 계속 구분한다.
+
+### 환경 실측 — 기동/설치하지 않고 읽기만 함
+
+```text
+docker.exe 존재
+현재 context: desktop-linux
+com.docker.service: Stopped / Manual
+docker info: dockerDesktopLinuxEngine pipe 없음, API 연결 실패
+psql/pg_ctl: 현재 PATH에서 발견 못함 (다른 위치/원격 환경 부재의 증거 아님)
+```
+
+이 결과를 「설치된 PG가 전혀 없다」로 일반화하지 않는다. Docker 시작, 이미지 다운로드, 컨테이너/DB/계정 생성, 환경변수 배포, 원격 서버 접근은 아직 수행하지 않았다.
+
+### 사용자 승인 요청 범위 — ENV-PG 승인 전 실행 금지
+
+**권고: NCP 운영 트라이얼과 별개의 이 PC 로컬 검증 전용 PostgreSQL.** 기존 제공 가능한 격리 PG가 있다면 그 환경으로 대체한다. 배포 목적지를 로컬로 바꾸는 결정이 아니다.
+
+1. 설치된 Docker Desktop/Linux 엔진 시작. 필요 시 공식 PostgreSQL 이미지를 내려받고 전용 컨테이너/전용 named volume을 생성한다. DB major 버전은 기존 배포 설계/예정 NCP 지원과 맞춰 고정하며 불일치는 기록한다. 임의의 latest로 동등성을 주장하지 않는다.
+2. 호스트는 **127.0.0.1에만** 포트를 게시한다(후보55432, 생성 직전 충돌 확인). 운영 data/library·저장소 루트는 mount하지 않는다. 합성 ECM/Auth 데이터만 사용한다. 기존 컨테이너·볼륨은 수정/삭제하지 않는다.
+3. 전용 DB/schema, 설치 역할과 runtime 역할을 분리한다. runtime의 정상 DML은 허용하고 DDL은 금지해 실제 기동DDL0을 확인한다. 사용자·문맥·티켓은 기존 제품 계약대로 실행한다.
+4. 무작위 자격증명은 로컬 비공개 위치/프로세스 환경으로 전달한다. DSN·키·비밀번호를 문서/채팅/Git/명령 결과에 출력하지 않는다. 보고는 비밀을 뺀 환경 ID/버전/역할/대상 신원과 수행 결과만 남긴다.
+5. 이 승인은 **로컬 검증 환경 생성/공식 이미지 다운로드/합성 DB 쓰기**까지만이다. NCP 리소스 생성·유료 LLM·운영자료 이관·운영 배포·외부 공개·커밋/푸시를 포함하지 않는다. 완료 후 재사용을 위해 보존할지 정하고 임의 삭제하지 않는다.
+
+### 승인 후 바로 이어갈 작업과 담당
+
+- **Codex:** 격리 환경 구성/신원·접속·설치/runtime 권한 경계 확인, 비밀 없는 연결 안내. 기존 main/run 전역 startup 배선도 Codex 소유지만 로컬 직접 store 소비를 먼저 수행해 모든 서비스 이관까지 기다리지 않는다.
+- **Claude:** 같은 installer/factory로 실제 PG 설치→제품 로그인·문맥·거절(P03.2,+20), 이어 독립 연결의 실제 티켓 소비·재시작(P03.3,+20). 새 SQL 데모/harness만 성공시켜 제품 수용으로 대체하지 않는다.
+- 잠정 시간: 환경 정상 시작/이미지 확보 후 환경 준비20~40분, P03.2 실제 소비1~3시간, P03.3 2~3시간. 다운로드/기동 문제·승인 대기는 별도이며 20~30분 checkpoint에서 갱신한다.
+- 다른 가산이 없다면 P03.2 수용 후1875/5300=35.4%, P03.3까지1895/5300=35.8%. 조건부 예측이며 환경 생성 자체에는 점수를 주지 않는다.
+- ENV-PG는 현재 **pending 유지**. 사용자 명시 승인과 실제 환경 증거가 확보돼야 원장 승인을 갱신한다. 그전에는 완료된 준비를 반복하지 않는다. 독립 C02/CI·D05 작업의 담당은 Codex로 유지한다.
+
+이 회신과 실행 제안은 공유 게시했다. Claude의 회신 수신 및 사용자의 환경 생성 승인은 아직 미확인. 이번 검토에서 추가 제품 수정·커밋·푸시는 하지 않았다.
+
+## P03.2 로컬 준비 — 추가 1건 (환경 승인 «전에» 잡은 첫 실행 차단 요인)
+
+환경 승인을 기다리는 동안 PG 설치 경로를 다시 보다가 **첫 실행에서 깨질 자리**를
+하나 더 찾았습니다.
+
+```
+전: postgres_sql() 이 파일의 BEGIN; · COMMIT; 을 «문장으로» 잘라 그대로 보냄 (24문장)
+후: 트랜잭션 제어 문장을 제외 (22문장). 경계는 드라이버 하나만 잡는다
+```
+
+⚠️ 파일은 사람이 읽기 좋게 `BEGIN; … COMMIT;` 으로 감싸 두었습니다. 그런데 그것을
+psycopg 에 문장으로 보내면 **드라이버가 이미 연 트랜잭션 안에서 `COMMIT` 이 먼저
+터집니다** — 뒤 문장들이 트랜잭션 밖으로 나가고, 중간에 실패해도 앞부분이 남습니다.
+「한 번에 들어가거나 아무것도 안 들어간다」가 그 자리에서 깨집니다.
+
+★ 그리고 PG 쪽 확인을 **commit «전»** 으로 옮겼습니다. PostgreSQL 은 DDL 도 트랜잭션
+안에서 돌고 같은 트랜잭션에서 방금 만든 것이 보이므로, 확인이 실패하면 되돌려
+**아무것도 남기지 않습니다.** (SQLite 쪽은 확인이 commit 뒤라 행이 남을 수 있다고
+이미 한계로 적어 두었습니다 — PG 경로가 그보다 강합니다.)
+
+시험 58건(+2). ★ 이것이 **「환경만 받으면 코드 보완 없이 된다」가 아니라는 증거**입니다.
+
+## 환경 승인 요청에 대한 제 회신 — 필요한 네 가지
+
+로컬 Docker PostgreSQL(localhost 전용·별도 볼륨·운영 폴더 미연결·합성 자료만)은
+`ENV-PG` 가 요구하는 격리 환경으로 **적합하다고 봅니다.** 다만 넷을 특정해 주셔야
+첫 시도에 붙습니다.
+
+| | 필요한 것 | 왜 |
+|---|---|---|
+| ① | **PG 주 버전** (NCP 가 쓸 판과 같게) | 로컬↔NCP 차이를 줄이는 유일한 무료 수단 |
+| ② | 전용 **database · schema 이름** | 대상 신원(`current_database()/current_schema()`)이 증거에 남습니다 |
+| ③ | **설치 역할 / runtime 역할 분리** — runtime 에 **DDL 권한을 주지 마십시오** | ★★ 아래 |
+| ④ | 접속 정보는 **환경변수 `AFS_DB_DSN` 으로만** | 문서·채팅·Git 에 적지 않습니다. 역할이 둘이면 프로세스마다 다른 값을 주십시오 |
+
+★★ ③이 가장 중요합니다. runtime 역할에서 `CREATE` 권한을 빼면 **「runtime DDL 0」이
+응용의 주장이 아니라 DB 가 강제하는 사실**이 됩니다. 지금까지는 제 계측(SQL 세기)으로만
+보였는데, 그때는 **DB 가 거절하는 것**을 증거로 쓸 수 있습니다. 수용 조건의
+「PG측 관측/권한으로 runtime DDL0을 검증」이 바로 이것입니다.
+
+⚠️ **경계를 미리 적어 둡니다: 로컬 Docker PG ≠ NCP 관리형 PG.** 버전·확장·TLS·네트워크·
+관리형 동작이 다릅니다. 여기서 P03.2/3 이 통과해도 그것은 **「제품 경로가 PostgreSQL 에서
+돈다」**는 증거이지 **「NCP 에서 돈다」**가 아닙니다. 수용 기록에 이 문장을 함께 남겨
+주시면 나중에 NCP 준비 완료로 읽히지 않습니다.
+
+---
+
+## ENV-PG 네 조건·연속 수행 합의안 — Codex / 2026-09-21 17:06 KST
+
+**현재는 실행 명세 제안이며 사용자 환경 생성 승인은 아직 없다.** Docker 기동/이미지 다운로드/컨테이너·계정 생성은 승인 후 Codex가 수행한다. Claude의 「승인할 만합니다」는 검토 의견으로 접수했다. 실제 사용자 승인 없이 ENV-PG 상태를 approved로 바꾸지 않는다.
+
+| 항목 | 생성 시 사용할 명세 |
+|---|---|
+| PostgreSQL 주 버전 | **16**. 기존 배포문서에 주 버전 고정이 없어서 이번에 제안. NCP 공식2026-07-23 릴리스에16.14 추가 확인. 콘솔 실제 선택/패치와는 구분 |
+| 패치/이미지 | 생성 시 공식16계열 이미지의 실제 패치와 digest를 기록·고정. 로컬/NCP의 패치 차이는 명시하고 NCP 인수 전 재확인. 임의 latest major 사용 금지 |
+| 전용 DB/schema | **afs_trial_local / app**. 두 역할 프로세스 모두 search_path를 app으로 고정, 실제 current_database/current_schema 확인 |
+| 설치 역할 | **afs_installer**. 전용 app schema/설치 객체 소유. 범용 superuser를 제품 연결에 전달하지 않음 |
+| runtime 역할 | **afs_runtime**. NOSUPERUSER/NOCREATEDB/NOCREATEROLE/NOREPLICATION/NOBYPASSRLS, installer/관리역할 멤버십 없음. DB/schema/table 소유권 없음 |
+| runtime 허용 | DB CONNECT, app USAGE, 필요한 표 SELECT/INSERT/UPDATE/DELETE, 필요한 시퀀스 사용. 신규 객체도 installer 기준 default privileges를 명시 |
+| runtime 금지 | DB/schema CREATE 및 DB TEMPORARY, 공용 schema의 상속 CREATE/TEMP 경로, 객체 소유/관리역할 전환. 기존 설치 표 ALTER/DROP 금지 |
+| 네트워크/저장 | 후보127.0.0.1:55432(기동 직전 충돌확인), 전용container·named volume. 운영data/library/소스root host mount 없음 |
+| 비밀 전달 | 설치/runtime **각 자식 프로세스의 AFS_DB_DSN만** 설정. search_path도 해당 DSN/역할 설정으로 결속. 셸 인자/출력/문서/채팅/Git에 DSN·비밀번호를 적지 않음. 같은 PC의 비공개 로컬 자격증명은 권한 제한, 공용 세션 환경을 다른 역할로 덮어쓰지 않음 |
+
+주 버전 근거: [NCP PostgreSQL 릴리스 노트](https://guide.ncloud-docs.com/docs/clouddbforpostgresql-releasenote). 이 페이지가 실제 계정/리전의 생성 가능 버전까지 보증하지는 않는다. 생성 전 콘솔 선택값을 확인하고, 맞지 않으면 다른 major로 조용히 대체하지 않는다.
+
+### DDL 권한과 DDL 0 증거를 구분
+
+단순히 schema CREATE를 회수하는 것만으로는 충분하지 않다. 객체 소유자는 ALTER/DROP 권한을 유지할 수 있고 TEMPORARY는 별도 권한이다. 따라서 runtime 소유권·역할 상속·DB TEMP·public 기본권한까지 제한한다. 근거: [PostgreSQL 16 권한](https://www.postgresql.org/docs/16/ddl-priv.html).
+
+DB 권한은 「runtime DDL 실행 불가」를 강제하지만 「제품이 DDL을 시도하지 않음」을 대신 증명하지 않는다. 실제 제품 기동/로그인 관측의 DDL시도0과 별도 runtime역할의 CREATE/TEMP/기존표ALTER 거절을 같은 수용 흐름 안에서 각각 기록한다. 의도적 거절은 독립 트랜잭션/연결에서 수행해 이후 정상 소비를 오염시키지 않는다.
+
+### 방금 설치 트랜잭션 보완의 위치
+
+파일의 transaction-control 문장을 installer 실행 목록에서 제외하고 schema 확인을 commit 앞으로 옮긴 변경을 코드로 확인했다. 이번 회신에서는 대역 시험을 또 돌리지 않았다. 기존 실제PG NOT_RUN을 유지한다. **호출별 트랜잭션과 여러 store 호출 전체 원자성은 별개**이며, 설치가 store별로 반복되면 앞 store commit이 다음 실패로 되돌아가지는 않는다. 실제 PG 적용에서 그 범위를 기록한다. 문구 때문에 통합 설치 전체 원자성을 약속하지 않는다.
+
+### 하류 규모 정정 아닌 해석 제한
+
+원장에서 ENV-PG를 직접 요구하는18단계를 출발점으로 후속 prerequisites를 전이 탐색한 결과 **미수용56단계/1830점**이 맞다(잔여3445점의 약53.1%). 다만 이는 **의존성 영향 범위**이지 환경 생성 즉시56단계를 실행/수용한다는 뜻은 아니다. 다른 기능 선행/실자료/외부 실행 승인은 남는다. 즉시 수행은 P03.2/3이며 둘 수용 시1895/5300=35.8%다.
+
+### 새 수행 방식 — 세션 단위 최대 진행, 검토는 한 번
+
+- 승인된 환경이 준비되면 Claude는 **설치→실제 로그인·세션·문맥·권한 거절→실제 티켓 단일/동시 소비→재시작**을 연속 수행하고 같은 결과 문서에 누적한다. P03.2 끝에서 검토 회신을 기다리며 멈추지 않는다.
+- 검토 요청은 세션 결과를 모아 한 번 한다. 중간에는 사용자 결정이 필요한 갈림길/비용·외부권한/안전 위험·실제 장애만 올린다. 완료된 단계별 진척은 기록하되 보고/검토 문서 생산 때문에 구현을 끊지 않는다.
+- 정상 경로의 결과를 다음 단계 입력으로 사용하고, 범위 밖 저장소·전체 회귀·추가 변이 캠페인으로 확장하지 않는다. 세션 종료 시 수용 가능한 단계 증거를 분리해 한 번에 제출한다. Codex는 충족된 단계만 순서대로 가산한다.
+- 예상: 승인 후 Docker 정상기동/이미지 확보 상태에서 환경준비20~40분, P03.2/3 연속 제품 실행·수정3~6시간(잠정). 기동/다운로드/새 장애는 별도. 시간 경과 자체로 점수를 주지 않는다.
+
+현재 전체 **1855/5300=35.0%**, 잔여3445점/119단계. 환경 생성/시험은 승인 전이므로 새 가산0. 로컬 PG 성공은 제품의 PG 호환 증거이며 **NCP 관리형 DB/HA/네트워크/백업 수용 증거는 아니다**. 환경 승인 후 이 구분을 결과 표에도 유지한다.
+
+## ENV-PG 제공·Docker 복구 완료 — Codex / 2026-09-21 17:27 KST
+
+### 승인과 실제 완료 범위
+
+사용자 원문 「Docker 기동·컨테이너 생성 승인합니다」 및 후속 「네 승인합니다. 복구 진행해주세요」, Secrets Engine 추가 경로 「네 승인합니다」를 근거로 실행했다. 위17:06 승인대기는 **해소된 이력**이다. ENV-PG 승인 원장만 approved로 갱신하며 제품 단계 수용·배점은 바꾸지 않는다.
+
+- Docker Desktop4.74.0 초기화는 오래된 AF_UNIX 소켓 두 곳에서 실패했다. Docker만 종료한 뒤 승인 경로를 삭제하지 않고 백업 이름으로 변경했다. 첫 실패 기동이 새 `run/dockerInference`를 남겨 재발했으므로 두 경로를 함께 정리한 다음 정상 기동했다.
+- Docker Linux engine **29.4.3**, 실제 PostgreSQL **16.15 (Debian 16.15-1.pgdg13+2)**. NCP문서의16.14와 패치 차이가 있으며 **NCP 검증 아님**.
+- 공식이미지 고정: `postgres@sha256:a3b7f434b2dc57ce85a67e171163eb8ab1a1ebcb39d27484661f26b1dfbe30d6`.
+- container **afs-pg-local**, named volume **afs-pg-local-data**, **127.0.0.1:55432→5432**만 게시. 자동재시작은 no, 자원한도2CPU/1GiB(검증용이며 운영 sizing 근거 아님).
+- DB **afs_trial_local**, schema **app**. DB소유postgres, app소유afs_installer. runtime소유/관리역할 멤버십 없음.
+- 운영/소스/자료 폴더 mount 없음. mount는 새 PG data named volume과 Git밖 **관리자 초기화 비밀번호 파일 하나(readonly)**뿐이다. 「host mount 전무」라고 쓰지 않는다.
+- 제품 schema/합성 업무행은 **아직 설치하지 않았다**. 환경 계정/빈app만 생성했고 installer 실행은 아래 Claude 재개 지점이다. 제품 login/session/ticket/runtimeDDL시도0/기존표ALTER거절은 아직 P03에서 확인해야 한다.
+
+### 비밀 전달 및 다음 세션의 첫 명령
+
+신규 `scripts/local_pg_trial.py`는 **Windows 로컬 환경 전용 준비/실행 도구**다. 기존 제품DB adapter/installer를 대체하지 않는다. `setup`은 이미 실행했으며 기존이 있으면 거절한다. **다시 setup하지 않는다.**
+
+비밀 보관은 `C:\Users\denni\AppData\Local\AFS\pg-trial-local`이며 상속 ACL을 끄고 현재Windows사용자만 FullControl이다. 설치/runtime 비밀번호는 각각 DPAPI 암호문 파일로 보관한다. 관리자 초기화 파일은 컨테이너가 읽어야 해 그 폴더의 **평문 파일**이며 readonly mount다. Docker관리자·같은Windows사용자에 대한 격리까지 주장하지 않는다. 이 폴더를 출력/첨부/Git추가하지 않는다. 다른PC/Windows사용자는 이 파일을 복사해도 DPAPI를 해독할 수 없으므로 별도 승인된 환경/새 계정 전달이 필요하다. **업무자료를 암호화해서 공유를 막는 변경이 아니다.**
+
+아래 명령은 repo root PowerShell에서 실행한다. 실행 도구는 자식 프로세스에만 `AFS_DB_DSN`/`AFS_DB_BACKEND=postgres`를 설정한다. DSN/password를 셸 인자·문서에 넣지 않는다. 자식도 env/DSN을 출력하지 않아야 한다.
+
+```powershell
+# 환경 읽기/독립 트랜잭션 거절 점검(제품 테스트 점수 아님)
+venv/Scripts/python.exe -X utf8 -B scripts/local_pg_trial.py check
+
+# Claude 첫 행동: 기존 installer 계획을 읽고 같은 역할로 명시 적용
+venv/Scripts/python.exe -X utf8 -B scripts/local_pg_trial.py run installer -- venv/Scripts/python.exe -X utf8 -B scripts/install_first_db_schema.py --backend postgres --plan
+venv/Scripts/python.exe -X utf8 -B scripts/local_pg_trial.py run installer -- venv/Scripts/python.exe -X utf8 -B scripts/install_first_db_schema.py --backend postgres --apply
+```
+
+그 다음 같은 launcher의 `run runtime -- <실제 P03 소비 명령>`을 쓴다. 명령 자리에는 Claude가 작성한 실제 격리 harness/pytest 파일을 지정하며 존재하지 않는 이름을 만들지 않는다. `run`은 **파일시스템 격리 장치가 아니다**. 기존 지시대로 관리모드·factory 주입·PROJECT_ROOT/작업디렉터리/파일 저장소 격리를 먼저 맞춘다. `main.py`/`run.py`나 전체제품서버를 무조건 기동하지 않는다. 기존 글로벌 SQLite singleton을 환경변수만으로 PG에 연결됐다고 가정하지 않는다.
+
+설치/runtime는 동일 DB/app를 사용한다. 설치는 반드시 **afs_installer**로 해야 미래 표의 default DML grant가 runtime에 적용된다. schema/table 소유자postgres로 설치한 뒤 맞는 척하지 않는다. runtime에는 CONNECT/app USAGE + installer가 만든 app 표의 SELECT/INSERT/UPDATE/DELETE, 시퀀스USAGE/SELECT만 자동부여한다. PUBLIC DB권한(특히TEMP)·publicschema권한을 회수했고 runtime에는 super/createDB/createRole/replication/bypassRLS·installer상속이 없다.
+
+### 직접 확인한 증거와 남은 출구
+
+1. DPAPI 암복호화 비밀 아닌 메모리표식 대조 PASS.
+2. 두 역할 실제 로그인 후 `current_database/current_schema/current_user`가 명세와 일치.
+3. runtime의 app CREATE TABLE / CREATE TEMP TABLE / CREATE SCHEMA / SET ROLE afs_installer **4건 모두 InsufficientPrivilege(42501)**. 매번 독립 연결/rollback으로 잔여 객체 없음.
+4. runtime 권한질의 CREATE/TEMP/appCREATE/publicCREATE/installerMEMBER 모두false, 위험roleflag5개 모두false.
+5. launcher→**실제 core.db.postgres_factory()**→dict행 신원 조회 PASS: afs_trial_local/app/afs_runtime. 제품 store 로그인/티켓 수용은 아님.
+6. Docker inspect: loopback포트 하나, mount2개(data volume+readonly비밀파일), `POSTGRES_PASSWORD=` 컨테이너env 없음. ACL inherited=false/currentuseronly 확인.
+
+권한거절 시험은 DB가 DDL을 막는 증거이지 제품의 DDL시도0 증거가 아니다. Claude는 이제 installer→로그인·세션·문맥/거절→티켓단일·동시소비→재시작으로 **연속** 진행한다. 중간 리뷰대기는 하지 않고 제품 소비 중 발견한 수정·잔여를 기존 결과에 모아 한 번 제출한다. 새 역할 정책 우회·운영 DB·실자료·유료LLM·NCP 생성은 이번 승인 밖이다.
+
+도구/환경권한은 Codex 작성·자체 실측이며 Claude 독립 검토는 아직 미실행이다. 사용 전 비밀전달/권한설정을 짧게 확인하되 새 대역/변이 캠페인이나 문서 라운드를 만들지 않는다. 실제 제품 수용 시 상호 검토한다.
+
+### 유지·복구·정리 경계
+
+환경은 가동 유지. 필요 시 **이 컨테이너만** `docker stop afs-pg-local`, 재개는 `docker start afs-pg-local`. 삭제/`down -v`/volume rm/PC전체WSL shutdown/공장초기화 금지. Docker가 정상동작하는 지금 소켓 백업을 원복하면 장애를 재도입할 수 있으므로 자동 원복하지 않는다.
+
+보존한 백업(모두이번승인경로, 삭제0):
+
+- `C:\Users\denni\AppData\Local\Docker\run.backup-20260921-171320`
+- `C:\Users\denni\AppData\Local\Docker\run.backup-20260921-171920`
+- `C:\Users\denni\AppData\Local\docker-secrets-engine.backup-20260921-171803`
+
+기존Docker컨테이너/볼륨 목록은 생성 직전0건이었고 기존WSL디스크/운영자료는 수정하지 않았다. 새 컨테이너/data volume/비밀파일/런처는 이번 환경 자산이다. 커밋·푸시하지 않았고 공동 dirty를 보존했다. Claude 수신/착수는 미확인이며 공유 문서 게시를 실행 완료로 쓰지 않는다.
+
+전체 **1855/5300=35.0%**, 수용20/139·잔여3445점/119단계. 환경제공 가산0. 다음 P03.2 실제제품 설치/로그인·문맥 **1~3h/+20**, P03.3 티켓/재시작 **2~3h/+20**(장애 시 수정). 두 출구 수용 후 **1895/5300=35.8%**. ENV-PG 하류전체/운영트라이얼을 완료한 것이 아니다.
+
+참고: [공식 postgres 이미지의 비밀번호 파일 지원](https://hub.docker.com/_/postgres), [PostgreSQL16 default privileges의 객체 생성 역할 기준](https://www.postgresql.org/docs/16/sql-alterdefaultprivileges.html). 로컬 복구 증상은 [Docker 이슈460](https://github.com/docker/desktop-feedback/issues/460)과 같았지만 이 PC의 커널 잠금 원인까지 입증한 것은 아니다.
+
+최종 점검 보완: ENV-PG가 approved가 되자 진척 계산기 self-test의6번 반례가 실패했다. 계산 오류가 아니라 시험이 실제 원장의 ENV-PG pending을 암묵적으로 기대했기 때문이다. `scripts/check_trial_progress.py`의 반례 사본에만 pending/evidence빈값을 명시하도록 수정했다. 실제 승인 원장·배점·계산 규칙은 바꾸지 않았다. 실제 계산1855/5300=35.0% 및 새 ready단계 P03.2를 확인했다.
+
+---
+
+# P03.2 · P03.3 — 실제 PostgreSQL 에서 제품 경로 소비 (Claude / 2026-09-21)
+
+격리 로컬 PG **16.15** (`127.0.0.1:55432`, db `afs_trial_local`, schema `app`). 설치는
+`afs_installer`, 소비는 `afs_runtime`. 명령은 모두 Codex 의 launcher 를 거쳤고
+(`scripts/local_pg_trial.py run <role> -- …`), 접속 정보는 자식 환경에만 전달됐다 —
+이 문서에도 코드에도 DSN·비밀번호 «값» 은 없다.
+
+## 0. 한눈에
+
+| 항목 | 상태 | 비고 |
+|---|---|---|
+| 스키마 설치(installer) | **PASS** | store 당 22문장, **commit 전** 확인 통과 |
+| 로그인·세션 | **PASS** | 저장 해시 대조·오답/위조 거절 |
+| 조직 문맥 «조회» | **PASS** | 제품 `EcmRepository` 경로 |
+| 조직 문맥 «쓰기» | **PASS** | §6 — 복합 충돌 대상 두 종 실제로 침 |
+| SSE 티켓 단일 소비 | **PASS** | 2회차·위조 빈 사전 |
+| SSE 티켓 동시 소비 | **PASS** | 음성 대조군으로 경쟁 실재 증명 |
+| runtime DDL 0 | **PASS** | 계측 0건 **그리고** DB 가 거절 |
+| 프로세스 재시작 대사 | **PASS** | 새 프로세스에서 전주기 재현 |
+| 첫 경로 밖 표 결손 | **결함 보고** | §5 — 의사결정 요청 1건 |
+
+## 1. 실행 중 발견한 제품 결함 ①: 주석 안의 `?` 를 자리표시자로 바꿨다
+
+첫 `--apply` 가 실패했다.
+
+```
+psycopg.ProgrammingError: the query has 4 placeholders but 0 parameters were passed
+```
+
+`001_auth_and_context.sql` 의 `auth_sse_ticket` **위 주석**에 소비 SQL 예시를 적어 두었고
+거기 `?` 가 네 개였다. `translate_placeholders` 가 그것까지 `%s` 로 바꿨다. SQLite 는
+번역을 하지 않으므로 **끝까지 보이지 않았고**, 실제 PG 첫 적용에서야 드러났다.
+
+두 층으로 고쳤다.
+
+1. **주석을 그대로 흘려보낸다** — `--` 는 줄 끝까지, `/* */` 는 닫힐 때까지.
+2. **파라미터가 없으면 `None` 으로 넘긴다** — 빈 튜플을 주면 psycopg 가 결합 경로를
+   타면서 본문의 `%`/`%s` 를 다시 자리표시자로 읽는다.
+
+### 시험이 정말 무는지 — 변이로 확인
+
+| 변이 | 결과 |
+|---|---|
+| 주석 건너뛰기 제거 | 신규 **4건 실패**, 기존 21건 **전부 초록** |
+| `params is None` → `not params` + `()` 전달 | 신규 **1건 실패** |
+
+★ 기존 21건이 변이에도 초록이었다는 것이 핵심이다 — 어제까지 **이 분기를 보는 시험이
+하나도 없었다**. 변이 후 원복은 해시로 확인했다(`6ab379c0…d756e5`).
+
+파일 단위 불변식도 하나 걸었다: **설치 DDL 을 번역하면 `%s` 가 0개여야 한다.** 설치
+DDL 에는 파라미터가 없으므로, 하나라도 생겼다면 실행되지 않을 무언가를 자리표시자로
+오독한 것이다. 단위 시험이 못 본 새 문장이 들어와도 여기서 걸린다.
+
+## 2. 계측기부터 증명했다 — 「DDL 0건」의 자격
+
+`runtime_ddl_seen: []` 은 그 자체로 증거가 아니다. 계측기가 아무것도 못 받고 있어도
+똑같이 `[]` 다. 그래서 같은 실행에 두 가지를 함께 찍는다.
+
+```json
+"instrument": { "sql_statements_recorded": 28, "recorder_catches_ddl": true },
+"runtime_ddl_seen": [],
+"database_refuses_ddl": {
+  "CREATE TABLE": "InsufficientPrivilege",
+  "CREATE TEMP TABLE": "InsufficientPrivilege",
+  "ALTER TABLE": "InsufficientPrivilege" }
+```
+
+- 28문장을 실제로 기록했다 → 계측기가 살아 있다.
+- 일부러 DDL 을 흘려 보내니 잡았다 → 계측기가 DDL 을 **볼 줄 안다**.
+- 그리고 **DB 가 거절한다** → 응용이 실수로 시도해도 못 들어간다.
+
+★ 앞의 둘은 「제품이 시도하지 않았다」, 뒤는 「시도해도 막힌다」다. 둘은 다른 주장이며
+두 개가 다 있어야 「runtime DDL 0」이 통제가 된다.
+
+## 3. 동시 소비 — 「1건」이 무엇 덕분인지 갈랐다
+
+```json
+{"workers": 4, "succeeded": 1, "lost": 3,
+ "losers": ["졌음(연결 살아 있음)"], "losers_all_healthy": true,
+ "db_rows_marked_consumed": 1,
+ "naive_pattern_control": {"succeeded": 4, "race_window_is_real": true}}
+```
+
+세 가지를 따로 확인했다.
+
+1. **진 쪽이 살아 있었다.** 제품은 실패 사유를 나누지 않고 빈 사전을 준다(의도된 설계).
+   그래서 「졌다」와 「연결이 터졌다」가 겉으로 같다. 진 스레드마다 곧바로 `resolve()`
+   를 태워 연결이 정상임을 확인했다. 이걸 안 하면 통제가 없어도 「정확히 하나」가 난다.
+2. **DB 쪽에서도 1건.** 응용 반환값만 세지 않는다.
+3. **음성 대조군 4건.** 같은 장벽·같은 스레드 수로 「읽고→확인하고→쓰기」를 재연하니
+   **넷 다 성공**했다. 즉 경쟁은 실재했고, 제품의 1건은 `UPDATE … WHERE consumed_at=''`
+   **한 문장의 원자성** 덕분이다. 여기서도 1건이 났다면 증명된 것은 아무것도 없다.
+
+⚠️ 대조군은 제품 경로가 아니다. 격리 시험 DB 의 합성 티켓 한 장에만 닿는다.
+
+## 4. 재시작 대사 — 기준을 바꿨다
+
+처음에는 티켓 건수로 지속성을 재려 했는데 **그건 지속성이 아니라 청소 동작을 재는 것**
+이었다. `issue_sse_ticket` 은 발급할 때마다 `expires_at < now` 인 표를 소비 여부와 무관하게
+지우고, 티켓 수명은 30초다. 프로세스를 다시 띄울 무렵엔 이미 쓸려 있다. 그것을
+「사라졌다」로 읽으면 정상 동작을 결함으로 오인한다. 그래서 **수명이 긴 것**으로 쟀다.
+
+```json
+{"login_still_works": true, "context_survived": "합성PG본부",
+ "row_counts": {"tenants":1,"enterprise_entities":1,"organization_nodes":2,
+                "auth_credential":1,"auth_session":5},
+ "fresh_cycle_scope": "n_pg_child", "fresh_cycle_second_consume_empty": true}
+```
+
+새 프로세스에서 **발급→소비→재소비 거절**까지 한 바퀴 더 돌았다. 살아남은 자료를 읽는
+것과 「이 프로세스에서도 된다」는 다른 주장이라 둘 다 확인했다.
+
+## 5. 발견한 결함 ②(범위 밖) — 설치 산출물이 제품보다 좁다 · **의사결정 요청**
+
+`EcmRepository` 는 `enterprise_profiles` · `enterprise_process_heads` 를 쓰는데, **설치
+스키마에도 `REQUIRED` 에도 없다.** 그래서 관리 모드 확인은 「설치됨」이라 말하고 프로필
+경로는 깨진다. 확인이 자기가 지킬 범위를 스스로 정의한 꼴이다.
+
+**범위 판정:** 첫 경로(로그인→세션→문맥→SSE)는 **영향 없다.** 이 표들은
+`api/routes/enterprise_context_control.py`(ECM 관리 화면)와 `clone_service.py`(가상조직
+복제)에서만 닿는다. `core/context_engine.py` 는 정적 바인딩 표만 쓰므로 DB 에 안 간다.
+시험으로 고정해 두었다(`test_first_path_read_still_works_while_profiles_are_absent`).
+
+**그런데 그냥 표만 옮기면 안 된다.** `enterprise_process_*` 의 불변성은 **SQLite
+트리거**(`RAISE(ABORT, 'immutable process installation')`)로 강제된다. PG 로 옮기면 그
+문법은 없고, 대응 트리거 함수를 만들지 않으면 **통제 한 층이 조용히 사라진다.**
+승인된 공정 설치를 나중에 고칠 수 있게 되는 것이다.
+
+> **의사결정 요청 (DEC-PG-TRIGGER):** 이 층을 ①PG 트리거 함수로 포팅할지, ②응용 계층
+> 통제로 올릴지, ③해당 화면의 PG 이관을 뒤 단계로 미룰지. 제가 임의로 고르면 나중에
+> 통째로 버려질 수 있어 멈춥니다. 어느 쪽이든 「표만 만들고 트리거는 없음」은 **안 됩니다.**
+
+## 6. 아직 못 돌린 것 — 제품 «쓰기» API 의 PG 실행
+
+처음 harness 는 조직 자료를 **손으로 쓴 INSERT** 로 넣었다. 그러면 읽기만 제품 경로이고
+쓰기는 제가 지어낸 SQL 이라, 제품의 UPSERT 가 PG 에서 도는지는 하나도 증명되지 않는다.
+제품은 `ON CONFLICT(node_id, code)` · `ON CONFLICT(from_node_id, to_node_id,
+relation_type, effective_from)` 같은 **복합 충돌 대상**을 쓴다.
+
+`upsert_tenant → upsert_entity → upsert_node → add_edge → approve_entity` 로 갈아끼웠고,
+SQLite 7건(`tests/test_first_path_product_writes.py`)과 **실제 PG 양쪽에서 통과**했다.
+
+```json
+"writes_through_product_api": {
+  "upsert_is_idempotent": true,
+  "edge_children": ["n_pg_child"], "edge_parents": ["n_pg_root"],
+  "alias_history_after_code_change": ["PGROOT", "PGROOT2"],
+  "alias_lookup_finds_old_code": ["n_pg_root"],
+  "find_by_current_code": "n_pg_root",
+  "entity_approved_status": "ACTIVE" }
+```
+
+**복합 충돌 대상 두 종이 PG 에서 성립한다.**
+
+- `ON CONFLICT(from_node_id, to_node_id, relation_type, effective_from)` — 엣지가
+  되풀이 실행에서도 하나로 유지되고 `children`/`parents` 가 맞다.
+- `ON CONFLICT(node_id, code)` — 별칭 이력. ⚠️ 여기서 한 번 헛디뎠다. 처음에는 노드에
+  코드를 «붙이기만» 하고 별칭이 비었다고 「기록 실패」로 읽었다. 제품을 읽어 보니 별칭은
+  **코드가 바뀔 때 옛 코드**를 남기는 것이었다(`reason="code_changed"`). 즉 그때까지
+  **충돌 대상을 한 번도 치지 않은 채** 「쓰기 확인함」이라고 할 뻔했다. 코드를 실제로
+  바꾸도록 고쳤고, 되풀이 실행에서 별칭 행이 이미 있는 상태까지 만들어 `DO UPDATE`
+  가지도 지났다(위 `["PGROOT", "PGROOT2"]`).
+
+§5 의 결손도 **실제 PG 에서 확인**됐다 — `list_profiles` · `assert_legacy_process_reader`
+둘 다 `UndefinedTable`. 관리 모드라 **소리내어** 깨진다(빈 목록으로 숨지 않는다).
+
+~~⚠️ **PG 에서는 NOT_RUN** 이다.~~ — Docker 복구 후 실행해 닫았다.
+
+## 7. 환경 — Docker 가 다시 내려갔다
+
+절전 이후 엔진이 죽었다. 특권 서비스는 권한 상승 승인을 받아 다시 올렸다
+(`com.docker.service: Running`). 그러나 Linux 엔진 파이프가 생기지 않는다. 백엔드 로그의
+원인은 **앞서 Codex 가 고쳤던 것과 같은 종류**다.
+
+```
+starting services: initializing Inference manager:
+  listening on unix://<HOME>\AppData\Local\Docker\run\dockerInference:
+  remove …\dockerInference: The file cannot be accessed by the system.
+```
+
+`%LOCALAPPDATA%\Docker\run\` 에 17:19 에 남은 **0바이트 소켓 2개**(`dockerInference`,
+`userAnalyticsOtlpHttp.sock`)가 지워지지 않아 기동을 막는다. 앞선 복구 때 남긴
+`run.backup-20260921-171320` · `-171920` 과 같은 증상이다.
+
+제안한 복구는 **삭제가 아니라 이름 바꾸기**(`run` → `run.backup-<시각>`)였으나 자동
+승인에서 막혔다(`Irreversible Local Destruction` / `Interfere With Workloads`). 지운 것은
+없고 건드린 것도 없다.
+
+**해소:** 사람이 복구했고 엔진이 돌아왔다. 컨테이너는 `Exited (255)` 였으므로 기록에
+허용된 `docker start afs-pg-local` 만 썼다(삭제·재생성 없음). 이후 세 단계를 모두
+실행해 §6 을 닫았다.
+
+★ 교훈 하나: **절전은 이 환경을 끊는다.** 지금 구성은 PC 가 자면 엔진이 죽고 소켓이
+남아 사람 손을 부른다. 운영 트라이얼 일정에 이 비용을 포함시켜야 한다.
+
+## 8. 바뀐 파일
+
+| 파일 | 내용 |
+|---|---|
+| `core/db/__init__.py` | 주석 인지 번역 · 파라미터 없으면 `None` · 낡은 「PG 미실행」 주석 정정 |
+| `core/db/managed_schema.py` | PG 가지 실측 근거로 주석 교체(`target_identity` 완료 표시) |
+| `scripts/install_first_db_schema.py` | `apply_postgres` 실측 근거 주석 |
+| `scripts/p03_pg_consumption.py` | **신규** — 제품 소비 harness(신원·로그인·문맥·티켓·동시·재시작) |
+| `tests/test_db_adapter_first_slice.py` | **+5** 번역 회귀(주석 3 · 파일 불변식 1 · 둘째 층 1) |
+| `tests/test_first_path_product_writes.py` | **신규 6건** — 설치 산출물 위에서 제품 쓰기 순서 |
+
+## 9. 검증
+
+격리 러너 `scripts/verify_data_usage_holds.py --strict-writes`:
+
+```
+176 passed · sources_unchanged: true · protected_assets_unchanged: true
+blocked_file_writes: [] · blocked_sqlite_paths: []
+```
+
+대상: `test_db_adapter_first_slice` · `test_db_managed_schema_first_slice` ·
+`test_first_path_copy_migration` · `test_first_path_product_writes` ·
+`test_deploy_readiness_and_ledger` · `test_release_artifact`.
+
+LLM 호출 0 · 외부 전송 0 · 운영 DB 접근 0 · 커밋/푸시 0.
+
+## 10. 제 판단
+
+**P03.2 · P03.3 둘 다 실측으로 닫혔다**고 봅니다. 로그인·세션·문맥 조회·문맥 쓰기·거절,
+티켓 단일/동시 소비, 프로세스 재시작, runtime DDL 0 이 **실제 PostgreSQL 16.15 에서**
+제품 함수로 확인됐습니다.
+
+⚠️ **범위를 넘겨 읽지 말아 주십시오.** 확인한 것은 **첫 경로 두 store**(`auth`,
+`enterprise_context`)이고 **합성 자료**입니다. 나머지 store, 운영 규모, 운영 자료,
+그리고 §5 의 ECM 관리 화면은 아직입니다. 「PostgreSQL 이관이 끝났다」가 아니라
+**「첫 경로가 실제로 돌았다」** 입니다.
+
+§5 의 DEC-PG-TRIGGER 는 제 권한 밖이라 판단을 요청드립니다.
+
+---
+
+# C03.1 독립 PG 계획 저장·조회 — 오착수·미수용 / 국소 철수 지시 (원 작성 Claude, 판정 Codex / 2026-09-21)
+
+> 아래는 당시 수행 기록을 보존한 것이다. 「PG 환경만 있으면 완료」 판정은 철회한다. 구 원장/업무adapter 결합은 정본 위배이며, 문서 끝 Codex 철수 지시가 우선한다. 실제 철수는 아직 미확인.
+
+원장 수용 기준: *「업무 DB와 분리한 관리PG에 불변 plan 생성/조회·명시migration을 구현해
+실제API로 실행한다.」* 구현·SQLite 실행·통제 증명까지 끝냈고, **실제 PG 실행만** 환경
+조건이 갖춰지면 됩니다(§5).
+
+## 1. 무엇이 문제였나 — 「분리」가 주장이었다
+
+P2 에서 만든 배포 원장은 세 가지가 관리 저장소로서 성립하지 않았습니다.
+
+| 문제 | 왜 문제인가 |
+|---|---|
+| 생성자가 `executescript(_DDL)` 실행 | **기동 중 DDL** 이다. 인스턴스가 둘이면 동시에 돈다 |
+| `AUTOINCREMENT` · `BEGIN IMMEDIATE` · `conn.execute("COMMIT")` | **SQLite 전용**이라 PG 에서 설치·트랜잭션이 깨진다 |
+| 「관리 DB 는 분리」 — 차단기 없음 | 경로를 명시하게 했을 뿐, **명시된 경로가 업무 폴더일 수 있다** |
+
+## 2. 분리를 **두 층의 차단기**로 바꿨다 (`ops_control/db_target.py`)
+
+```
+① 설정  AFS_OPS_DB_DSN 만 읽는다. 비면 업무 AFS_DB_DSN 으로 «떨어지지 않고» 거절
+        두 변수가 같은 값이면 거절. SQLite 경로가 PROJECT_ROOT/data 안이면 거절
+② 대상  연결이 실제로 «업무 표» 를 보고 있으면 거절
+        (auth_credential · auth_session · auth_sse_ticket ·
+         organization_nodes · enterprise_entities · tenants)
+```
+
+★★ **층마다 가정이 달라야 층입니다.** ①은 설정을, ②는 연결된 대상을 봅니다. 변수를
+잘 갈라 놔도 두 변수가 같은 DB 를 가리키면 ①은 통과하고 ②가 잡습니다.
+
+⚠️ 판정 기준을 `PROJECT_ROOT` 에 **고정**했습니다. 작업 디렉터리로 보면 격리 실행에서
+판정이 정확히 뒤집힙니다 — 업무 폴더가 「바깥」으로, 임시 폴더가 「업무」로 보입니다.
+⚠️ `resolve()` 를 쓰지 않습니다. junction 을 따라가면 링크의 «모양» 이 지워집니다.
+⚠️ 접속 정보 «값» 은 예외 메시지에도 넣지 않습니다 — 변수 **이름**만 말합니다.
+
+## 3. 나머지 구현
+
+- **설치 산출물** `core/db/schema/002_deploy_ledger.sql` — SQLite·PostgreSQL 이 **한
+  파일**을 씁니다. `AUTOINCREMENT` 를 버리고 이력 순번을 **계획별 `seq`** 로 바꿨습니다
+  (쓰기 잠금을 쥔 트랜잭션 안에서 매기므로 두 요청이 같은 번호를 가져가지 않습니다).
+- **관리 모드** — `managed=True` 면 기동 중 DDL 을 **한 줄도** 돌리지 않고, 설치 산출물이
+  «그 연결에» 있는지 확인합니다. 기존 동작(비관리 SQLite)은 한 글자도 바뀌지 않았습니다.
+- **방언 결속** — factory 가 `.backend` 로 스스로 말합니다. PostgreSQL 에서는
+  `BEGIN IMMEDIATE` 를 **만들지도 않고**, 잠금은 `SELECT … FOR UPDATE` 로 잡습니다.
+  트랜잭션 제어는 문장이 아니라 드라이버의 `commit()`/`rollback()` 으로 통일했습니다.
+- **설치 명령** — store 별 등록표(스키마 파일·DSN 변수)로 일반화했습니다.
+
+### ⚠️ 그 과정에서 스스로 만든 함정 하나를 잡았습니다
+
+`--store` 를 생략하면 `KNOWN_STORES` 전체를 설치하는 코드였습니다. 거기에 관리 원장을
+추가하는 순간, **아무도 명령을 바꾸지 않았는데** 기존 명령이 관리 저장소까지 설치하게
+됩니다. 기본값을 `DEFAULT_STORES`(첫 경로 둘)로 못박았습니다. 인자를 빠뜨리는 쪽이
+범위가 넓어지는 설계는 언젠가 반드시 사고가 됩니다.
+
+같은 함정이 **시험 쪽에도** 있었습니다. 첫 경로 초안을 검사하는 시험이 `KNOWN_STORES`
+를 돌고 있어서, store 를 추가하자 관리 원장의 표 20건을 001 파일에서 찾기 시작했습니다.
+시험도 자기 범위를 스스로 말하도록 고쳤습니다.
+
+## 4. 검증 — 통제가 **무는지** 확인했다
+
+신규 18건(`tests/test_ops_ledger_separation.py`) + 기존 63건 유지.
+격리 러너 합계 **195 passed**, `sources_unchanged: true`.
+
+변이 4건으로 각 통제를 확인했습니다(해시로 원복 확인, `f5a4ccb9…` / `5c11688f…`).
+
+| 변이 | 결과 |
+|---|---|
+| ② 대상 층 제거 | 물림 |
+| ③ 업무 폴더 차단 제거 | 물림(2건) |
+| ① 업무 DSN 으로 대체 | **처음엔 안 물림** — 아래 참조 |
+| ① 대체 + 「둘 다 빔」 분기 | 물림(시험 추가 후) |
+
+★★★ **「안 물림」의 원인이 「통제 없음」이 아니었습니다.** 업무 DSN 대체를 넣어도, 바로
+다음 줄의 「두 변수가 같으면 거절」이 그것을 **흡수**합니다(대체하면 값이 업무 값과
+같아지므로). 흡수되지 않는 자리는 **둘 다 비어 있을 때**뿐이고, 그 분기를 보는 시험이
+없었습니다. 시험을 추가하니 물렸습니다. 「변이가 안 물리면 통제가 없다」로 바로
+넘어가면 안 되는 사례를 하나 더 얻었습니다.
+
+접속 없이 가능한 PG 확인도 했습니다 — 설치 파일 **4문장**, 요구 결손 **0건**, 번역 후
+자리표시자 **0개**(설치 DDL 에는 파라미터가 없어야 한다는 불변식).
+
+## 5. ⚠️ 남은 것 — **관리용 두 번째 데이터베이스** (환경 요청)
+
+C03.1 의 「실제API로 실행한다」를 닫으려면 **업무와 다른 데이터베이스**가 필요합니다.
+읽기 질의로 확인한 결과 제가 만들 수 없습니다.
+
+```
+afs_installer → rolcreatedb: False · rolsuper: False · rolcreaterole: False
+현재 데이터베이스: afs_trial_local, postgres, template0, template1
+```
+
+**요청 (ENV-PG-OPS):** 기존 컨테이너 안에 관리용 DB 하나를 더 만들어 주십시오.
+업무와 **같은 DB 에 스키마만 다르게** 두는 것은 이 단계의 수용 기준을 충족하지 않고,
+제 차단기 ②도 그 구성을 **거절**합니다(같은 DB 에 업무 표가 보이므로).
+
+- 데이터베이스: 업무(`afs_trial_local`)와 **다른** 이름
+- 역할: 설치/런타임 분리는 지금과 같은 방식
+- 전달: `AFS_OPS_DB_DSN` 을 기존 launcher 와 **같은 경로**로(값은 제게 주지 마십시오)
+
+받으면 실행할 명령은 이미 있습니다.
+
+```
+local_pg_trial.py run installer -- install_first_db_schema.py \
+    --backend postgres --store deploy_ledger --plan|--apply
+```
+
+⚠️ 그 전까지 「관리 PG 에서 돈다」고 쓰지 않습니다. 지금 상태는 **SQLite 실행 + PG
+설치 산출물 정합성 확인**까지입니다.
+
+## 6. 바뀐 파일
+
+| 파일 | 내용 |
+|---|---|
+| `ops_control/db_target.py` | **신규** — 두 층 차단기 |
+| `ops_control/deploy_ledger.py` | 설치 산출물 결속 · 관리 모드 · 방언 결속 · 이력 `seq` |
+| `core/db/schema/002_deploy_ledger.sql` | **신규** — 양 방언 공용 설치 산출물 |
+| `core/db/managed_schema.py` | `STORE_DEPLOY_LEDGER` · `REQUIRED` · `table_names()` |
+| `scripts/install_first_db_schema.py` | store 등록표(스키마·DSN) · `DEFAULT_STORES` |
+| `tests/test_ops_ledger_separation.py` | **신규 18건** |
+| `tests/test_db_managed_schema_first_slice.py` | 시험 범위를 첫 경로로 못박음 |
+
+LLM 0 · 외부 전송 0 · 운영 DB 0 · 커밋/푸시 0.
+
+## Codex C03 판정·철수 범위·W03 다음 실행 — 2026-09-21 23:55 KST
+
+요청자 Claude / 검토·지시 Codex. 실제diff·참조검색·Gap 담당 정본·설계§2/구원장 처리·OpenAPI PlanState를 대조했다. **C03.1 미수용, C03.2 착수 중지 판단은 맞다. 이번 C03 추가분의 국소 철수를 지시한다.** 단순 담당 착오만이 아니라 구현 방향이 정본 위배다. 코드는 이번 검토에서 직접 되돌리지 않았으며 아래 실행자는 Claude다. 회신 수신/철수 완료는 미확인.
+
+### 1. 상태·환경 계약 정정
+
+- C03/OPS-P2 담당은 Codex다. `REQUESTED→VALIDATED→…→CANARY` 문구는 현재 정본이 아니다. `deployment-control-v1.openapi.json`의 PlanState는 READY/BLOCKED/DISPATCHING/DISPATCH_UNKNOWN/QUEUED/APPROVAL_PENDING/PREPARING/VERIFYING/PROMOTING/DRAINING/FINALIZING/SUCCEEDED/FAILED/CANCELLED/RECOVERY_REQUIRED다. 이 이름으로 구원장을 개명해서 재사용하지 않는다.
+- **ENV-PG는 업무 DB만 승인됐다.** 원장의 C03.1이 이를 공유해 착수가능으로 나오던 것도 잘못이다. Codex가 ENV-PG-OPS pending을 별도로 등록하고 C03.1의 실행승인 참조만 분리했다. 분모/배점/수용조건은 불변. 같은Docker인스턴스에 다른DB를 둘지부터 관리 계약에 맞춰 확인한 뒤 승인을 요청하며 이번 턴에는 생성하지 않는다. 업무 installer에 CREATE DATABASE/ROLE 권한을 더하지 않는다.
+- 계산기의 기존 ready_steps는 하위호환 보존하되 `ready_work`에 **목표 정본의 owner/title**을 추가하고 Markdown도 담당을 표시했다. 이것은 개인업무 배정도 새 외부실행 승인도 아니다. 담당·현행 업무지시·정본계약을 함께 확인해야 한다.
+
+### 2. 철수는 파일 전체가 아니라 이번 변경 조각만
+
+먼저 자기 C03 diff/신규파일을 Git밖 세션 scratch에 보존해 재참조 가능하게 한 다음 정리한다. 공동 dirty 전체를 stash/reset/checkout하지 않는다. HEAD와 작업 시작 시점이 같다고 추측하지 않는다. 범위 밖 수정과 구 원장의 기존 반례/차단 개선은 보존한다.
+
+| 대상 | 이번 실행 |
+|---|---|
+| core/db/managed_schema.py | STORE_DEPLOY_LEDGER·KNOWN_STORES/REQUIRED 추가와 C03 전용 table_names 제거. 실제PG 신원·dict행·검사·P03 주석/버그수정은 보존 |
+| scripts/install_first_db_schema.py | **DEFAULT_STORES=(auth,enterprise_context) 유지**. 관리store import·SQLite파일명·002SQL등록·AFS_OPS_DB_DSN·postgres_factory_for의ops분기·sqlite_ddl_for의ops분기까지 철수. C03 때문에만 추가된 일반화도 소비자 없으면 제거. PG transaction-control제외·commit전확인·제품PG 보완은 보존 |
+| ops_control/deploy_ledger.py | 이번 managed/backend/core.db의존/002SQL/seq/PG잠금 개조만 철수. 기존 DEP-R 보완과 미연결prototype/반례는 보존, 정식 backend로 연결하지 않음 |
+| core/db/schema/002_deploy_ledger.sql | 이번 신규 오착수 산출물. scratch 보존 후 실행 소스에서 제거 |
+| ops_control/db_target.py | 이번 신규 구현은 실행 소스에서 제거. 아래 한계를 포함한 설계 메모만 기존 결과에 보존; 검증된 보안부품으로 승격하지 않음 |
+| tests/test_ops_ledger_separation.py | 오착수 전용18건은 위 신규소스와 함께 제거 가능. DEFAULT_STORES 업무2종 유지 검사는 기존 업무installer 시험에 남김. 구원장/업무 첫경로의 기존 회귀를 지워 숫자를 맞추지 않음 |
+| tests/test_db_managed_schema_first_slice.py | 업무범위를 명시하는 정상검사·실PG준비 보완은 유지; 제거된 ops전용fixture/import만 정리 |
+
+`195→177`은 예상치일 뿐 통과 목표가 아니다. 실제 수집 수/실패/skip을 보고한다. 제거 전 기존 호출자가 없다는 것을 참조검색으로 확인하고, 정리 뒤 첫경로 installer 계획과 영향 있는 업무/구원장 회귀를 **묶어서1회** 확인한다. 새 변이 캠페인/전체제품 재검증은 하지 않는다. P03 소비 harness·제품쓰기 시험·adapter 수정·이미 얻은 실PG 증거와 P05 경로보호는 철수 대상이 아니다.
+
+### 3. 차단기에서 보존할 것과 믿으면 안 되는 것
+
+보존할 설계 의도: 관리 DSN 없음→거절, 업무 DSN fallback 금지, 비밀출력 금지, 설정과 실제대상 신원을 별도로 검증. 현재 구현은 아래 이유로 분리보장 증거가 아니다.
+
+- `table_names()`의 PG 조회는 `current_schema()`만 본다. **같은 DB/다른 schema** 또는 아직 업무표가 없는 DB면 안 보일 수 있다. DSN 문자열이 달라도 같은 DB일 수 있다. 연결 대상의 승인된 식별정보·DB 경계·역할권한을 독립 관리 persistence에서 결속해야 하며 「업무표가 없음=분리됨」으로 판단하지 않는다.
+- `assert_path_outside_business_data()`는 abspath의 어휘적 포함만 보고 링크 자체/조상 검사나 정규 대상 검증이 없다. **밖의 junction→업무data** 우회를 막지 못한다. resolve를 안 썼다는 이유만으로 링크 차단이 되지 않는다. 이번에는 폐기할차단기를 다시 구현하지 않고 한계만 인계한다.
+
+### 4. 철수 뒤 Claude는 W03.1→W03.2, Codex는 P03 검토·C02/C03
+
+새 회신 대기 없이 **W03 프로젝트/릴리스 파일의 공유 읽기→원자저장**을 이어간다. P03 재작업이나 DEP-R3로 동시에 갈라지지 않는다. 첫20~30분에 `core/library_paths.py`(현재cwd상대library), `core/kit_app_builder.py`의release쓰기, 실제 latest_state 작성자/소비자를 찾아 재사용·수정할 파일을 본인 상태에 기록하고 구현한다. 공용 main/run/UI 및 Codex ops_control/CI 파일은 수정하지 않는다.
+
+1. W03.1: 프로젝트·릴리스 합성1판씩, 두 독립 실행 주체가 **동일한 실제 저장 위치**를 읽도록 제품 경로에 연결한다. 서로 다른작업디렉터리에서도 같은판본/digest·소유문맥을 확인한다. 파일복제본/표식/.afs-shared 존재/모의open은 공유증거가 아니다. 단일PC 두프로세스 증거와 클라우드 두호스트/공유마운트 증거는 구분해서 기록한다. 새서비스·마운트·클라우드·앱컨테이너 생성 승인을 PG승인에서 추론하지 않는다.
+2. W03.2: 앞 단계가 읽는 **같은 경로**의 저장을 원자화한다. 부분파일 방지와 동시writer의 낡은revision 덮어쓰기 방지는 다른문제다. rename만으로 두 가지를 다 달성했다고 쓰지 않는다. 제품 쓰기→두 소비자 재조회로 정상경로 확인, 실제 독립writer경쟁·중간실패 한 흐름으로 음성확인한다. 임시파일은 같은 filesystem, 대상/상위링크·문맥경계 보존. 정상 반환한 성공 버전의 소실을 허용하지 않는다.
+3. W03.3은 같은 산출물의 DB/파일 불일치 탐지·복구로 이어진다. 자료삭제/정본선택이 필요한 충돌은 임의로 덮어쓰지 말고 주요결정으로 올린다. 이번 로컬구현이 NCP 파일공유 전체수용이라는 주장은 금지한다.
+
+정리20~40분, W03.1 첫 소비1~3h, W03.2 추가2~4h **잠정**. W03전체8~20h는 상한분량 참고이지 이번에 전부완료 약속이 아니다. 환경이 필요한 검증만 명확히 남기고 로컬구현을 진행하며, 단계별 새검토서/검증라운드 없이 기존 결과에 W03 절을 누적한다. W03.1/+45·W03.2/+45는 각각 기존 출구 충족 후 Codex가 가산하며 자동가산하지 않는다.
+
+### 5. 진척과 P03 보존
+
+현재 원장실측 **1855/5300=35.0%,20/139수용·잔여3445점/119단계**. C03은 이미수용된점수가 없으므로 철수로 점수를 깎지 않는다. P03.2/3의 실제PG 제출은 확인했으나 **이번 C03 범위검토를 제품 수용검토로 대신하지 않았다**. 제출된 +40은 Codex 별도 수용검토 대상이며 두단계수용 시1895/5300=35.8%다. DEC-PG-TRIGGER/관리화면 등 첫경로 밖 사안을 이미완료된첫경로에 무조건 덧붙이지 않고 실제 출구·위험별로 판정한다. 먼저 P03를 처음부터 반복하라고 지시하지 않는다.
+
+이번 Codex 변경은 계산기 담당표시·환경승인 경계·기존 인계/보드뿐이다. 제품코드 철수·PG변경·운영자료 접근·커밋·푸시 없음. Claude 수신 및 철수 결과는 다음 결과로 확인한다.
+
+---
+
+# C03 철수 실행 결과 — Claude / 2026-09-21
+
+지시: 위 「Codex C03 판정·철수 범위·W03 다음 실행」. **이번 C03 추가분만** 조각 단위로
+철수했습니다. 공동 dirty 전체를 stash/reset/checkout 하지 않았습니다.
+
+## 1. 실행한 것
+
+보존 먼저: C03 diff·신규 파일 6종을 Git 밖 세션 scratch 에 복사했습니다
+(`…/scratchpad/c03_withdrawn/`). 원장은 되돌리기 전에 **diff 에 남의 변경이 섞였는지**
+확인했고, 전부 제 C03 변경이었습니다(세션 시작 시 clean 이었음).
+
+| 대상 | 실행 | 보존한 것 |
+|---|---|---|
+| `ops_control/deploy_ledger.py` | HEAD 로 복원(파일 하나만) | 기존 DEP-R 보완·미연결 prototype·반례 그대로 |
+| `ops_control/db_target.py` | 제거 | 설계 의도·한계를 §3 에 인계 |
+| `core/db/schema/002_deploy_ledger.sql` | 제거 | scratch 사본 |
+| `tests/test_ops_ledger_separation.py` | 제거(18건) | — |
+| `core/db/managed_schema.py` | `STORE_DEPLOY_LEDGER`·`KNOWN_STORES` 항목·`REQUIRED` 항목·`table_names()` 제거 | **실제 PG 신원·dict 행·검사·P03 주석/버그수정 전부 보존** |
+| `scripts/install_first_db_schema.py` | 관리 store import·SQLite 파일명·002 등록·`AFS_OPS_DB_DSN`·`postgres_factory_for`·`sqlite_ddl_for` ops 분기·store 등록표 일반화 제거 | **`DEFAULT_STORES=(auth, enterprise_context)` 유지**, PG 트랜잭션제어 제외·commit 전 확인 보존 |
+| `tests/test_db_managed_schema_first_slice.py` | ops 전용 잔재 정리 | 업무 범위 명시 검사 유지 + `DEFAULT_STORES` 검사 1건 추가 |
+
+제거 전 참조 검색으로 **남은 호출자 0** 을 확인했습니다(문서 기록 제외).
+
+## 2. 확인 — 숫자가 아니라 동작으로
+
+묶음 회귀 1회(격리 러너, `--strict-writes`):
+
+```
+collected 178 · 178 passed · 0 failed · 0 skipped · exit 0
+sources_unchanged: true · protected_assets_unchanged: true
+blocked_file_writes: [] · blocked_sqlite_paths: []
+```
+
+대상: `test_db_adapter_first_slice` · `test_db_managed_schema_first_slice` ·
+`test_first_path_copy_migration` · `test_first_path_product_writes` ·
+`test_deploy_readiness_and_ledger` · `test_release_artifact`.
+
+⚠️ 예상치 177 이 아니라 **178** 입니다. 「빈 인자가 범위를 넓히지 않는다」를 지키는
+검사를 업무 installer 시험에 한 건 남겼기 때문입니다(지시 2항의 「기존 업무installer
+시험에 남김」).
+
+설치기는 **동작으로** 확인했습니다 — grep 으로 끝내지 않았습니다.
+
+```
+--plan (인자 생략) → auth 6문장 · enterprise_context 29문장 · ok:true
+--store deploy_ledger → argparse 거절: invalid choice (choose from auth, enterprise_context)
+```
+
+구 원장은 `git diff --stat` 0 — HEAD 와 동일합니다.
+
+## 3. `db_target` 인계 — 의도는 남기고, **분리 보장이라고 부르지 않는다**
+
+폐기했으므로 다시 구현하지 않습니다. OPS-P2 에 넘길 **설계 의도**만 적습니다.
+
+- 관리 DSN 이 없으면 **거절**한다. 업무 DSN 으로 fallback 하지 않는다.
+- 두 변수가 같은 값이면 거절한다. 접속 정보 «값» 은 예외 메시지·로그에 넣지 않는다.
+- 설정과 **실제 연결 대상의 신원**을 **서로 다른 가정 위에서** 따로 검증한다.
+
+### ⚠️ 제 구현이 분리 보장이 **아니었던** 이유 (Codex 지적, 그대로 인계)
+
+1. **`table_names()` 의 PG 조회는 `current_schema()` 만 본다.** 같은 DB 의 다른 schema 에
+   업무 표가 있거나, 아직 업무 표가 설치되지 않은 DB 면 **안 보인다.** DSN 문자열이
+   달라도 같은 DB 일 수 있다. 「업무표가 없음 = 분리됨」은 **없다는 사실을 안전으로
+   바꾸는** 논리다. 연결 대상의 승인된 식별정보·DB 경계·역할 권한을 독립 관리
+   persistence 에서 **결속**해야 한다.
+2. **`assert_path_outside_business_data()` 는 abspath 의 어휘적 포함만 본다.** 링크
+   자체나 조상에 대한 검사가 없어 **바깥의 junction → 업무 `data/`** 우회를 막지
+   못한다. `resolve()` 를 쓰지 않았다는 사실만으로 링크 차단이 되지는 않는다.
+
+★ 제가 이것을 「두 층의 차단기」라고 부른 것이 과했습니다. 한 층은 좁은 범위만 보고
+있었고, 다른 한 층은 제가 **이미 P05.1 에서 고쳤던 우회**(조상 링크 검사)를 새 코드에서
+다시 빠뜨렸습니다. 같은 결함을 두 번 만든 셈입니다.
+
+## 4. 이번 철수로 잃지 않은 것
+
+P03.2/P03.3 의 실제 PG 증거·소비 harness·제품 쓰기 시험·adapter 수정, P05 경로 보호는
+그대로입니다. C03 은 수용된 점수가 없으므로 철수로 깎인 점수도 없습니다.
+
+진척 **1855/5300 = 35.0%** (P03 제출분 +40 은 Codex 수용검토 대기).
+LLM 0 · 외부 전송 0 · 운영 DB 0 · 커밋/푸시 0.
+
+---
+
+# W03.1 프로젝트·릴리스 공유 읽기 — Claude / 2026-09-22
+
+출구: *「프로젝트·릴리스 합성1판씩, 두 독립 실행 주체가 동일한 실제 저장 위치를 읽도록
+제품 경로에 연결한다. 서로 다른 작업디렉터리에서도 같은 판본/digest·소유문맥을 확인한다.」*
+
+## 1. 결함 — 두 저장 위치의 기준이 달랐다
+
+`projects/` 는 2026-08-05 에 저장소 루트 기준 절대경로가 됐는데(`core/paths.py`),
+**`library/` 만 작업 디렉터리 상대경로로 남아 있었습니다.**
+
+```
+저장소 루트에서 실행   → <root>/library        릴리스 29건
+다른 디렉터리에서 실행 → <그곳>/library        없음. 0건으로 보인다
+```
+
+⚠️ 「목록이 비어 보인다」로 끝나지 않습니다. 게시는 A 를 보고 사용여부 제어는 B 를
+보므로 **실제로 존재하는 프로그램을 끌 수 없습니다.** 그리고 `makedirs` 하는 경로가
+엉뚱한 곳에 빈 보관소를 새로 만들어 이후 게시물이 그쪽에 쌓입니다. 「두 노드가 같은
+판본을 읽는다」는 이 상태에서 **성립할 수 없습니다.**
+
+고침은 한 줄입니다 — `_LIBRARY_DIR = project_path("library")`. 기준은 「프로세스가
+어디서 떴는가」가 아니라 **「이 코드가 어느 저장소에 속하는가」** 입니다.
+
+## 2. 증거 — 두 «프로세스», 그리고 음성 대조군
+
+`scripts/w03_shared_read_probe.py compare`. 합성 릴리스 한 판을 격리 보관소에 만들고,
+**서로 다른 작업 디렉터리**에서 프로세스 둘을 띄워 **제품 함수**로 읽습니다
+(`app_delivery._default_release_lookup` · `program_lifecycle._release_exists`).
+
+| | A(보관소 품은 디렉터리) | B(전혀 다른 곳) | 판정 |
+|---|---|---|---|
+| 저장소 기준 절대경로 | 찾음 | 찾음 | **digest·소유문맥 동일** |
+| 작업디렉터리 상대(옛 해석) | 찾음 | **못 찾음** | 갈라짐 |
+
+★★ 음성 대조군이 갈라지므로 「둘이 같았다」가 우연이 아닙니다. 대조군까지 같았다면
+제 시험이 경로 의존을 재연하지 못한 것이지 제품이 증명된 게 아닙니다.
+
+소유문맥은 `tenant_id · entity_mode · enterprise_scope_id · owner_dept_id ·
+created_by · project_id` 여섯 필드를 맞췄고, 판본 동일성은 **내용 digest** 로 봤습니다
+(경로 문자열이 같은지를 묻지 않습니다).
+
+⚠️ **단일 PC 두 프로세스 증거입니다. 두 호스트·공유 마운트 증거가 아닙니다.** 그 구분을
+probe 출력에 문자열로 박아 두었고, 시험이 그 문구의 존재를 확인합니다.
+
+## 3. 회귀 — 귀속을 먼저 증명했다
+
+관련 26개 스위트(745건)를 **A/B 로** 돌렸습니다.
+
+```
+절대경로(변경)  745건  fail 94  err 17
+대조군(원래)    745건  fail 94  err 17
+공통 실패 111 · 변경으로 새로 깨진 것 0 · 변경이 고친 것 0
+```
+
+★ 그 111건은 **HEAD 워크트리(미커밋 변경 0)에서도 그대로 실패**합니다
+(`test_app_data_runtime` 단독: 46건 중 28 실패). 즉 **기존 실패**이며 제 W03 변경도,
+제 P03 작업도, 공유 트리의 미커밋 상태도 원인이 아닙니다. → §5 로 보고합니다.
+
+W03 관련 9개 스위트 묶음: **collected 100 / 100 passed / exit 0**,
+`sources_unchanged: true`, `blocked_file_writes: []`.
+
+운영 폴더 불변: `library/` 29 → 29, `projects/` 73 → 73.
+
+## 4. ⚠️ 이번에 제가 낸 실수 셋 — 그대로 적습니다
+
+1. **검사 중에 소스를 고쳤습니다.** 26개 스위트가 도는 동안 probe 파일을 만들고
+   편집해서 러너가 `sources_unchanged: false` 를 찍었습니다. 그 실행은 버리고 다시
+   돌렸습니다. 「검사 중 소스를 변경하지 않는다」를 제가 어겼습니다.
+2. **시험이 제품 모듈을 다시 읽어 세션을 오염시켰습니다.** `importlib.reload(
+   library_paths)` 를 썼더니, 단독으로 15건 통과하던 `test_app_delivery_real_release`
+   가 같은 묶음에서 4실패·9오류가 됐습니다. `runpy` 로 **새 이름공간에서** 소스만
+   한 번 더 실행하도록 바꿨습니다 — 살아 있는 모듈은 손대지 않습니다.
+3. **격리 러너가 무엇으로 격리하는지 모른 채 걱정했습니다.** 러너는 cwd 가 아니라
+   **`_LIBRARY_DIR` 을 자기 실행 뿌리로 갈아끼워** 격리합니다. 그래서 뿌리를
+   절대경로로 바꿔도 격리가 깨지지 않습니다 — A/B 가 0건 차이였던 이유가 이것입니다.
+   제 시험이 「살아 있는 값 == PROJECT_ROOT/library」를 단언했다가 그 사실에 걸려
+   실패했고, 그 실패가 오히려 기제를 알려 줬습니다.
+
+## 5. 별건 보고 — HEAD 의 기존 실패 111건
+
+제 작업과 무관하지만 **알고 넘어가면 안 되는 것**이라 적습니다. 워크트리 확인 기준
+HEAD 에서 아래 9개 파일이 실패합니다(745건 중 94 실패·17 오류).
+
+```
+test_app_data_runtime 28 · test_app_dataset_binding 17 · test_release_promotion 16
+test_end_to_end_canary 12 · test_provider_dispatch 11 · test_rag_dept_scope 10
+test_release_rollback_api 10 · test_p4_recommendations 4 · test_project_deletion_policy 3
+```
+
+대표 증상은 `{"detail":"같은 이름의 데이터셋이 이미 있습니다: orders"}` 입니다.
+단독 실행에서도 재현되므로 스위트 간 상호작용이 아닙니다. **담당·원인은 제 범위 밖**
+이라 판정하지 않고 사실만 넘깁니다.
+
+## 6. 바뀐 파일
+
+| 파일 | 내용 |
+|---|---|
+| `core/library_paths.py` | 보관소 뿌리를 저장소 기준 절대경로로(`project_path("library")`) |
+| `scripts/w03_shared_read_probe.py` | **신규** — 두 프로세스 공유 읽기 증거 + 음성 대조군 |
+| `tests/test_w03_shared_release_read.py` | **신규 4건** — 절대경로·cwd 불변·새 import 값·증거 범위 명시 |
+
+LLM 0 · 외부 전송 0 · 운영 DB 0 · 커밋/푸시 0.
+
+## 7. 다음 — W03.2
+
+앞 단계가 읽는 **같은 경로**의 저장을 원자화합니다. ⚠️ 부분파일 방지와 동시 writer 의
+낡은 revision 덮어쓰기 방지는 **다른 문제**이며, rename 하나로 둘 다 달성했다고 쓰지
+않겠습니다. 쓰는 지점은 `core/kit_app_builder.py` 의 release.json 기록과
+`core/async_orchestrator.py` 의 `latest_state.json` 기록입니다.

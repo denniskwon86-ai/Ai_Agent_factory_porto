@@ -183,7 +183,10 @@ class AuthStore:
         with self._lock:
             conn = self._connect()
             try:
-                self._verified_target = assert_installed_on(conn, STORE_AUTH)
+                #: ★ 방언은 «연결을 만든 factory» 가 말한다 — 환경변수로 추측하지 않는다.
+                self._verified_target = assert_installed_on(
+                    conn, STORE_AUTH,
+                    backend=str(getattr(self._connect_fn, "backend", "") or ""))
             finally:
                 conn.close()
         #: ★ 성공했을 때만, 그리고 «같은 대상» 에만 캐시한다.

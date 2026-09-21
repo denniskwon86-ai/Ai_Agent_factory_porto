@@ -41,6 +41,62 @@ def test_percent_is_escaped_for_format_paramstyle():
     assert "%%수%%" in out and out.count("%s") == 1
 
 
+def test_question_mark_inside_a_line_comment_is_left_alone():
+    """★★ [2026-09-21 실측] **실제 PG 설치가 여기서 멈췄다.**
+
+    `001_auth_and_context.sql` 의 `auth_sse_ticket` 위 주석에 예시 SQL 이 있고 거기
+    물음표가 네 개 있었다. 번역이 그것까지 `%s` 로 바꾸는 바람에 psycopg 가
+    «자리표시자 4개인데 파라미터가 0개» 라며 설치를 거절했다. 주석은 **실행되지 않는
+    글**이므로 번역기가 손대면 안 된다."""
+    out = dbmod.translate_placeholders(
+        "-- VALUES (?,?,?,?) 처럼 쓴다" + chr(10) + "SELECT a FROM t WHERE b=?")
+    assert out.count("%s") == 1, out
+    assert "(?,?,?,?)" in out, "주석 안의 물음표를 건드렸다"
+
+
+def test_question_mark_inside_a_block_comment_is_left_alone():
+    out = dbmod.translate_placeholders(
+        "/* 예: WHERE x=? AND y=? */ SELECT a FROM t WHERE b=?")
+    assert out.count("%s") == 1, out
+    assert "x=? AND y=?" in out
+
+
+def test_a_comment_does_not_swallow_the_rest_of_the_statement():
+    """⚠️ 주석을 건너뛰다가 끝을 잘못 잡으면 **뒤의 진짜 자리표시자까지** 사라진다.
+
+    그러면 이번엔 반대 방향으로 «파라미터는 있는데 자리표시자가 없다» 가 된다."""
+    out = dbmod.translate_placeholders(
+        "SELECT a FROM t -- 주석 ?" + chr(10) + "WHERE b=? AND c=?")
+    assert out.count("%s") == 2, out
+
+
+def test_install_ddl_translates_to_zero_placeholders():
+    """★★ 파일 단위 불변식: **설치 DDL 에는 파라미터가 없다.**
+
+    번역 결과에 `%s` 가 하나라도 생겼다면 실행되지 않을 무언가(주석·리터럴)를
+    자리표시자로 오독한 것이다. 단위 시험이 못 본 새 문장이 들어와도 여기서 걸린다."""
+    schema = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                          "core", "db", "schema", "001_auth_and_context.sql")
+    sql = open(schema, encoding="utf-8").read()
+    out = dbmod.translate_placeholders(sql)
+    assert "%s" not in out, "설치 DDL 에서 자리표시자를 만들어 냈다"
+
+
+def test_execute_without_params_does_not_pass_an_empty_tuple():
+    """★★ 둘째 층. 빈 튜플을 주면 psycopg 가 결합 경로를 타면서 본문의 `%` 를 다시
+    자리표시자로 읽는다. 파라미터가 없는 문장은 결합을 **아예 지나지 않아야** 한다."""
+    seen = []
+
+    class Raw:
+        def execute(self, sql, *args):
+            seen.append(args)
+            return None
+
+    conn = dbmod.TranslatingConnection(Raw(), dbmod.POSTGRES_DIALECT)
+    conn.execute("CREATE TABLE t(a text)")
+    assert seen == [()], f"파라미터 없이 부른 문장에 무언가를 딸려 보냈다: {seen}"
+
+
 def test_sqlite_dialect_does_not_touch_sql():
     """★ SQLite 쪽은 **변환하지 않는다** — 비용 0 · 위험 0."""
     sql = "SELECT * FROM t WHERE a=? AND n LIKE '%x%'"

@@ -49,6 +49,12 @@ BACKENDS = (SQLITE, POSTGRES)
 SQLITE_FILENAME = {STORE_AUTH: "auth.db",
                    STORE_ENTERPRISE_CONTEXT: "enterprise_context.db"}
 
+#: ★★ 인자를 생략했을 때의 범위. **업무 첫 경로 둘뿐**이다.
+#:   ⚠️ `KNOWN_STORES` 를 기본값으로 쓰지 않는다. 목록에 저장소가 하나 추가되는 순간,
+#:     `--store` 를 생략한 **기존 명령의 범위가 조용히 넓어진다** — 아무도 명령을
+#:     바꾸지 않았는데. 인자를 빠뜨리는 쪽이 넓어지는 설계는 언젠가 사고가 된다.
+DEFAULT_STORES = (STORE_AUTH, STORE_ENTERPRISE_CONTEXT)
+
 _DSN_ENV = "AFS_DB_DSN"
 _PG_SCHEMA = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                           "core", "db", "schema", "001_auth_and_context.sql")
@@ -135,11 +141,29 @@ def sqlite_ddl_for(store: str) -> List[str]:
     raise ValueError(f"모르는 저장소 이름입니다: {store}")
 
 
+#: 트랜잭션은 **드라이버가** 연다. 파일에 적힌 것을 문장으로 또 보내면 안 된다.
+_TRANSACTION_CONTROL = ("BEGIN", "COMMIT", "ROLLBACK", "END", "START TRANSACTION")
+
+
+def _is_transaction_control(statement: str) -> bool:
+    body = chr(10).join(l for l in statement.splitlines()
+                        if l.strip() and not l.strip().startswith("--")).strip()
+    return body.rstrip(";").strip().upper() in _TRANSACTION_CONTROL
+
+
 def postgres_sql() -> List[str]:
+    """설치 SQL 을 문장으로 나눈다. **트랜잭션 제어 문장은 뺀다.**
+
+    ⚠️⚠️ 파일은 사람이 읽기 좋게 `BEGIN; … COMMIT;` 으로 감싸 두었다. 그런데 그것을
+      문장 단위로 잘라 psycopg 에 그대로 보내면, 드라이버가 **이미 연** 트랜잭션 안에서
+      `COMMIT` 이 «먼저» 터진다 — 뒤 문장들이 트랜잭션 밖으로 나가고, 중간에 실패해도
+      앞부분이 남는다. 「한 번에 들어가거나 아무것도 안 들어간다」가 그 자리에서 깨진다.
+      ★ 실제 PG 에 붙이기 «전에» 잡았다. 트랜잭션 경계는 드라이버 하나만 잡는다."""
     if not os.path.isfile(_PG_SCHEMA):
         raise SchemaInstallError("PostgreSQL 설치 스키마 파일이 없습니다.")
     with open(_PG_SCHEMA, "r", encoding="utf-8") as handle:
-        return split_statements(handle.read())
+        statements = split_statements(handle.read())
+    return [s for s in statements if not _is_transaction_control(s)]
 
 
 def _pg_defined_columns() -> Dict[str, List[str]]:
@@ -206,20 +230,45 @@ def apply_sqlite(db_path: str, statements: Sequence[str]) -> int:
     return len(statements)
 
 
-def apply_postgres(dsn: str, statements: Sequence[str]) -> int:
-    """⚠️ **한 번도 실행된 적이 없다** — PostgreSQL 서버가 이 자리에 없다.
+def apply_postgres(store: str, statements: Sequence[str], connect=None) -> int:
+    """적용 **그리고 같은 연결에서 확인**.
 
-    접속 정보 «값» 은 어떤 메시지에도 싣지 않는다."""
+    ★ [2026-09-21 실측] 격리 로컬 PG 16.15 에 `afs_installer` 역할로 실제 적용했다 —
+      store 마다 22문장, commit 전 확인 통과(`verified: true`).
+
+    ★★ 예전 판은 문장을 던지고 `verified: false` 를 넣으면서도 `ok: true` / exit0 을
+      냈다. 「설치했는데 확인은 안 했다」를 성공으로 보고한 것이다 — 그 거짓 초록 위에서
+      다음 단계가 시작된다. 이제 **확인 전에는 성공이라고 하지 않는다.**
+
+    ⚠️ 연결은 방언을 «스스로 말하는» factory 에서 얻는다. 환경변수로 추측하지 않고,
+      행 형식(dict)도 그 factory 가 고정한다. 접속 정보 «값» 은 어떤 메시지에도 없다."""
+    from core.db.managed_schema import POSTGRES_BACKEND, missing_objects_on
+    if connect is None:
+        from core.db import postgres_factory
+        connect = postgres_factory()
+    conn = connect()
     try:
-        import psycopg  # type: ignore
-    except ImportError as exc:  # pragma: no cover - 드라이버가 없는 환경
-        raise SchemaInstallError(
-            "PostgreSQL 드라이버(psycopg)가 없습니다.") from exc
-    with psycopg.connect(dsn) as conn:  # pragma: no cover - 실제 PG 없음
-        with conn.cursor() as cur:
-            for statement in statements:
-                cur.execute(statement)
+        for statement in statements:
+            conn.execute(statement)
+        #: ★★ 확인을 **commit 전에** 한다. PostgreSQL 은 DDL 도 트랜잭션 안에서 돌고
+        #:   같은 트랜잭션에서는 방금 만든 것이 보인다 — 확인이 실패하면 되돌려
+        #:   **아무것도 남기지 않는다.** (SQLite 쪽은 `executescript` 계열 제약 때문에
+        #:   확인이 commit 뒤라 행이 남을 수 있다고 이미 적어 두었다. PG 는 더 강하다.)
+        gaps = missing_objects_on(conn, store, POSTGRES_BACKEND)
+        if gaps:
+            conn.rollback()
+            raise SchemaInstallError(
+                f"'{store}' PG 설치 뒤 확인에서 {len(gaps)}건이 비었습니다: "
+                f"{', '.join(gaps[:4])}")
         conn.commit()
+    except Exception:
+        try:
+            conn.rollback()
+        except Exception:  # noqa: BLE001 — 되돌리기 실패를 원래 오류로 덮지 않는다
+            pass
+        raise
+    finally:
+        conn.close()
     return len(statements)
 
 
@@ -271,8 +320,7 @@ def install(backend: str, stores: Sequence[str],
             entries.append({"store": store, "target": target,
                             "applied_statements": count, "verified": True})
         else:
-            dsn = os.environ.get(_DSN_ENV, "").strip()
-            if not dsn:
+            if not os.environ.get(_DSN_ENV, "").strip():
                 raise SchemaInstallError(
                     f"PostgreSQL 접속 정보가 없습니다 — 환경변수 {_DSN_ENV} 로 "
                     f"주십시오(인자로 받지 않습니다).")
@@ -284,11 +332,15 @@ def install(backend: str, stores: Sequence[str],
                     f"'{store}' PG 설치 스키마가 첫 경로 요구를 충족하지 않습니다 "
                     f"({len(gaps)}건: {', '.join(gaps[:4])}"
                     f"{' …' if len(gaps) > 4 else ''}). 초안을 먼저 맞추십시오.")
-            count = apply_postgres(dsn, statements)
+            #: `dsn` 값은 여기서도 쓰지 않는다 — factory 가 환경에서 직접 읽는다.
+            count = apply_postgres(store, statements)
             entries.append({"store": store, "target": f"postgres(<{_DSN_ENV}>)",
                             "applied_statements": count,
-                            "verified": False,
-                            "note": "PG 확인 질의 미구현 — NOT_RUN"})
+                            #: ★ 여기까지 왔다는 것은 «확인을 통과했다» 는 뜻이다.
+                            #:   확인이 실패하면 위에서 예외가 나 이 줄에 닿지 못한다.
+                            "verified": True,
+                            "note": "실제 PG 실행 이력 없음 — 이 값은 «이번 실행에서» "
+                                    "확인했다는 뜻이다"})
     return {"backend": backend, "mode": "apply", "entries": entries}
 
 
@@ -307,7 +359,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     group.add_argument("--apply", action="store_true", help="실제로 설치한다")
     args = ap.parse_args(argv)
 
-    stores = args.store or list(KNOWN_STORES)
+    #: ⚠️ 기본 범위는 **업무 첫 경로 둘**로 못박는다(§DEFAULT_STORES).
+    stores = args.store or list(DEFAULT_STORES)
     if args.backend == SQLITE and not args.sqlite_dir.strip():
         print("backend=sqlite 에는 --sqlite-dir 가 필요합니다.", file=sys.stderr)
         return 2

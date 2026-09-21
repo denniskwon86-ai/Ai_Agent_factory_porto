@@ -193,6 +193,24 @@ def test_a_failed_verification_is_not_reported_as_success(tmp_path, monkeypatch)
         installer.install(installer.SQLITE, [ms.STORE_AUTH], str(tmp_path / "bad"))
 
 
+def test_omitting_store_installs_exactly_the_two_business_stores(tmp_path):
+    """★★ **빈 인자가 범위를 넓히면 안 된다.**
+
+    `--store` 를 생략했을 때의 범위를 `KNOWN_STORES` 로 두면, 목록에 저장소가 하나
+    추가되는 날 **기존 명령이 그 저장소까지 설치한다** — 아무도 명령을 바꾸지 않았는데.
+    기본값은 업무 첫 경로 둘로 못박혀 있어야 한다."""
+    assert installer.DEFAULT_STORES == (ms.STORE_AUTH, ms.STORE_ENTERPRISE_CONTEXT)
+
+    folder = str(tmp_path / "db")
+    os.makedirs(folder, exist_ok=True)
+    result = installer.main(["--backend", "sqlite", "--sqlite-dir", folder, "--plan"])
+    assert result == 0
+    #: 계획이 만드는 대상 파일도 그 둘뿐이어야 한다.
+    planned = installer.plan(installer.SQLITE, list(installer.DEFAULT_STORES), folder)
+    assert [e["store"] for e in planned["entries"]] == [ms.STORE_AUTH,
+                                                        ms.STORE_ENTERPRISE_CONTEXT]
+
+
 def test_destructive_statements_are_refused(tmp_path, monkeypatch):
     """⚠️ 설치는 «지우는 일» 이 아니다."""
     monkeypatch.setattr(installer, "sqlite_ddl_for",
@@ -316,7 +334,12 @@ def test_the_postgres_draft_covers_every_canonical_first_path_column(tmp_path):
     folder = _install(tmp_path)
     pg_tables = installer._pg_defined_columns()
     missing = []
-    for store in ms.KNOWN_STORES:
+    #: ⚠️⚠️ **`KNOWN_STORES` 를 돌지 않는다.** 이 시험이 보는 것은 «첫 경로» 초안
+    #:   (`001_auth_and_context.sql`)이다. 목록을 그대로 돌면, 나중에 저장소가 하나
+    #:   추가되는 순간 이 시험이 **그 저장소의 표까지 001 에서 찾기 시작**한다 —
+    #:   아무도 이 시험을 건드리지 않았는데 범위가 넓어져 실패한다(실측으로 겪었다).
+    #:   시험도 자기 범위를 스스로 말해야 한다.
+    for store in installer.DEFAULT_STORES:
         conn = sqlite3.connect(os.path.join(folder, installer.SQLITE_FILENAME[store]))
         try:
             for table in ms.REQUIRED[store]:
@@ -488,23 +511,96 @@ def test_a_connection_refused_by_the_gate_is_closed_by_the_gate(tmp_path):
     assert (len(opened), len(closed)) == (1, 1), (len(opened), len(closed))
 
 
-def test_no_sqlite_pragma_is_sent_to_a_non_sqlite_connection():
-    """★★ PG 에서 `PRAGMA database_list` 를 시도하면 **트랜잭션이 실패 상태로 남아**
+def test_no_sqlite_only_statement_is_sent_to_a_non_sqlite_connection():
+    """★★ PG 에서 `PRAGMA` 를 시도하면 **트랜잭션이 실패 상태로 남아** 뒤따르는 정상
 
-    뒤따르는 정상 질의까지 전부 죽는다. 「예외를 삼켰으니 안전하다」가 아니다 —
-    연결이 이미 오염된다. backend 가 SQLite 가 아니면 **한 문장도 보내지 않는다.**
+    질의까지 전부 죽는다. 「예외를 삼켰으니 안전하다」가 아니라 연결이 이미 오염된다.
 
-    ⚠️ 아직 「PG 대상 신원을 PG 읽기 질의로 구하는」 구현은 없다. 여기서 막는 것은
-      독성뿐이고, 방언을 실제 연결 설정에 결속하는 일은 P03.2 몫이다."""
-    sent = []
+    ⚠️ 불변식은 「아무 문장도 안 보낸다」가 «아니다» — PG 대상 신원은 PG 읽기 질의로
+      구해야 하므로 문장은 간다. 지켜야 할 것은 **SQLite 전용 문장을 보내지 않는 것**이다.
+      (처음엔 전자로 단언했다가, PG 신원 질의를 넣는 순간 그 시험이 깨졌다.)"""
+    sent: list = []
 
-    class Watcher:
+    class Recorder:
         def execute(self, sql, *a, **k):
             sent.append(sql)
-            raise AssertionError("SQLite 전용 문장이 비-SQLite 연결로 갔다: " + sql)
 
-    assert ms.target_identity(Watcher(), backend="postgres") == ""
-    assert sent == [], sent
+            class Result:
+                @staticmethod
+                def fetchone():
+                    return {"db": "syn_db", "schema": "syn_schema"}
+            return Result()
+
+    identity = ms.target_identity(Recorder(), backend=ms.POSTGRES_BACKEND)
+    assert identity == "syn_db/syn_schema"
+    assert sent, "PG 신원을 구하려면 질의는 가야 한다"
+    assert not [q for q in sent if "PRAGMA" in q.upper()], sent
+
+
+def test_a_tuple_row_from_postgres_is_refused_not_guessed_by_position():
+    """⚠️ 우리 PG factory 는 `dict_row` 를 붙인다. 튜플 행이 오면 **행 형식이 어긋난
+
+    것**이고, 자리 번호로 «맞춰서» 넘기면 조용히 엉뚱한 컬럼을 읽는다."""
+    class TupleRows:
+        def execute(self, sql, *a, **k):
+            class Result:
+                @staticmethod
+                def fetchone():
+                    return ("syn_db", "syn_schema")
+            return Result()
+
+    with pytest.raises(ms.ManagedSchemaError):
+        ms._row_values(TupleRows().execute("x").fetchone(), ("db", "schema"))
+
+
+def test_the_dialect_comes_from_the_connection_not_the_environment(monkeypatch,
+                                                                   tmp_path):
+    """★★ 방언을 «런타임 환경값» 으로 추측하지 않는다.
+
+    환경은 PG 라고 말하는데 실제로는 SQLite 를 물고 있는 조합에서, 환경을 믿으면
+      SQLite 전용 문장을 PG 로 보내거나 그 반대가 된다."""
+    monkeypatch.setenv("AFS_DB_BACKEND", "postgres")
+    path = str(tmp_path / "dialect.db")
+    sqlite3.connect(path).close()
+    conn = sqlite3.connect(path)
+    try:
+        #: 환경이 postgres 라고 해도, 실제 연결이 SQLite 면 sqlite 로 판정한다.
+        assert ms.backend_of(conn) == ms.SQLITE_BACKEND
+    finally:
+        conn.close()
+
+    from core.db import postgres_factory, sqlite_factory
+    monkeypatch.setenv("AFS_DB_DSN", "postgresql://ignored")
+    assert sqlite_factory(str(path)).backend == ms.SQLITE_BACKEND
+    assert postgres_factory().backend == ms.POSTGRES_BACKEND
+
+
+def test_the_gate_itself_uses_the_connection_dialect_not_the_environment(tmp_path,
+                                                                        monkeypatch):
+    """★★ 관문 **호출 지점**까지 본다.
+
+    ⚠️ 처음엔 `backend_of()` 를 직접 부르는 시험만 있었고, `assert_installed_on` 안의
+      판정을 환경변수로 되돌리는 변이가 **안 물렸다.** 통제가 없던 게 아니라 «그 자리를
+      짚는 시험» 이 없었다. 환경이 postgres 라고 우겨도 실제 SQLite 연결이면 SQLite 로
+      확인해야 하고, 그러지 않으면 PG 전용 질의가 SQLite 로 가서 죽는다."""
+    monkeypatch.setenv("AFS_DB_BACKEND", "postgres")
+    folder = _install(tmp_path)
+    conn = sqlite3.connect(os.path.join(folder, "auth.db"))
+    try:
+        identity = ms.assert_installed_on(conn, ms.STORE_AUTH)
+    finally:
+        conn.close()
+    assert identity.endswith("auth.db"), identity
+
+
+def test_an_undeclared_non_sqlite_connection_is_refused():
+    """⚠️ 모르면 «추측» 이 아니라 **거절**이다."""
+    class Mystery:
+        def execute(self, *a, **k):
+            raise AssertionError("방언도 모르면서 질의를 보냈다")
+
+    with pytest.raises(ms.ManagedSchemaError):
+        ms.backend_of(Mystery())
 
 
 def test_an_unreadable_target_is_refused_not_waved_through():
@@ -581,3 +677,102 @@ def test_login_context_and_ticket_run_on_the_managed_connection(tmp_path):
 
     #: ★ 이 전 과정에서 DDL 이 한 줄도 없어야 한다.
     assert ms.ddl_statements(log) == [], ms.ddl_statements(log)
+
+# ═══ ⑨ [P03.2 준비] PG 경로 — **대역이다. DB 동작 PASS 가 아니다** ══════
+#   ⚠️⚠️ 아래는 실제 PostgreSQL 이 아니라 «연결 코드의 조건» 만 증명한다.
+#     P03.2/3 가산 근거로 쓰지 않는다. 환경이 오면 같은 코드를 실제 PG 에 건다.
+class _StandInPostgres:
+    """`information_schema` 질의에 **dict 행** 으로 답하는 대역."""
+
+    def __init__(self, columns):
+        self.columns = columns
+        self.executed: list = []
+
+    def execute(self, sql, *args, **kwargs):
+        self.executed.append(sql)
+        rows = []
+        if "information_schema.columns" in sql:
+            rows = [{"table_name": t, "column_name": c}
+                    for t, cols in self.columns.items() for c in cols]
+
+        class Result:
+            @staticmethod
+            def fetchall():
+                return rows
+
+            @staticmethod
+            def fetchone():
+                return rows[0] if rows else None
+        return Result()
+
+    def commit(self):
+        self.executed.append("<COMMIT>")
+
+    def rollback(self):
+        self.executed.append("<ROLLBACK>")
+
+    def close(self):
+        pass
+
+
+def _complete_pg_columns():
+    return {t: list(c) for t, c in ms.REQUIRED[ms.STORE_ENTERPRISE_CONTEXT].items()}
+
+
+def test_postgres_install_does_not_report_success_before_it_verifies():
+    """★★ 예전 판은 문장을 던지고 `verified: false` 를 넣으면서도 `ok: true`/exit0 을 냈다.
+
+    「설치했는데 확인은 안 했다」를 성공으로 보고한 것이다 — 그 거짓 초록 위에서
+    다음 단계가 시작된다."""
+    missing = _complete_pg_columns()
+    missing["organization_nodes"] = ["node_id"]          # 컬럼 대부분이 없다
+    fake = _StandInPostgres(missing)
+    with pytest.raises(ms.SchemaInstallError):
+        installer.apply_postgres(ms.STORE_ENTERPRISE_CONTEXT,
+                                 ["CREATE TABLE t(a TEXT)"], connect=lambda: fake)
+    assert any("information_schema" in q for q in fake.executed),         "확인 질의를 «보내지도» 않았다"
+    #: ★★ 확인이 «commit 전» 이라 되돌리면 아무것도 남지 않는다.
+    assert "<ROLLBACK>" in fake.executed, "확인 실패인데 되돌리지 않았다"
+    assert "<COMMIT>" not in fake.executed, "확인 실패인데 commit 했다"
+
+
+def test_postgres_install_passes_when_the_target_really_has_the_schema():
+    """★ 음성 대조 — 확인이 «늘 실패» 면 위 시험은 아무 뜻이 없다."""
+    fake = _StandInPostgres(_complete_pg_columns())
+    count = installer.apply_postgres(ms.STORE_ENTERPRISE_CONTEXT,
+                                     ["CREATE TABLE t(a TEXT)"], connect=lambda: fake)
+    assert count == 1
+    assert fake.executed.index("<COMMIT>") >         max(i for i, q in enumerate(fake.executed) if "information_schema" in q),         "확인보다 commit 이 먼저였다"
+
+
+def test_transaction_control_never_reaches_the_driver():
+    """★★ 파일은 사람이 읽기 좋게 `BEGIN; … COMMIT;` 으로 감싸 두었다.
+
+    ⚠️ 그것을 문장으로 잘라 psycopg 에 보내면 드라이버가 **이미 연** 트랜잭션 안에서
+      `COMMIT` 이 «먼저» 터진다 — 뒤 문장이 트랜잭션 밖으로 나가고, 중간에 실패해도
+      앞부분이 남는다. 「한 번에 들어가거나 아무것도 안 들어간다」가 거기서 깨진다.
+      실제 PG 에 붙이기 «전에» 잡았다."""
+    statements = installer.postgres_sql()
+    leftover = [s for s in statements if installer._is_transaction_control(s)]
+    assert leftover == [], leftover
+    #: 그리고 원본 파일에는 여전히 그 문장이 «있어야» 한다 — 없으면 이 검사가 헛돈다.
+    raw = open(installer._PG_SCHEMA, encoding="utf-8").read()
+    assert "BEGIN;" in raw and "COMMIT;" in raw, "원본에 트랜잭션 경계가 사라졌다"
+
+
+def test_the_postgres_factory_fixes_the_row_format_the_product_expects():
+    """★★ 제품 ECM 은 조회 결과에 `dict(row)` 를 하고 auth 는 `row["user_id"]` 로 읽는다.
+
+    psycopg 의 기본 행은 **튜플**이라 그대로 두면 `dict(row)` 가 그 자리에서 깨진다.
+    제품 SQL 을 고치는 대신 **연결을 제품이 기대하는 모양으로** 맞춘다.
+
+    ⚠️ 이것은 배선 확인이다 — 실제 PG 에 붙어 본 적이 없다."""
+    import inspect
+
+    from core.db import postgres_factory
+    source = inspect.getsource(postgres_factory)
+    assert "dict_row" in source, "PG 연결에 dict 행 형식이 붙어 있지 않다"
+    #: 그리고 그 이름이 psycopg 에 «실제로» 있는지 본다(오타면 런타임에야 터진다).
+    from psycopg.rows import dict_row
+    assert callable(dict_row)
+

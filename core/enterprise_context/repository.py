@@ -213,8 +213,10 @@ class EcmRepository:
                     "명령으로 먼저 설치하십시오. 자동으로 만들지 않습니다.")
             conn = self._open()
             try:
+                #: ★ 방언은 «연결을 만든 factory» 가 말한다 — 환경변수로 추측하지 않는다.
                 self._verified_target = assert_installed_on(
-                    conn, STORE_ENTERPRISE_CONTEXT)
+                    conn, STORE_ENTERPRISE_CONTEXT,
+                    backend=str(getattr(self._connect_fn, "backend", "") or ""))
             except Exception:
                 conn.close()
                 raise

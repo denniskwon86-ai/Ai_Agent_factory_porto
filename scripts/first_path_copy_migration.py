@@ -115,14 +115,42 @@ def _under_operational(path: Path) -> bool:
         return False
 
 
+def reject_links(path: Path, label: str) -> None:
+    """경로 **자체와 존재하는 모든 상위**가 심볼릭링크·junction 이 아님을 본다.
+
+    ⚠️⚠️ [CR-P05-1] 처음에는 **입력만** 막고 출력을 열어 뒀다. 출력은 `resolve()` 와
+      「비어 있나」만 봤는데, `resolve()` 는 **링크를 풀어 원래 모양을 지운다** — 그래서
+      지정된 경로가 junction 이어도 통과했고, 뒤이어 `mkdir` 와 설치 도구가 그 링크
+      너머에 썼다. 한쪽 문만 막고 반대편을 안 본 것이다.
+
+    ⚠️ `snapshot.regular(p, p.parent)` 를 그대로 쓰지 않는 이유: 그건 검사 root 를 바로
+      부모로 두어 **그 위의 링크를 놓친다.** 여기서는 드라이브 루트까지 올라간다.
+
+    ⚠️ 판정은 `os.path.abspath` 위에서 한다 — `resolve()` 를 쓰면 검사하려던 링크가
+      이미 풀려 버려서 «검사할 대상이 사라진다»."""
+    current = Path(os.path.abspath(path))
+    while True:
+        if current.is_symlink() or (hasattr(current, "is_junction")
+                                    and current.is_junction()):
+            raise MigrationRefused(
+                f"{label} 경로에 심볼릭링크/junction 이 있습니다 — 실제 경로를 주십시오.")
+        parent = current.parent
+        if parent == current:
+            return
+        current = parent
+
+
 def guard_paths(bundle: Path, target_dir: Path) -> None:
     """**적용 전에** 전부 본다. 하나라도 걸리면 아무것도 쓰지 않는다."""
+    #: ★ 링크 검사를 «가장 먼저». 뒤의 검사들은 resolve 를 쓰므로 그 전에 봐야 한다.
+    reject_links(bundle, "번들")
+    reject_links(target_dir, "대상")
     for label, path in (("번들", bundle), ("대상", target_dir)):
         if _under_operational(path):
             raise MigrationRefused(f"{label} 경로가 운영 data/ 아래입니다 — 격리 경로를 주십시오.")
     if not bundle.is_file():
         raise MigrationRefused("번들을 찾을 수 없습니다.")
-    #: 링크·junction 우회 차단은 기존 도구의 것을 그대로 쓴다.
+    #: 파일 자체의 성질은 기존 도구 것도 함께 쓴다(두 층).
     snapshot.regular(bundle, bundle.parent)
     source_dir = bundle.resolve().parent
     target = target_dir.resolve()

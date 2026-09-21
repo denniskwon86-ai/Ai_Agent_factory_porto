@@ -44,6 +44,7 @@ _MANAGED_ENV = "AFS_DB_MANAGED_STORES"
 
 #: 방언 이름 — `core.db` 와 같은 값을 쓴다(두 벌로 갈리지 않게).
 SQLITE_BACKEND = "sqlite"
+POSTGRES_BACKEND = "postgres"
 
 #: DDL 로 세는 첫 낱말. 기동 경로에서 이것들이 보이면 계약 위반이다.
 _DDL_VERBS = ("create", "alter", "drop", "truncate", "rename", "reindex", "vacuum")
@@ -152,6 +153,29 @@ def missing_objects(db_path: str, store: str) -> List[str]:
 #   그래서 **연결을 먼저 얻고, 그 연결 위에서** 확인한다. 쓰는 곳과 찾는 곳의 출처를
 #   하나로 만든다.
 
+def backend_of(conn, factory=None) -> str:
+    """이 연결의 방언. **환경변수로 추측하지 않는다.**
+
+    ★★ 순서: ① factory 가 «스스로 말한» 값 → ② 연결 객체의 «실제 형» →
+      ③ 그래도 모르면 **거절**.
+      `AFS_DB_BACKEND` 를 읽어 맞히면, 환경은 PG 인데 실제로는 SQLite 를 물고 있는
+      조합에서 SQLite 전용 문장을 PG 로 보내거나 그 반대가 된다."""
+    declared = str(getattr(factory, "backend", "") or "")
+    if declared:
+        return declared
+    raw = getattr(conn, "_raw", conn)
+    #: wrapper 가 겹쳐 있을 수 있다(계측용 등) — 끝까지 벗긴다.
+    seen = 0
+    while hasattr(raw, "_raw") and seen < 5:
+        raw = raw._raw
+        seen += 1
+    if isinstance(raw, sqlite3.Connection):
+        return SQLITE_BACKEND
+    raise ManagedSchemaError(
+        "연결의 방언을 알 수 없습니다 — 방언을 «스스로 말하는» factory 를 주십시오"
+        "(core.db.sqlite_factory / postgres_factory).")
+
+
 def target_identity(conn, backend: str = SQLITE_BACKEND) -> str:
     """이 연결이 «실제로» 무엇을 보고 있는가. 캐시 키이자 증거다.
 
@@ -161,8 +185,23 @@ def target_identity(conn, backend: str = SQLITE_BACKEND) -> str:
       `PRAGMA database_list` 를 돌리고 예외를 삼켰다. PostgreSQL 에서 그 문장은 실패하고,
       **그 순간 트랜잭션이 실패 상태로 남아** 뒤따르는 정상 질의까지 전부 죽는다.
       「예외를 삼켰으니 안전하다」가 아니다 — 연결이 이미 오염된다.
-      ★ 아직 «PG 대상 신원을 PG 읽기 질의로 구하는» 구현은 하지 않았다. 그건 방언을
-        실제 연결 설정에 결속하는 일과 함께 P03.2 에서 한다. 여기서는 **독성만** 막는다."""
+      ~~★ 아직 «PG 대상 신원을 PG 읽기 질의로 구하는» 구현은 하지 않았다.~~ —
+        **2026-09-21 [P03.2] 완료.** `current_database()/current_schema()` 로 구하고,
+        실제 PG 에서 `afs_trial_local/app` 를 확인했다."""
+    if backend == POSTGRES_BACKEND:
+        #: ★ [2026-09-21 실측] 실제 PG 에서 `afs_trial_local/app` 를 돌려줬다.
+        #:   PG 신원은 PG «읽기 질의» 로 구한다 —
+        #:   SQLite 전용 문장을 던져 보고 실패로 알아내는 방식은 쓰지 않는다(트랜잭션이
+        #:   실패 상태로 남는다).
+        try:
+            row = conn.execute(
+                "SELECT current_database() AS db, current_schema() AS schema").fetchone()
+        except Exception:  # noqa: BLE001
+            return ""
+        if row is None:
+            return ""
+        database, schema = _row_values(row, ("db", "schema"))
+        return f"{database}/{schema}" if database else ""
     if backend != SQLITE_BACKEND:
         return ""
     try:
@@ -174,16 +213,34 @@ def target_identity(conn, backend: str = SQLITE_BACKEND) -> str:
     return ""
 
 
+def _row_values(row, names: Sequence[str]) -> Tuple[str, ...]:
+    """행에서 이름으로 값을 꺼낸다.
+
+    ⚠️ 우리 PG factory 는 `dict_row` 를 붙이므로 행은 **매핑**이다. 튜플이 오면
+      행 형식이 어긋난 것이고, 그걸 자리 번호로 «맞춰서» 넘기지 않는다 — 조용히
+      엉뚱한 컬럼을 읽게 된다."""
+    try:
+        return tuple(str(row[name] if row[name] is not None else "") for name in names)
+    except (TypeError, KeyError, IndexError) as exc:
+        raise ManagedSchemaError(
+            "행 형식이 기대와 다릅니다 — PostgreSQL 연결에 dict 행 형식이 "
+            "붙어 있는지 확인하십시오(core.db.postgres_factory).") from exc
+
+
 def _tables_and_columns(conn, backend: str) -> Dict[str, Set[str]]:
     """살아 있는 연결에서 표·컬럼을 읽는다. **읽기 질의뿐이다.**"""
     found: Dict[str, Set[str]] = {}
-    if backend == "postgres":
-        #: ⚠️ 이 가지는 **한 번도 실행되지 않았다**(PG 환경 없음).
+    if backend == POSTGRES_BACKEND:
+        #: ★ [2026-09-21 실측] 실제 PG 에서 돌았다 — 설치 직후 확인과 runtime 조회가
+        #:   이 가지로 `missing_objects_on(...) == []` 를 냈다.
+        #: ⚠️ `for table, column in rows` 로 풀지 않는다 — `dict_row` 행을 그렇게 풀면
+        #:   **키가 풀려** table/column 대신 컬럼 «이름» 이 들어온다. 이름으로 꺼낸다.
         rows = conn.execute(
             "SELECT table_name, column_name FROM information_schema.columns "
             "WHERE table_schema = current_schema()").fetchall()
-        for table, column in rows:
-            found.setdefault(str(table), set()).add(str(column))
+        for row in rows:
+            table, column = _row_values(row, ("table_name", "column_name"))
+            found.setdefault(table, set()).add(column)
         return found
     names = [str(r[0]) for r in conn.execute(
         "SELECT name FROM sqlite_master WHERE type='table'").fetchall()]
@@ -198,8 +255,7 @@ def missing_objects_on(conn, store: str, backend: str = "") -> List[str]:
     if required is None:
         raise ValueError(f"모르는 저장소 이름입니다: {store}")
     if not backend:
-        from core.db import configured_backend
-        backend = configured_backend()
+        backend = backend_of(conn)
     try:
         present = _tables_and_columns(conn, backend)
     except Exception as exc:  # noqa: BLE001
@@ -222,8 +278,7 @@ def assert_installed_on(conn, store: str, backend: str = "") -> str:
     ⚠️ 연결은 **닫지 않는다** — 부르는 쪽이 계속 쓴다. 실패했을 때 닫는 책임도
       부르는 쪽에 있다(연결을 받은 적이 없는 호출자에게 넘기지 않기 위해서다)."""
     if not backend:
-        from core.db import configured_backend
-        backend = configured_backend()
+        backend = backend_of(conn)
     gaps = missing_objects_on(conn, store, backend)
     if gaps:
         raise ManagedSchemaError(
