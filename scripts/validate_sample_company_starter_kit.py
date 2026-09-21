@@ -324,16 +324,21 @@ def main() -> None:
         raise SystemExit(1)
 
 
-def use_version(version: str) -> None:
+def use_version(version: str, kit_id: str = "") -> None:
     """검증할 판본을 갈아 끼운다.
 
     ⚠️ 판본이 하나뿐일 때 쓴 하드코딩이 남아 있었다 — 1.1.0 을 내고도 `--version`
       없이 돌리면 **말없이 1.0.0 을 검증하고 PASS 를 찍는다.** 새 판본이 검증되지
       않은 채 통과한 것으로 보이는 쪽이, 안 도는 것보다 나쁘다.
     """
-    global KIT_VERSION, KIT_ROOT
+    global KIT_VERSION, KIT_ROOT, KIT_ID
     KIT_VERSION = version
-    KIT_ROOT = ROOT / "starter_kits" / KIT_ID / version
+    if kit_id:
+        KIT_ID = kit_id
+    #: ⚠️ 자리는 `kit_registry` 가 정한다 — `AFS_STARTER_KITS_DIR` 로 옮길 수 있다.
+    #:   여기서 다시 조립하면 **키트를 옮겼을 때 검증기만 옛 자리를 본다.**
+    from core.data_preparation import kit_registry
+    KIT_ROOT = Path(kit_registry.starter_packages_dir()) / KIT_ID / version
     if not KIT_ROOT.exists():
         raise SystemExit(f"그런 판본이 없습니다: {KIT_ROOT}")
 
@@ -344,5 +349,9 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--version", default=KIT_VERSION,
                     help="검증할 판본 (기본: %(default)s)")
-    use_version(ap.parse_args().version)
+    #: ★ 사업별로 키트를 내면서 필요해졌다 — 예전에는 키트가 하나뿐이라 상수였다
+    ap.add_argument("--kit", default="", metavar="KIT_ID",
+                    help="검증할 키트 (기본: %s)" % KIT_ID)
+    _a = ap.parse_args()
+    use_version(_a.version, _a.kit)
     main()

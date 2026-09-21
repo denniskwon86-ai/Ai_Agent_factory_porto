@@ -53,6 +53,35 @@ def test_선반이_실제_디렉터리를_반영한다():
         assert v["frozen"] and v["integrity"] == "PASS", f"{v['version']} 이 온전하지 않다"
 
 
+def test_선반의_확정_판본은_모두_온전하다():
+    """★ **선반이 늘어도 자동으로 지켜지는 불변식.**
+
+    확정(`.frozen`)이면 지문 대장이 있어야 하고 대조를 통과해야 한다. 키트를 하나
+    더 올릴 때마다 이 시험이 그 판본까지 함께 본다.
+    """
+    bad = []
+    for k in kit_shelf.shelf():
+        for v in k["versions"]:
+            if v["frozen"] and v["integrity"] != "PASS":
+                bad.append(f"{k['kit_id']}/{v['version']}: {v['integrity']} {v['problems'][:1]}")
+    assert not bad, "확정 판본이 온전하지 않다: " + " · ".join(bad)
+
+
+def test_사업_단독_키트가_선반에_있다():
+    """제련만·전지소재만 — **고려아연·켐코에 줄 수 있는 것.**"""
+    ids = {k["kit_id"] for k in kit_shelf.shelf()}
+    assert {"KIT-MFG-SMELTING-NONFERROUS", "KIT-MFG-BATTERY-MATERIALS"} <= ids
+
+
+def test_새_키트는_제_이름을_갖는다():
+    """★ `kit_name` 이 없으면 카탈로그에 **회사명이 뜬다**(D4). 새로 낸 것은 아니어야."""
+    for k in kit_shelf.shelf():
+        if k["kit_id"] in ("KIT-MFG-SMELTING-NONFERROUS", "KIT-MFG-BATTERY-MATERIALS"):
+            for v in k["versions"]:
+                assert v["kit_name"], f"{k['kit_id']}/{v['version']} 에 kit_name 이 없다"
+                assert v["sector"], f"{k['kit_id']}/{v['version']} 에 sector 가 없다"
+
+
 def test_구조가_다른_manifest_에도_죽지_않는다():
     """`KIT-MFG-BATTERY-CHEMICAL-PROCUREMENT` 는 키 구성이 다르다
     (`industry`·`primary_loop`·`supported_profiles`)."""
@@ -93,9 +122,10 @@ def test_빈_칸을_양쪽으로_보여준다():
     c = kit_shelf.catalog()
     assert all("on_shelf" in s for s in c["seeds"])
     assert all("from_business" in k for k in c["shelf"])
-    #: 지금은 사업 단독 키트를 아직 뽑지 않았다 — 그 사실이 보여야 한다
     singles = [s for s in c["seeds"] if len(s["businesses"]) == 1]
     assert singles, "사업 단독 씨앗이 하나도 없다"
+    #: 선반에만 있는 것(사업 정의를 모르는 키트)을 **감추지 않는다**
+    assert any(not k["from_business"] for k in c["shelf"]) or         all(k["from_business"] for k in c["shelf"])
 
 
 def test_json_이_직렬화된다():

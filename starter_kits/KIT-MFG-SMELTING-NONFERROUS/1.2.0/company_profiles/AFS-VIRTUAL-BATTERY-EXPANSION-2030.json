@@ -1,0 +1,39 @@
+{
+  "data_class": "SYNTHETIC",
+  "data_origin": "SYNTHETIC",
+  "entity_mode": "VIRTUAL",
+  "certification_status": "CERTIFIED_FOR_DEMO",
+  "not_for_management_decision": true,
+  "currency": "KRW",
+  "timezone": "Asia/Seoul",
+  "company_profile_id": "AFS-VIRTUAL-BATTERY-EXPANSION-2030",
+  "company_name": "AFS 배터리소재 제3공장 증설안",
+  "profile_role": "VIRTUAL_EXPANSION",
+  "source_profile_id": "AFS-DEMO-MATERIALS-GROUP",
+  "industry_code": "C2013",
+  "industry_name": "무기화학·배터리 전구체 소재",
+  "purpose": "황산니켈 생산능력 증설과 전력·원료·현금 영향을 사전 검증",
+  "valid_until": "2032-12-31",
+  "organization_blueprint": [
+    "배터리소재사업부",
+    "기존 제2공장",
+    "가상 제3공장",
+    "증설 PMO"
+  ],
+  "products": [
+    "고순도 황산니켈",
+    "배터리급 수산화리튬"
+  ],
+  "recommended_apps": [
+    "APP-01",
+    "APP-03",
+    "APP-04"
+  ],
+  "default_assumptions": {
+    "capacity_increase_pct": 35.0,
+    "capex_krw_billion": 180.0,
+    "electricity_price_change_pct": 12.0,
+    "commissioning_year": 2030,
+    "ramp_up_months": 18
+  }
+}

@@ -1,0 +1,6 @@
+﻿record_id,tenant_id,scope_node_id,data_class,business_data_kind,data_origin,quality_status,certification_status,as_of_date,lineage_id,location_id,site_id,location_name,storage_type,capacity_quantity,capacity_uom,active
+mdm-04-16932d0528e2,tenant-afs-demo-materials,plant-afs-battery-02,SYNTHETIC,REFERENCE,SYNTHETIC,PASS,CERTIFIED_FOR_DEMO,2026-08-11,lin-ab41aa1c05e1,LOC-P2-RAW,plant-afs-battery-02,원료창고,RAW,45000,TON,True
+mdm-04-98a71fc13341,tenant-afs-demo-materials,plant-afs-battery-02,SYNTHETIC,REFERENCE,SYNTHETIC,PASS,CERTIFIED_FOR_DEMO,2026-08-11,lin-8a4d69ff7111,LOC-P2-QI,plant-afs-battery-02,품질검사창고,QUALITY,8000,TON,True
+mdm-04-ed26763bb368,tenant-afs-demo-materials,plant-afs-battery-02,SYNTHETIC,REFERENCE,SYNTHETIC,PASS,CERTIFIED_FOR_DEMO,2026-08-11,lin-ffb9811169ab,LOC-P2-WIP,plant-afs-battery-02,공정재고,WIP,18000,TON,True
+mdm-04-43038c3f84c8,tenant-afs-demo-materials,plant-afs-battery-02,SYNTHETIC,REFERENCE,SYNTHETIC,PASS,CERTIFIED_FOR_DEMO,2026-08-11,lin-43ce97b651d8,LOC-P2-FG,plant-afs-battery-02,제품창고,FINISHED,22000,TON,True
+mdm-04-bbb64f1c62cc,tenant-afs-demo-materials,plant-afs-expansion-03,SYNTHETIC,REFERENCE,SYNTHETIC,PASS,CERTIFIED_FOR_DEMO,2026-08-11,lin-086bf7e0b825,LOC-P3-SIM,plant-afs-expansion-03,가상 증설창고,VIRTUAL,35000,TON,False
