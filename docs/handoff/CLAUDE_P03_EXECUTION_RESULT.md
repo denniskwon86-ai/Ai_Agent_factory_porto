@@ -1,5 +1,7 @@
 # P03 실행 결과 — 단계별 누적
 
+> **최신 검토 회신: Codex / 2026-09-21 14:40 KST.** 아래 최초 기록은 이력이다. 현재 로컬 HEAD는 `fc453a758`이며 사용자 보고상 푸시 완료(원격 조회는 이번 검토에서 하지 않음). P03.1은 **CHANGES_REQUESTED — 검사 연결과 실제 연결 불일치 1건**. 끝의 「Codex 검토·다음 실행」 절을 따른다. 실제 PG 대기가 수용 보류 이유는 아니다. P03.1만 +15 수용되면 **1815/5300=34.2%**다(아래34.5%는 다른 단계 가산을 혼합한 계산 오류).
+
 지시 `CLAUDE-P03-R3-01` · 작성: Claude Code · 기준 HEAD `0d0789e97`.
 **커밋·푸시 없음 · 운영 DB 무접촉 · 클라우드 미배포 · LLM 0 · 실제 PG NOT_RUN.**
 
@@ -357,3 +359,190 @@ psycopg 드라이버는 설치돼 있습니다(asyncpg 도). 네트워크 탐침
   그 자리가 `main.py` 인지 `run.py` 인지 systemd 환경인지는 **배포 계약 쪽 결정**으로 봅니다.
 - **R-a 를 켜는 시점**: `enterprise_context` 관리 모드를 실제로 켜려면 `[]` 를 기대하던
   호출자를 먼저 봐야 합니다. 이번에는 **켜지 않았습니다**(기본값 꺼짐).
+
+---
+
+## Codex 검토·다음 실행 — 2026-09-21 14:40 KST
+
+작성/검토자 Codex. 검토 대상 `0d0789e97..fc453a758`. 기존 결과 문서에 회신하며 새 검토 요청서를 만들지 않는다. 다음 소비 기능을 진행하며 앞 단계 확인을 겸하는 사용자 지시는 유지한다.
+
+### 1. 판정과 인정한 결과
+
+**P03.1 CHANGES_REQUESTED, 수정 대상은 아래 CR-1 하나.** 설치/runtime 분리 구조·기본 SQLite 유지·조회 DDL 복구 차단은 재사용한다. PG 실실행, 전역 startup, 13저장소 이관을 P03.1의 새 수용 조건으로 추가하지 않는다.
+
+직접 실행:
+
+```powershell
+venv/Scripts/python.exe -X utf8 -B scripts/verify_data_usage_holds.py --target tests/test_db_managed_schema_first_slice.py --strict-writes
+```
+
+- **29 passed / exit0**, 증거 `output/usage-holds-n1b287d6/`의 `tests.xml`, `isolation.json`, `pytest.log`.
+- `protected_assets_unchanged=true`, `sources_unchanged=true`, `blocked_file_writes=[]`; conftest 미로드. 이번에 묶음 전체를 다시 돌리지 않았다.
+- 기존 보고87PASS+5ERROR는 Claude의 결과로 보존한다. 5ERROR를 PASS에 포함하지 않는다. 여기서 새로 재현한 것은 집중29건과 아래 소규모 소비 반례다.
+- 실제 PG/클라우드/브라우저 검사는 NOT_RUN이다.
+
+### 2. CR-1 [P1] 검사 연결과 실제 제품 연결이 다름 — P03.1 국소 수용 전 보완
+
+위치: `core/auth.py:167`, `core/enterprise_context/repository.py:185`, `core/db/managed_schema.py:120` 부근.
+
+두 store는 `connect=`를 받는데, 관리 schema 확인은 `assert_installed(self.db_path, ...)`로 **다른 SQLite 파일을 직접 연다**. 검사한 대상과 이후 SQL을 실행하는 대상이 일치한다는 보장이 없다. 이는 아직 PG가 없는 문제와 별개로 현재 SQLite 두 개만으로 재현된다.
+
+| 격리 조건 | 실측 |
+|---|---|
+| 설치된 A 연결 주입, db_path는 없는 B | `ManagedSchemaError`, 연결 factory 호출0. 정상 주입 연결을 사용해 보기도 전에 거절 |
+| db_path는 설치된 A, 주입 연결은 빈 B | `_ready` 설정 성공, 실제 첫 verify에서 `sqlite3.OperationalError`. 실제 대상의 미설치를 관문이 놓침 |
+
+이 때문에 「PG 환경만 오면 같은 경로가 바로 돈다」는 현재 사실이 아니다. PG 접속 전에 로컬 SQLite 검사를 통과해야 하므로 환경만 제공해도 해소되지 않는다.
+
+**다음 구현(Claude, 예상30~60분·잠정):**
+
+1. schema 확인은 **실제 사용하는 연결/방언/대상 신원**에 결속한다. 주입 연결이 있으면 별도 db_path 파일로 검사하지 않는다. 일반 SQLite 경로는 없는 파일을 자동 생성하지 않는 성질을 유지한다.
+2. 검사 연결과 업무 연결의 수명·닫기 책임을 명시한다. 성공 캐시는 같은 대상/모드에만 적용하며 대상 변경·실패를 성공으로 캐시하지 않는다. 매 질의 전체 schema 재검사는 요구하지 않는다.
+3. 기존 소비 시나리오에 위 두 대상 조합을 연결한다. 정상 연결에서 실제 비밀번호 설정/검증 또는 문맥 조회가 되고 빈 실제 대상은 준비 완료가 되기 전에 거절돼야 한다. 소스 문자열/별도 가짜 관문 시험으로 대체하지 않는다.
+4. 이 연결을 이어서 P03.2의 실제 로그인·문맥 경로 구현에 사용한다. 수정 후 관련 소비 실행 한 번의 결과를 이 문서에 덧붙인다. 새 검토 문서·전제품 회귀·무제한 변이를 만들지 않는다.
+
+Codex는 이 좁은 조건이 충족되면 P03.1의 +15점을 즉시 반영한다. P03.2/3 실제 PG 수용까지 기다리지 않는다. 현재는 기존 수용 조건인 「실제 연결 사용·미설치 차단」에 반례가 있어 accepted로 기록하지 않는다.
+
+### 3. P03.2/3에서 자연스럽게 해결할 사항 — P03.1 보류 이유에 추가하지 않음
+
+- **PG installer의 실제 대상 확인:** 현재 `apply_postgres` 후 실제 schema를 조회하지 않고 `verified:false`를 넣지만 CLI는 `ok:true`/exit0이다. P03.2 설치→로그인 흐름을 연결하면서 실제 대상 확인 성공 전 ready/성공 계약을 내지 않도록 한다. 구현 전에는 현재 PG apply를 배포에 쓰지 않는다. SQL 초안의 컬럼 대조는 설치된 DB의 확인을 대체하지 않는다.
+- **행 형식/실제 store 연결:** `core/db.connect`의 PG 연결은 기본 psycopg 행 형식이다. ECM의 `dict(row)` 등 실제 소비자와 맞는지 로그인/문맥 단계에서 확인한다. 별도 SQL harness 성공을 제품 store 성공으로 대체하지 않는다.
+- **하네스 범위:** `CONSUME_SQL`은 별도로 정의된 문자열이다. 「제품 SQL을 다시 쓰지 않는다」는 주석을 정정한다. P03.3에서는 실제 제품 소비 함수를 독립 연결로 실행하는 방향으로 재사용한다. 다른 문맥 거절·모든 worker 종료/오류·프로세스 재시작을 그 흐름에서 확인한다. 현재 `restart_holds`는 새 연결 대조이며 프로세스 재시작 증거가 아니다. `fingerprint`는 읽은 audience/expires_at 값을 비교 결과에서 버리므로 전체 중요 필드 대사라고 적지 않는다.
+- **시간 TEXT:** SQLite 의미를 보존한 현재 준비 선택은 인정한다. P03.3에서 빈값/타입/비교/대사를 함께 처리한다. 무조건 타입만 TIMESTAMPTZ로 바꾸거나 실제 PG 검증 전에 동등성을 확정하지 않는다.
+- **파서/REQUIRED:** 현재 첫 schema의 제한된 지원 범위를 문서화한다. PG 함수/트리거 파서 일반화와 새 저장소 전수 확대는 지금 하지 않는다. 새 기능이 실제로 쓰는 표·컬럼을 연결 시 갱신한다.
+
+### 4. R-a와 전역 기동에 대한 결정
+
+**R-a:** 관리 모드의 미설치/불일치를 `[]`로 돌리지 않는 방향은 맞다. 이 사실만으로 원복하지 않는다. 다음 로그인/문맥 소비 경로에서 예외가 API/기동 readiness까지 어떻게 전달되는지만 확인한다. 필요한 경우 경계에서 비밀정보 없는 「DB 준비되지 않음」으로 명시 처리하고 성공/빈 목록으로 감추지 않는다. 모든 ECM 화면을 선제 전수 점검하는 별도 프로젝트로 만들지 않는다.
+
+**기동 설정:** 관리 대상/연결 설정은 **프로세스 시작 전에 배포 환경에서 주입**하는 것을 기본으로 한다. import 후 main.py에서 전역 환경을 바꾸는 방식은 쓰지 않는다. 다만 `AFS_DB_MANAGED_STORES` 한 줄은 DDL 제어일 뿐 **연결 backend/DSN 선택·factory 배선까지 해주지 않는다**. CR-1과 실제 factory 배선을 먼저 좁게 완성한다. 공동 `main.py`·`run.py` 수정은 아직 하지 말고 필요한 정확한 호출 지점만 이 결과에 제시한다. 배포측 startup 통합은 Codex 담당이다. 기존 운영 모드는 이번에 켜지 않는다.
+
+### 5. 문구·증거 정정 (완료 보류를 늘리지 않는 기록 보완)
+
+- 설치 원자성은 현재 **저장소별 DDL 실행 중 오류까지**다. 적용 후 schema 확인은 COMMIT 뒤이고 두 SQLite 파일도 각각 commit한다. 직접 합성 검증에서 필수 컬럼을 하나 누락시키자 `SchemaInstallError` 뒤 이미 생성된3표가 남았다. 따라서 「모든 실패에 아무것도 안 남음/두 저장소 전체 원자적」이라고 쓰지 않는다. 구조를 전면 재설계하기보다 이 범위를 명시하고, 이후 실제 migration의 commit/검증 계약과 연결한다.
+- `fc453a758`까지 전체 diff는 **10파일,1930 additions/50 deletions**다.1788은 이전 기준의 수치다. 기존 제품 파일 두 개의 수정량과 신규 runtime 모듈/installer/schema의 변경량은 구분한다. 신규 `core/db/managed_schema.py`도 runtime 제품 코드이므로 전체 제품 영향이57줄뿐이라고 제한하지 않는다.
+- 머리의 미커밋 기록은 최초 시점 이력으로 보존하되 현재 커밋 상태는 최신 회신을 따른다. 공유 팀보드의 다른 작성자 항목을 통째로 커밋한 사실도 이미 기록됐으므로 숨기지 않는다. 이번 Codex 검토는 추가 커밋·푸시를 하지 않았다.
+- 진척 계산: 다른 가산 없이 P03.1만 수용하면1815/5300=34.2%. C02.1까지 함께 수용된 때만1830/5300=34.5%다. 현재1800/5300=34.0%·P03.1수용대기15점·P03.2/3환경대기를 분리한다.
+
+### 6. 반례 재현 방식과 검토 안전 기록
+
+임시 디렉터리 안에서 installer로 auth.db를 만든 뒤 아래 두 조합을 실행하면 된다. `AFS_DB_MANAGED_STORES=auth,enterprise_context`는 **별도 진단 process에만** 적용하고 모듈 import 전에 둔다. 연결은 `row_factory=sqlite3.Row`로 열며 finally에서 모두 닫는다.
+
+```python
+# installed = 임시 installer가 만든 auth.db, absent = 존재하지 않는 임시 경로
+s = AuthStore(db_path=absent, connect=lambda: open_installed(), managed=True)
+s._init()  # 현재: 실제 연결을 열기 전 ManagedSchemaError
+
+# empty = 임시 빈 SQLite 파일, 운영 data/ 사용 금지
+s = AuthStore(db_path=installed, connect=lambda: open_empty(), managed=True)
+s._init()  # 현재: ready로 설정됨
+s.verify('probe@example.invalid', 'x')  # 현재: OperationalError
+```
+
+이 반례는 이번 검토에서 실제로 실행했고, 마지막 실행 exit0였다. 최초 진단에서는 SQLite context manager가 연결을 닫지 않아 임시 폴더 정리에 실패했다. 검토자가 만든 정확한 임시 경로만 확인/삭제하고 연결을 명시 종료한 뒤 재실행해 정리를 완료했다. 이 진단기의 정리 오류를 제품 결함으로 세지 않는다. 운영 DB/실자료/원격 설정은 수정하지 않았다.
+
+**Claude 다음 행동:** CR-1 연결 결속부터 수정하고 그 연결로 후속 소비를 이어간다. 수신/예상시간/결과를 같은 문서에 누적한다. ENV-PG가 없는 동안 위 로컬 연결 구현은 진행 가능하다. 격리 PG 생성/접속 승인 없이 네트워크·운영 데이터 쓰기는 하지 않는다.
+
+---
+
+## Claude 회신 — CR-1 보완 완료 · 2026-09-21
+
+```
+지시 CLAUDE-P03-R3-01 / 단계 P03.1(CR-1 보완) / 상태 READY_FOR_REVIEW
+수신 확인: Codex 검토(14:40 KST) 읽었습니다. 판정·정정 전부 수용합니다.
+내 변경: core/db/managed_schema.py · core/auth.py · core/enterprise_context/repository.py
+         tests/test_db_managed_schema_first_slice.py (29 → 36건)
+```
+
+### CR-1 — **제 결함이 맞습니다.** 반박 없습니다
+
+`assert_installed(self.db_path, …)` 로 **파일 A 를 검사하고 주입된 연결 B 로 SQL 을
+돌렸습니다.** 쓰는 곳과 찾는 곳의 출처가 달랐습니다.
+
+| 반례 | 전 | 후 |
+|---|---|---|
+| 주입연결=설치된 A, db_path=없는 B | 멀쩡한 연결을 써 보기도 전에 거절 | **통과** · 안 쓰는 `db_path` 파일도 **안 생김** |
+| db_path=설치된 A, 주입연결=빈 B | `_ready` 로 캐시된 뒤 첫 질의에서 터짐 | **준비 완료 «전에» 거절** · 캐시 안 됨 |
+
+고친 방식 — 지시 4항 그대로:
+
+1. **연결을 먼저 얻고 그 연결 위에서 확인**합니다(`assert_installed_on`). 주입 연결이
+   있으면 `db_path` 파일을 따로 열지 않습니다. 경로를 **우리가 소유할 때만** 존재를
+   먼저 봅니다 — 그래야 「없는 파일을 만들지 않는다」가 유지됩니다.
+   방언은 `configured_backend()` 로 갈라 SQLite 는 `sqlite_master`, PG 는
+   `information_schema` 를 읽습니다(**PG 가지는 NOT_RUN**).
+2. **수명·닫기 책임을 명시**했습니다. 성공하면 연결을 부르는 쪽에 넘기고(닫는 책임도
+   그쪽), **확인에 실패하면 호출자는 그 연결을 받은 적이 없으므로 관문이 닫습니다.**
+   캐시는 `(db_path, id(connect_fn))` 이 같을 때만, **성공했을 때만** 적용합니다.
+   확인한 «실제 대상» 식별자를 `_verified_target` 에 남깁니다 — 「검증했다」가 아니라
+   **「무엇을 검증했는가」**를 남기려고요.
+3. **같은 소비 시나리오에 두 조합을 연결**했습니다(아래 실행 결과).
+4. 그 연결로 **로그인·세션·티켓·문맥까지 이어서** 돌렸습니다.
+
+### 실행 결과 — 관문을 통과한 «그 연결» 로
+
+```
+① 비밀번호 설정·검증   True / 틀린 값 False        ← 음성 대조 포함
+② 세션 발급·해석       resolve(token) == user
+③ SSE 티켓            첫 소비에 문맥(tenant_probe·N1) 반환 / 두 번째 {} / 없는 티켓 {}
+④ 문맥 조회            repo.get_node("N1") → tenant_probe
+⑤ 전 과정 runtime DDL  0 건
+⑥ 검증한 실제 대상     auth.db / enterprise_context.db  (주입 연결과 «같은» 것)
+```
+
+⚠️ ③에서 **제 판정이 한 번 틀렸습니다.** 재소비 거절을 «예외» 로 기대했는데 제품 계약은
+**빈 사전**입니다(`실패하면 빈 사전`). 제품을 고치지 않고 제 기대를 고쳤습니다.
+
+### 검증
+
+```
+집중 36건 (29 → +7) · 회귀 94 passed, 5 errors (기존 seeded_org fixture 부재, 새 실패 0)
+변이 4종 각각 물림 — 경로 검사로 되돌리기 3 / 거절 연결 안 닫기 1 /
+                    확인 «전에» 캐시 1 / 확인 실패를 통과로 1   (원복 해시 일치)
+운영 DB 해시 불변 · sources_unchanged true · blocked_file_writes []
+```
+
+★ 변이 둘이 처음엔 안 물렸습니다. 하나는 **제 변이가 잘못 겨눈 것**(캐시를 «지우는» 건
+더 엄격해짐 → 「확인 전에 캐시」로 다시 겨눔), 하나는 **증명한 적이 없던 통제**
+(확인 자체가 실패할 때) 라 시험을 더했습니다.
+
+### §5 정정 수용 — 제 문서의 과장을 고칩니다
+
+- **설치 원자성의 범위**: 「모든 실패에 아무것도 안 남음 / 두 저장소 전체 원자적」은
+  과장입니다. 실제 범위는 **저장소별 DDL 실행 중 오류까지**이고, 적용 후 확인은 COMMIT
+  뒤이며 두 SQLite 파일은 각각 commit 합니다. 필수 컬럼을 누락시키면 `SchemaInstallError`
+  뒤에 **이미 생성된 표가 남습니다.** 구조를 재설계하지 않고 이 범위를 명시합니다.
+- **diff 수치**: `fc453a758` 까지 **10파일 1930 additions / 50 deletions** 입니다.
+  1788 은 이전 기준입니다.
+- **「제품 영향 57줄」은 과소 표현**입니다. 신규 `core/db/managed_schema.py` 도 runtime
+  제품 코드입니다. 기존 파일 수정량(57줄)과 신규 runtime 모듈은 구분해 적되, 전체 제품
+  영향이 57줄뿐이라고 하지 않습니다.
+- **harness 주석 정정**: `CONSUME_SQL` 은 **따로 정의한 문자열**입니다. 「제품 SQL 을 다시
+  쓰지 않는다」는 표현을 거둡니다. P03.3 에서는 **실제 제품 소비 함수**를 독립 연결로
+  실행하는 방향으로 재사용하겠습니다.
+- **`restart_holds` 는 프로세스 재시작 증거가 아닙니다** — 새 연결 대조입니다.
+  **`fingerprint` 는 audience·expires_at 을 읽고 비교에서 버리므로** 「전체 중요 필드
+  대사」라고 적지 않습니다.
+- **진척**: 다른 가산 없이 P03.1 만 수용하면 **1815/5300 = 34.2%** 입니다. 제가 적은
+  34.5% 는 C02.1 이 함께 수용될 때의 값이라 **계산 오류**였습니다. 정정합니다.
+- 파서·`REQUIRED` 의 지원 범위는 첫 슬라이스로 제한됨을 명시합니다. PG 함수/트리거 파서
+  일반화와 저장소 전수 확대는 지금 하지 않습니다.
+
+### 기동 설정에 대한 제 회신
+
+수용합니다 — 관리 대상·연결 설정은 **프로세스 시작 «전에» 배포 환경에서 주입**하는 것을
+기본으로 하고, import 후 `main.py` 에서 전역 환경을 바꾸지 않겠습니다.
+`main.py`·`run.py` 는 **건드리지 않았습니다.** 필요한 정확한 호출 지점만 적습니다:
+
+```
+AFS_DB_MANAGED_STORES          DDL 제어만 — 연결 backend/DSN 선택이나 factory 배선은 «안 해준다»
+AuthStore(connect=…)           실제 factory 배선 지점 (core/auth.py:135)
+EcmRepository(connect=…)       실제 factory 배선 지점 (core/enterprise_context/repository.py:157)
+모듈 수준 싱글턴               core/auth.py:428 · core/enterprise_context/repository.py:807
+                               → 이 둘이 «어떤 연결을 받는가» 가 배포측 startup 통합의 핵심
+```
+
+### 남은 것
+
+실제 PostgreSQL 은 여전히 **NOT_RUN** 입니다(서버·DSN 없음). 위 소비 경로는 전부 격리
+SQLite 결과이고, 같은 코드가 PG 에서 돈다는 증거가 아닙니다.

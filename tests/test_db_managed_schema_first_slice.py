@@ -396,3 +396,169 @@ def test_the_harness_uses_the_product_consume_statement():
                      "AND audience=?"):
         assert fragment in harness.CONSUME_SQL, fragment
         assert fragment in product, f"제품 SQL 이 바뀌었다: {fragment}"
+
+# ═══ ⑦ [CR-1] 검사 대상이 «실제 연결» 인가 ══════════════════════════════
+#   ⚠️ 두 store 는 `connect=` 로 연결을 주입받는데, 예전 관문은 `self.db_path` 파일을
+#     따로 열어 검사했다. 검사한 대상과 SQL 을 실행하는 대상이 같다는 보장이 없었다.
+#     **SQLite 두 개만으로 재현된다** — PG 가 와도 저절로 해소되지 않는 결함이었다.
+def _opener(path):
+    def factory():
+        conn = sqlite3.connect(path, timeout=5)
+        conn.row_factory = sqlite3.Row
+        return conn
+    return factory
+
+
+def test_an_installed_injected_connection_is_accepted_even_if_db_path_is_absent(tmp_path):
+    """★★ [CR-1 반례①] 멀쩡한 연결을 **써 보기도 전에** 거절하면 안 된다.
+
+    그리고 쓰지 않는 `db_path` 파일을 **만들어서도** 안 된다."""
+    folder = _install(tmp_path)
+    absent = str(tmp_path / "absent.db")
+    store = AuthStore(db_path=absent,
+                      connect=_opener(os.path.join(folder, "auth.db")), managed=True)
+    store._init()
+    assert store._verified_target.endswith("auth.db"), store._verified_target
+    assert not os.path.exists(absent), "쓰지도 않을 경로에 파일을 만들었다"
+
+
+def test_an_empty_injected_connection_is_refused_before_ready(tmp_path):
+    """★★ [CR-1 반례②] 이쪽이 더 나쁘다 — 관문이 «준비 완료» 를 주고 실제 대상은 비었다.
+
+    예전에는 `db_path` 가 설치돼 있으면 통과시켜 캐시까지 했고, 첫 질의에서
+    `OperationalError` 로 터졌다. 이제 **준비 완료 전에** 거절해야 한다."""
+    folder = _install(tmp_path)
+    empty = str(tmp_path / "empty.db")
+    sqlite3.connect(empty).close()
+    store = AuthStore(db_path=os.path.join(folder, "auth.db"),
+                      connect=_opener(empty), managed=True)
+    with pytest.raises(ms.ManagedSchemaError):
+        store._init()
+    assert store._managed_ok is None, "실패를 «확인됨» 으로 캐시했다"
+
+
+def test_the_same_split_is_caught_in_the_context_store_too(tmp_path):
+    """⚠️ 한쪽 문만 막으면 반대편으로 지나간다 — ECM 에도 같은 조합을 건다."""
+    folder = _install(tmp_path)
+    empty = str(tmp_path / "empty_ecm.db")
+    sqlite3.connect(empty).close()
+    repo = EcmRepository(db_path=os.path.join(folder, "enterprise_context.db"),
+                         connect=_opener(empty), managed=True)
+    with pytest.raises(ms.ManagedSchemaError):
+        repo._connect()
+    assert repo._managed_ok is None
+
+
+class _CountingConnection:
+    """닫혔는지 세는 얇은 대리. `sqlite3.Connection` 은 C 타입이라 속성 대입이
+
+    안 된다 — 처음에 `conn.close = ...` 로 가로채려다 여기서 걸렸다(내 시험 결함)."""
+
+    def __init__(self, raw, closed):
+        self._raw = raw
+        self._closed = closed
+
+    def close(self):
+        self._closed.append(1)
+        self._raw.close()
+
+    def __getattr__(self, name):
+        return getattr(self._raw, name)
+
+
+def test_a_connection_refused_by_the_gate_is_closed_by_the_gate(tmp_path):
+    """⚠️ 확인에 실패하면 호출자는 그 연결을 **받은 적이 없다** — 여기서 닫아야 한다.
+
+    안 닫으면 거절될 때마다 연결이 샌다."""
+    folder = _install(tmp_path)
+    empty = str(tmp_path / "leak.db")
+    sqlite3.connect(empty).close()
+    opened, closed = [], []
+
+    def tracking():
+        raw = sqlite3.connect(empty, timeout=5)
+        raw.row_factory = sqlite3.Row
+        opened.append(1)
+        return _CountingConnection(raw, closed)
+
+    repo = EcmRepository(db_path=os.path.join(folder, "enterprise_context.db"),
+                         connect=tracking, managed=True)
+    with pytest.raises(ms.ManagedSchemaError):
+        repo._connect()
+    assert (len(opened), len(closed)) == (1, 1), (len(opened), len(closed))
+
+
+def test_an_unreadable_target_is_refused_not_waved_through():
+    """★★ 확인 «자체» 를 못 했으면 통과가 아니다.
+
+    ⚠️ 이 가지는 변이를 걸었을 때 아무 시험도 안 물렸다 — 통제가 없던 게 아니라
+      **증명한 적이 없었다.** 연결이 조회에 답하지 못하는 상황을 만들어 누른다."""
+    class Mute:
+        def execute(self, *a, **k):
+            raise sqlite3.OperationalError("조회할 수 없음")
+
+    with pytest.raises(ms.ManagedSchemaError):
+        ms.assert_installed_on(Mute(), ms.STORE_AUTH, backend="sqlite")
+
+
+def test_the_verified_target_is_the_one_actually_used(tmp_path):
+    """★ 「검증했다」가 아니라 **「무엇을 검증했는가」**를 남긴다."""
+    folder = _install(tmp_path)
+    real = os.path.join(folder, "auth.db")
+    store = AuthStore(db_path=str(tmp_path / "somewhere_else.db"),
+                      connect=_opener(real), managed=True)
+    store._init()
+    assert os.path.normcase(store._verified_target) == os.path.normcase(real)
+
+
+# ═══ ⑧ [CR-1 ③④] 그 연결로 «실제 소비» 가 되는가 ═══════════════════════
+def test_login_context_and_ticket_run_on_the_managed_connection(tmp_path):
+    """★★ 관문을 통과한 **그 연결로** 로그인·세션·티켓·문맥이 실제로 돈다.
+
+    ⚠️ 소스 문자열이나 별도 가짜 관문으로 대체하지 않는다 — 제품 함수를 부른다.
+    ⚠️ 티켓 재소비의 «거절» 은 예외가 아니라 **빈 사전**이다(제품 계약).
+      처음에 예외를 기대했다가 내 판정이 틀렸다."""
+    folder = _install(tmp_path)
+    auth_path = os.path.join(folder, "auth.db")
+    ecm_path = os.path.join(folder, "enterprise_context.db")
+    log: list = []
+    user = "probe@example.invalid"
+
+    store = AuthStore(db_path=auth_path,
+                      connect=ms.recording_factory(auth_path, log), managed=True)
+    store.set_password(user, "pw-synthetic-001")
+    assert store.verify(user, "pw-synthetic-001") is True
+    assert store.verify(user, "wrong") is False          # 음성 대조
+
+    session = store.create_session(user)
+    token = session["token"] if isinstance(session, dict) else session
+    assert store.resolve(token) == user
+
+    issued = store.issue_sse_ticket(user, token, tenant_id="tenant_probe",
+                                    scope_node_id="N1", entity_mode="REAL")
+    raw = issued["ticket"] if isinstance(issued, dict) else issued
+    first = store.consume_sse_ticket(raw)
+    assert first.get("tenant_id") == "tenant_probe"
+    assert store.consume_sse_ticket(raw) == {}, "두 번째 소비가 통과했다"
+
+    repo = EcmRepository(db_path=ecm_path,
+                         connect=ms.recording_factory(ecm_path, log), managed=True)
+    conn = repo._connect()
+    try:
+        conn.execute("INSERT INTO tenants VALUES "
+                     "('tenant_probe','합성','','ACTIVE','now','now')")
+        conn.execute("INSERT INTO enterprise_entities "
+                     "(entity_id,tenant_id,name_ko,created_at,updated_at) "
+                     "VALUES ('E1','tenant_probe','합성법인','now','now')")
+        conn.execute("INSERT INTO organization_nodes "
+                     "(node_id,entity_id,tenant_id,node_type,name_ko,created_at,"
+                     "updated_at) VALUES "
+                     "('N1','E1','tenant_probe','DIVISION','합성본부','now','now')")
+        conn.commit()
+    finally:
+        conn.close()
+    node = repo.get_node("N1")
+    assert node is not None and node.tenant_id == "tenant_probe"
+
+    #: ★ 이 전 과정에서 DDL 이 한 줄도 없어야 한다.
+    assert ms.ddl_statements(log) == [], ms.ddl_statements(log)

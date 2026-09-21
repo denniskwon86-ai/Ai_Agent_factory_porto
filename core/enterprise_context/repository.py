@@ -160,7 +160,9 @@ class EcmRepository:
         self._lock = threading.Lock()
         #: [P03.1] 관리 스키마 모드. `None` 이면 부를 때 환경에서 읽는다.
         self._managed = managed
-        self._schema_verified = False
+        #: [CR-1] «확인에 성공한 대상» 만 캐시한다. 실패도, 다른 대상도 캐시하지 않는다.
+        self._managed_ok = None
+        self._verified_target = ""
         if self._is_managed():
             #: ★★ [P03.1] 관리 모드에서는 생성자가 **아무것도 하지 않는다.**
             #:   ⚠️ 여기서 검증해 예외를 내면 `ecm_repository = EcmRepository()` 가
@@ -176,14 +178,8 @@ class EcmRepository:
         return is_managed(STORE_ENTERPRISE_CONTEXT)
 
     # ── 인프라 ────────────────────────────────────────────────────────────
-    def _connect(self):
-        if self._is_managed() and not self._schema_verified:
-            #: ★★ [P03.1] 읽기·쓰기 **모든 길이 여기를 지난다** — 한 곳에서 막는다.
-            #:   설치 안 됐으면 여기서 멈춘다. 만들지 않는다.
-            from core.db.managed_schema import (STORE_ENTERPRISE_CONTEXT,
-                                                assert_installed)
-            assert_installed(self.db_path, STORE_ENTERPRISE_CONTEXT)
-            self._schema_verified = True
+    def _open(self):
+        """연결을 «얻기만» 한다. 검사는 `_connect` 가 이 위에서 한다."""
         if self._connect_fn is not None:
             return self._connect_fn()
         os.makedirs(os.path.dirname(self.db_path) or ".", exist_ok=True)
@@ -195,6 +191,39 @@ class EcmRepository:
         except Exception:
             pass
         return conn
+
+    def _connect(self):
+        """★★ [P03.1] 읽기·쓰기 **모든 길이 여기를 지난다** — 한 곳에서 막는다.
+
+        ★★ [CR-1] 그리고 **연결을 먼저 얻은 뒤 그 연결 위에서** 확인한다.
+          예전에는 `self.db_path` 파일을 따로 열어 검사했는데, 주입된 연결이 다른
+          저장소를 보고 있으면 «검사한 것» 과 «쓰는 것» 이 갈린다.
+
+        ⚠️ 성공하면 연결을 **부르는 쪽에 넘긴다**(닫는 책임도 그쪽). 확인에 실패하면
+          호출자는 이 연결을 받은 적이 없으므로 **여기서 닫는다.**"""
+        key = self._managed_target_key()
+        if self._is_managed() and self._managed_ok != key:
+            from core.db.managed_schema import (STORE_ENTERPRISE_CONTEXT,
+                                                ManagedSchemaError,
+                                                assert_installed_on)
+            if self._connect_fn is None and not os.path.isfile(self.db_path):
+                #: 경로를 «우리가» 소유할 때만 존재를 먼저 본다 — 연결하면 만들어진다.
+                raise ManagedSchemaError(
+                    "'enterprise_context' 스키마가 설치돼 있지 않습니다 — 설치 "
+                    "명령으로 먼저 설치하십시오. 자동으로 만들지 않습니다.")
+            conn = self._open()
+            try:
+                self._verified_target = assert_installed_on(
+                    conn, STORE_ENTERPRISE_CONTEXT)
+            except Exception:
+                conn.close()
+                raise
+            self._managed_ok = key
+            return conn
+        return self._open()
+
+    def _managed_target_key(self):
+        return (self.db_path, id(self._connect_fn))
 
     def _init_db(self):
         conn = self._connect()

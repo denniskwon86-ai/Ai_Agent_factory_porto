@@ -136,6 +136,89 @@ def missing_objects(db_path: str, store: str) -> List[str]:
     return gaps
 
 
+# ── ★★ [CR-1] 검사 대상을 «실제 연결» 에 결속한다 ─────────────────────
+#
+#   처음 판은 `assert_installed(self.db_path, ...)` 로 **파일을 직접 열어** 검사했다.
+#   그런데 두 store 는 `connect=` 로 연결을 주입받는다 — 검사한 대상과 이후 SQL 을
+#   실행하는 대상이 같다는 보장이 **어디에도 없었다.** SQLite 두 개만으로 재현된다:
+#
+#     주입 연결=설치된 A, db_path=없는 B  → 멀쩡한 연결을 써 보기도 전에 거절
+#     db_path=설치된 A, 주입 연결=빈 B    → «준비 완료» 로 캐시된 뒤 첫 질의에서 터짐
+#
+#   ★ 둘째가 특히 나쁘다. 관문이 초록을 주고 실제 대상은 비어 있다.
+#   그래서 **연결을 먼저 얻고, 그 연결 위에서** 확인한다. 쓰는 곳과 찾는 곳의 출처를
+#   하나로 만든다.
+
+def target_identity(conn) -> str:
+    """이 연결이 «실제로» 무엇을 보고 있는가. 캐시 키이자 증거다.
+
+    ⚠️ 못 알아내면 빈 문자열이다 — 그때는 「같은 대상」이라고 주장하지 않는다."""
+    try:
+        for row in conn.execute("PRAGMA database_list").fetchall():
+            if str(row[1]) == "main":
+                return str(row[2] or ":memory:")
+    except Exception:  # noqa: BLE001 — SQLite 가 아니면 알 수 없다
+        pass
+    return ""
+
+
+def _tables_and_columns(conn, backend: str) -> Dict[str, Set[str]]:
+    """살아 있는 연결에서 표·컬럼을 읽는다. **읽기 질의뿐이다.**"""
+    found: Dict[str, Set[str]] = {}
+    if backend == "postgres":
+        #: ⚠️ 이 가지는 **한 번도 실행되지 않았다**(PG 환경 없음).
+        rows = conn.execute(
+            "SELECT table_name, column_name FROM information_schema.columns "
+            "WHERE table_schema = current_schema()").fetchall()
+        for table, column in rows:
+            found.setdefault(str(table), set()).add(str(column))
+        return found
+    names = [str(r[0]) for r in conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table'").fetchall()]
+    for name in names:
+        found[name] = {str(r[1]) for r in conn.execute(f"PRAGMA table_info({name})")}
+    return found
+
+
+def missing_objects_on(conn, store: str, backend: str = "") -> List[str]:
+    """★ **연결 위에서** 요구 표·컬럼을 확인한다. 파일을 따로 열지 않는다."""
+    required = REQUIRED.get(store)
+    if required is None:
+        raise ValueError(f"모르는 저장소 이름입니다: {store}")
+    if not backend:
+        from core.db import configured_backend
+        backend = configured_backend()
+    try:
+        present = _tables_and_columns(conn, backend)
+    except Exception as exc:  # noqa: BLE001
+        #: 확인 자체를 못 했으면 «통과» 가 아니다 — 닫는다.
+        raise ManagedSchemaError(
+            f"'{store}' 스키마를 확인하지 못했습니다: {type(exc).__name__}") from exc
+    gaps: List[str] = []
+    for table, columns in required.items():
+        have = present.get(table)
+        if have is None:
+            gaps.append(f"{table}: 표 없음")
+            continue
+        gaps.extend(f"{table}.{c}: 컬럼 없음" for c in columns if c not in have)
+    return gaps
+
+
+def assert_installed_on(conn, store: str, backend: str = "") -> str:
+    """관리 모드의 «진짜» 관문. 통과하면 확인한 대상 식별자를 돌려준다.
+
+    ⚠️ 연결은 **닫지 않는다** — 부르는 쪽이 계속 쓴다. 실패했을 때 닫는 책임도
+      부르는 쪽에 있다(연결을 받은 적이 없는 호출자에게 넘기지 않기 위해서다)."""
+    gaps = missing_objects_on(conn, store, backend)
+    if gaps:
+        raise ManagedSchemaError(
+            f"'{store}' 스키마가 설치돼 있지 않거나 요구와 다릅니다 "
+            f"({len(gaps)}건: {', '.join(gaps[:4])}"
+            f"{' …' if len(gaps) > 4 else ''}). "
+            f"설치 명령으로 먼저 설치하십시오 — 자동으로 만들지 않습니다.")
+    return target_identity(conn)
+
+
 def assert_installed(db_path: str, store: str) -> None:
     """관리 모드의 관문. **여기서 멈추는 것이 빈 목록보다 낫다.**
 

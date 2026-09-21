@@ -140,6 +140,9 @@ class AuthStore:
         #: [P03.1] 관리 스키마 모드. `None` 이면 **부를 때** 환경에서 읽는다 —
         #:   기본값에 박아 두면 파이썬이 정의 시점에 한 번 묶어 나중 변경을 못 따라간다.
         self._managed = managed
+        #: [CR-1] «확인에 성공한 대상» 만 캐시한다. 실패도, 다른 대상도 캐시하지 않는다.
+        self._managed_ok = None
+        self._verified_target = ""
 
     def _connect(self):
         if self._connect_fn is not None:
@@ -155,17 +158,42 @@ class AuthStore:
         from core.db.managed_schema import STORE_AUTH, is_managed
         return is_managed(STORE_AUTH)
 
+    def _managed_target_key(self):
+        """이 인스턴스가 «무엇을» 대상으로 삼는가. 캐시는 이것이 같을 때만 유효하다."""
+        return (self.db_path, id(self._connect_fn))
+
+    def _verify_managed(self) -> None:
+        """★★ [CR-1] **실제로 쓸 연결 위에서** 확인한다.
+
+        ⚠️ 예전에는 `self.db_path` 파일을 따로 열어 검사했다. 주입된 연결이 다른
+          저장소를 보고 있으면 «검사한 것» 과 «쓰는 것» 이 갈린다 — 실제로
+          「db_path 는 설치됨 / 주입 연결은 빈 DB」 조합에서 준비 완료로 캐시된 뒤
+          첫 질의가 터졌다.
+
+        ⚠️ 연결을 우리가 열었으므로 **우리가 닫는다.** 실패해도 닫는다."""
+        from core.db.managed_schema import (STORE_AUTH, ManagedSchemaError,
+                                            assert_installed_on)
+        if self._managed_ok == self._managed_target_key():
+            return
+        if self._connect_fn is None and not os.path.isfile(self.db_path):
+            #: 경로를 «우리가» 소유할 때만 존재를 먼저 본다 — 연결하면 만들어진다.
+            raise ManagedSchemaError(
+                "'auth' 스키마가 설치돼 있지 않습니다 — 설치 명령으로 먼저 "
+                "설치하십시오. 자동으로 만들지 않습니다.")
+        with self._lock:
+            conn = self._connect()
+            try:
+                self._verified_target = assert_installed_on(conn, STORE_AUTH)
+            finally:
+                conn.close()
+        #: ★ 성공했을 때만, 그리고 «같은 대상» 에만 캐시한다.
+        self._managed_ok = self._managed_target_key()
+
     def _init(self) -> None:
         if self._ready == self.db_path:
             return
         if self._is_managed():
-            #: ★★ [P03.1] 관리 모드에서는 **한 줄의 DDL 도 돌리지 않는다.**
-            #:   대신 요구한 표·컬럼이 실제로 있는지 «읽기만» 하고, 없으면 멈춘다.
-            #:   ⚠️ 확인에 실패하면 `_ready` 를 세우지 않는다 — 세우면 다음 호출이
-            #:     그냥 통과해서 «설치 실패» 가 캐시 뒤에 숨는다.
-            from core.db.managed_schema import STORE_AUTH, assert_installed
-            assert_installed(self.db_path, STORE_AUTH)
-            self._ready = self.db_path
+            self._verify_managed()
             return
         with self._lock, self._connect() as conn:
             # ★★★ [2026-08-13 실측 회귀 수정] **컬럼 보강을 `executescript` 보다 먼저** 한다.
