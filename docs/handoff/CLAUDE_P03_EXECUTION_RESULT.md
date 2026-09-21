@@ -243,3 +243,117 @@ P03.2/3(각 20점)은 **환경 대기**라 예상에 넣지 않습니다.
 
 운영 자산 불변: `data/auth.db`·`data/enterprise_context.db` 해시 대조 OK ·
 `library/`·실사용자 자료 무접촉 · 다른 세션 미커밋 파일 보존.
+
+---
+
+# 검토 요청 — P03.1 (지시 §7 여섯 항목)
+
+> 지시 §6-1 대로 **새 검토 요청서를 만들지 않고** 이 결과 문서에 절을 더합니다.
+> 회신을 기다리며 멈추지 않습니다 — 승인 없이 가능한 준비는 위 §P03.2 에 이미 했습니다.
+
+## 1. 파일별 핵심 diff
+
+기준 `0d0789e97` → `9d0b1bc34` (**커밋·푸시 완료** — 사용자 별도 지시).
+`1788 insertions(+), 50 deletions(-)` / 10파일.
+
+| 파일 | ± | 핵심 변경 |
+|---|---:|---|
+| `core/db/managed_schema.py` | +208 | **신규.** 저장소별 관리 모드 · 첫 경로 필수 표·컬럼 · 읽기 전용 확인 · `RecordingConnection` 계측 |
+| `scripts/install_first_db_schema.py` | +330 | **신규.** `--plan`/`--apply` · 한 트랜잭션 · 적용 후 재확인 · PG 초안 대조 관문 |
+| `tests/test_db_managed_schema_first_slice.py` | +398 | **신규 29건** |
+| `scripts/first_path_consistency_harness.py` | +244 | **신규.** P03.3 동시 소비·대사·재시작 (연결 팩토리 주입) |
+| `core/db/schema/001_auth_and_context.sql` | +175/−… | 첫 경로에 맞춤(부족 14→0) · 시간 컬럼은 SQLite 의미 유지 |
+| `core/auth.py` | **+20/−4** | `managed=None` 인자 · `_is_managed()` · `_init` 이 관리 모드면 **확인만** |
+| `core/enterprise_context/repository.py` | **+37/−7** | 생성자 DDL 차단 · `_connect` 에서 1회 확인 · `_ensure_tables` 복구 차단 · `_query` 빈 목록 금지 |
+
+★ **제품 코드 변경은 두 파일 57줄뿐**입니다(`core/auth.py` 20 · ECM 37). 나머지는 신규
+도구·시험·스키마입니다. 기존 SQL 은 한 줄도 고치지 않았습니다.
+
+핵심 hunk 세 개:
+
+```
+core/auth.py         _init(): if self._is_managed(): assert_installed(...); self._ready=...; return
+core/enterprise_ctx  __init__(): if self._is_managed(): return          ← 생성자 DDL 차단
+                     _connect(): 관리 모드면 «최초 1회» assert_installed
+                     _ensure_tables(): 관리 모드면 return False          ← 조회 경로 뒷문
+                     _query(): 관리 모드면 raise (빈 목록 금지)
+```
+
+## 2. As-Is 대비 결과
+
+| 자리 | 전 | 후(관리 모드) |
+|---|---|---|
+| Auth 기동 | ALTER 4 + `executescript` | **확인만** · DDL 0 |
+| ECM 생성자 | `executescript`×2 + ALTER 3 | **아무것도 안 함** |
+| ECM 조회 실패 | `_init_db()` 재실행 | **복구 안 함** |
+| ECM 스키마 없음 | `[]` 반환 | **예외** |
+| `import` 만으로 | DDL 실행됨 | **DDL 0** |
+| 관리 안 켠 저장소 | — | **오늘과 동일**(기본값) |
+
+## 3. 재현 명령 (그대로 붙여 넣으면 됩니다)
+
+```powershell
+# ① 집중 시험 29건
+venv/Scripts/python.exe -X utf8 -B scripts/verify_data_usage_holds.py `
+  --target tests/test_db_managed_schema_first_slice.py --strict-writes
+
+# ② 묶음 끝 회귀 1회 (지시 §5)
+venv/Scripts/python.exe -X utf8 -B scripts/verify_data_usage_holds.py `
+  --target tests/test_db_managed_schema_first_slice.py `
+  --target tests/test_db_adapter_first_slice.py --target tests/test_auth_password_verify.py `
+  --target tests/test_sse_ticket.py --target tests/test_sse_org_isolation.py --strict-writes
+
+# ③ 설치 명령 — 계획(쓰지 않음) / 적용
+venv/Scripts/python.exe scripts/install_first_db_schema.py --backend sqlite --sqlite-dir <격리경로> --plan
+venv/Scripts/python.exe scripts/install_first_db_schema.py --backend sqlite --sqlite-dir <격리경로> --apply
+
+# ④ P03.3 harness (격리 경로만 — 운영 data/ 는 거절합니다)
+venv/Scripts/python.exe scripts/first_path_consistency_harness.py `
+  --backend sqlite --sqlite-path <격리경로>/auth.db --workers 4
+```
+
+기대값: ① `29 passed` ② `87 passed, 5 errors`(그 5건은 기준선과 동일)
+③ plan `wrote_anything=false` / apply `auth 6 · ecm 29 verified`, 종료코드 0
+④ `rowcounts [0,0,0,1]` · `healthy_control 1` · `restart.ok true`
+
+## 4. 실제 PG 여부 — **전부 NOT_RUN**
+
+```
+PostgreSQL 서버·DSN 없음. apply_postgres() 와 postgres_factory() 는 «한 번도» 실행되지
+않았습니다. 위의 모든 초록은 격리 SQLite 결과입니다.
+psycopg 드라이버는 설치돼 있습니다(asyncpg 도). 네트워크 탐침은 하지 않았습니다.
+```
+
+## 5. 남은 위험 — 제가 보는 것
+
+| # | 위험 | 성격 |
+|---|---|---|
+| R-a | **`_query` 가 관리 모드에서 예외를 던집니다.** 지금까지 `[]` 를 기대하던 ECM 호출자가 있으면 그 화면이 오류로 바뀝니다. 기본 모드는 그대로지만, `enterprise_context` 를 관리 모드로 켜는 순간 드러납니다 | **가장 큰 행동 변화.** 켜기 전에 호출자 점검 필요 |
+| R-b | 스키마 확인이 **최초 1회**만 돕니다(`_schema_verified`·`_ready`). 도중에 스키마가 사라지면 다시 감지하지 못합니다 | 매 연결 확인은 읽기 전용 열기 비용 — 절충한 것입니다 |
+| R-c | `REQUIRED` 는 **제가 고른 표 8개**입니다. 첫 경로가 «새 표» 를 쓰기 시작하면 대조가 놓칩니다(컬럼 추가는 잡습니다) | 목록 방식의 한계 |
+| R-d | `split_statements` 가 PG SQL 에도 sqlite 판정기를 씁니다. 지금 DDL 에는 맞지만 `$$ … $$` 함수 본문이 들어오면 틀립니다 | PG 스키마가 커질 때 |
+| R-e | harness 의 「제품 SQL 과 같은가」 시험이 **조각 문자열 대조**입니다 | 전체 문장 동일성은 아님 |
+| R-f | PG 초안의 시간 컬럼이 `TEXT` 입니다 — 타입 정합은 **아직 안 했습니다** | 의도된 유보(§준비 ①). 이관 변환+조건절 동시 변경 필요 |
+
+## 6. 되돌릴 임시 자산
+
+```
+저장소 안        없음 (git status 확인 — .db·임시 디렉터리 0건)
+스크래치패드     p03db/{auth,enterprise_context,harness_auth}.db · equiv/* · canon/*
+                 세션 임시 경로라 저장소·운영과 무관합니다. 지울 것도 없습니다.
+운영 자산        data/auth.db · data/enterprise_context.db — 해시 대조 OK(불변)
+다른 세션 파일   .agents/DECISIONS.md · AI_HANDOFF.md · PROGRESS.md ·
+                 DECISION_CREATION_CONTRACT_REPAIR_*.json · WEB_DEMO_*.md
+                 → **열지도 커밋하지도 않았습니다**
+```
+
+⚠️ `.agents/TEAM_BOARD.md` 커밋에는 **Codex 항목 6건이 함께** 들어갔습니다(공유 로그라
+통째로 커밋). 제 항목은 🔔 로 표시된 둘입니다.
+
+## 7. 제가 판단하지 않은 것
+
+- **`main.py` 전역 기동 경로 연결**: 공동 파일이라 지시 §3-6 대로 **변경 지점·이유를 먼저
+  보고**합니다. 필요한 것은 「어느 시점에 어떤 저장소를 관리 모드로 선언하는가」 한 줄이고,
+  그 자리가 `main.py` 인지 `run.py` 인지 systemd 환경인지는 **배포 계약 쪽 결정**으로 봅니다.
+- **R-a 를 켜는 시점**: `enterprise_context` 관리 모드를 실제로 켜려면 `[]` 를 기대하던
+  호출자를 먼저 봐야 합니다. 이번에는 **켜지 않았습니다**(기본값 꺼짐).
