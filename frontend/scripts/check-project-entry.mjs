@@ -1502,30 +1502,31 @@ await test('§10.1 내려받기: 두 화면이 앵커를 직접 만들지 않는
 //     클로저 값이라 결과와 늘 같다 — A 요청 뒤 B 로 옮겨도 통과했다. 「대상 확인」이 아니라
 //     자기 자신과의 비교였고, 특히 `ControlPanel` 의 `alert` 는 **전역**이라 다른 화면 위에 떴다.
 //   ★ 두 호출부의 onClick 을 **뽑아서 실행** 한다 — A 요청 → B 전환 → A 완료.
+/** 화면 파일을 읽는다. */
+const readScreen = (rel) => fs.readFileSync(new URL(rel, import.meta.url), 'utf8');
+
+/** 파일에서 라벨로 `onClick` 본문을 뽑는다 — **두 시험이 같은 도구를 쓴다.**
+ *  ⚠️ `JsxAttribute.parent` 는 여는 태그가 아니라 **속성 묶음**(`JsxAttributes`) 이다.
+ *    두 칸 올려야 여는 태그이고, 그것만 읽으면 «자식 텍스트» 가 빠진다 —
+ *    라벨이 `<button>` 안에 글로 있는 구 ControlPanel 을 못 찾는다(실제로 한 번 빨강). */
+const pickHandler = (src, marker) => {
+  const file = ts.createSourceFile('x.tsx', src, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+  let found = null;
+  (function walk(node) {
+    if (ts.isJsxAttribute(node) && node.name.getText(file) === 'onClick'
+        && node.initializer && ts.isJsxExpression(node.initializer)) {
+      const open = node.parent && node.parent.parent;
+      const element = open && open.parent && ts.isJsxElement(open.parent) ? open.parent : open;
+      const text = element ? element.getText(file) : '';
+      if (text.includes(marker)) found = node.initializer.expression.getText(file);
+    }
+    ts.forEachChild(node, walk);
+  })(file);
+  assert.ok(found, marker + ' 의 onClick 을 찾지 못했다');
+  return found;
+};
+
 await test('내려받기 안내: A 요청 → B 전환 → A 완료 시 B 화면에 붙지 않는다', async () => {
-  const read = (rel) => fs.readFileSync(new URL(rel, import.meta.url), 'utf8');
-
-  /** 파일에서 「코드·문서 내려받기」 onClick 본문을 뽑는다(라벨로 찾는다). */
-  const pickHandler = (src, marker) => {
-    const file = ts.createSourceFile('x.tsx', src, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
-    let found = null;
-    (function walk(node) {
-      if (ts.isJsxAttribute(node) && node.name.getText(file) === 'onClick'
-          && node.initializer && ts.isJsxExpression(node.initializer)) {
-        //: ⚠️ `JsxAttribute.parent` 는 여는 태그가 아니라 **속성 묶음**(`JsxAttributes`) 이다.
-        //:   두 칸 올려야 여는 태그이고, 그것만 읽으면 «자식 텍스트»가 빠진다 —
-        //:   구 ControlPanel 은 라벨이 `<button>` 안에 글로 있어서 못 찾았다(실제로 한 번 빨강).
-        const open = node.parent && node.parent.parent;
-        const element = open && open.parent && ts.isJsxElement(open.parent) ? open.parent : open;
-        const text = element ? element.getText(file) : '';
-        if (text.includes(marker)) found = node.initializer.expression.getText(file);
-      }
-      ts.forEachChild(node, walk);
-    })(file);
-    assert.ok(found, marker + ' 의 onClick 을 찾지 못했다');
-    return found;
-  };
-
   //: 대역 store — 「지금 열린 프로젝트」를 시험이 바꿀 수 있게 한다.
   let current = 'A';
   const store = { getState: () => ({ currentProjectId: current }) };
@@ -1533,7 +1534,7 @@ await test('내려받기 안내: A 요청 → B 전환 → A 완료 시 B 화면
   const download = (pid) => new Promise((resolve) => { pending = { pid, resolve }; });
 
   // ── ① 새 Studio(RunControls) ───────────────────────────────────────────
-  const runHandler = pickHandler(read('../src/factory/RunControls.tsx'), '코드·문서 내려받기');
+  const runHandler = pickHandler(readScreen('../src/factory/RunControls.tsx'), '코드·문서 내려받기');
   const notes = [];
   const alive = { current: true };
   const runClick = compileApp('(pid, downloadProjectArchive, setNote, alive, useFactoryStore) => ('
@@ -1570,7 +1571,7 @@ await test('내려받기 안내: A 요청 → B 전환 → A 완료 시 B 화면
   alive.current = true;
 
   // ── ② 종전 통제실(ControlPanel) — `alert` 는 전역이라 더 위험하다 ────────
-  const panelHandler = pickHandler(read('../src/components/ControlPanel.tsx'), '산출물 코드 ZIP 다운로드');
+  const panelHandler = pickHandler(readScreen('../src/components/ControlPanel.tsx'), '산출물 코드 ZIP 다운로드');
   const alerts = [];
   const panelClick = compileApp('(currentProjectId, downloadProjectArchive, alert, useFactoryStore)'
     + ' => (' + panelHandler + ')')('A', download, (m) => alerts.push(m), store);
@@ -1587,7 +1588,455 @@ await test('내려받기 안내: A 요청 → B 전환 → A 완료 시 B 화면
   pending.resolve({ ok: false, projectId: 'A', reason: '권한이 없습니다.', status: 403 });
   await new Promise((r) => setTimeout(r, 0));
   assert.deepEqual(alerts, ['권한이 없습니다.'], '현재 화면인데 오류를 알리지 않았다');
+
+  //: ⚠️ [2026-09-20 실측] 성공해도 **아무 말도 하지 않았다** — 실제로 눌렀는데
+  //:   `export` 가 200 이고 alert 는 0건이었다. 브라우저가 조용히 받으면
+  //:   사용자는 「눌렀는데 아무 일도 없다」로 읽는다. 새 Studio 와 같이 말한다.
+  alerts.length = 0;
+  panelClick();
+  pending.resolve({ ok: true, projectId: 'A', filename: 'A.zip', bytes: 1 });
+  await new Promise((r) => setTimeout(r, 0));
+  assert.equal(alerts.length, 1, '성공했는데 아무 말도 하지 않았다');
+  assert.match(alerts[0], /시작했습니다/, '저장 완료로 단정하거나 침묵했다');
+  assert.match(alerts[0], /A\.zip/, '공용 함수가 준 파일명을 버렸다');
+
+  //: ★ 그래도 **남의 화면에는** 말하지 않는다(성공이어도).
+  alerts.length = 0;
+  panelClick();
+  current = 'B';
+  pending.resolve({ ok: true, projectId: 'A', filename: 'A.zip', bytes: 1 });
+  await new Promise((r) => setTimeout(r, 0));
+  assert.deepEqual(alerts, [], 'A 의 성공 안내가 B 화면 위에 떴다');
 });
+
+
+// ── [§10.1 「검토용 버전 저장」] 접수·거절·«미확정» 은 서로 다른 사실이다 ──────────
+//   ⚠️⚠️ 구 통제실은 `r.ok` 하나로 갈라 **미확정까지 「실패」로 단정**했다. 그런데 이 명령의
+//     UNKNOWN 은 「안 됐다」가 아니라 「됐는지 모른다」다(응답 유실·5xx·문맥 변경). 실패라고
+//     들으면 사용자는 **다시 누르고**, 그때 같은 결과물이 두 벌 저장된다 — 공용 함수가 원키로
+//     막으려던 바로 그 사고다.
+//   ★ 새 Studio 는 공용 `command` 가 미확정을 보존·잠금한다. 구 화면만 그 계약 밖에 있었다.
+await test('검토용 버전 저장: 구 통제실이 «미확정» 을 실패로 단정하지 않는다', async () => {
+  const src = readScreen('../src/components/ControlPanel.tsx');
+  //: ★ [2026-09-19] 라벨을 「검토용 버전 저장」으로 바꿨다 — 표식도 정본을 따른다.
+  const handler = pickHandler(src, '검토용 버전 저장');
+
+  let current = 'A';
+  const store = { getState: () => ({ currentProjectId: current }) };
+  let pending = null;
+  const saveRelease = (pid) => new Promise((resolve) => { pending = { pid, resolve }; });
+  const alerts = [];
+  const make = (yes) => compileApp(
+    '(state, confirm, saveRelease, currentProjectId, alert, useFactoryStore) => (' + handler + ')')(
+    { supervisor_verdict: 'PASS' }, () => yes, saveRelease, 'A', (m) => alerts.push(m), store);
+  const click = make(true);
+  const settle = async (result) => { pending.resolve(result); await new Promise((r) => setTimeout(r, 0)); };
+  const head = () => String(alerts[alerts.length - 1] || '').split('\n\n')[0];
+
+  //: ① 미확정 — **실패로 단정하지 않고**, 다시 누르지 말라고 말한다.
+  click();
+  await settle({ ok: false, outcome: 'UNKNOWN', releaseId: null, reasonCode: 'RESPONSE_LOST',
+    message: '응답을 확인하지 못했습니다. 목록에서 결과를 확인하십시오.' });
+  assert.equal(alerts.length, 1, '미확정인데 아무 말도 하지 않았다');
+  assert.ok(!/실패/.test(head()), '미확정을 «실패» 로 단정했다: ' + head());
+  //: ★ [2026-09-19 Codex 정정] 미확정 «중» 의 재전송은 공용 계층이 이미 막는다.
+  //:   그러므로 「두 벌 저장된다」고 곁주지 않는다 — 할 일은 **원요청 조회**다.
+  assert.match(head(), /다시 누르지 말고/, '다시 누르지 말라고 말하지 않았다');
+  assert.match(head(), /조회/, '원래 요청을 조회하라는 다음 행동을 주지 않았다');
+  assert.ok(!/두 벌/.test(head()), '공용 계층이 막는 사고를 사용자 탓으로 돌렸다');
+  assert.match(alerts[0], /목록에서 결과를 확인하십시오/, '공용 함수가 준 문구를 싣지 않았다');
+
+  //: ② 거절 — 이쪽은 **실패로 말해야 한다**(①이 「아무 말도 안 하는」 시험이 되지 않게).
+  alerts.length = 0;
+  click();
+  await settle({ ok: false, outcome: 'REJECTED', releaseId: null,
+    message: '이 결과물을 저장할 권한이 없습니다.' });
+  assert.equal(alerts.length, 1);
+  assert.match(head(), /저장하지 못했습니다/, '거절을 실패로 말하지 않았다: ' + head());
+  assert.match(alerts[0], /권한이 없습니다/, '거절 사유를 싣지 않았다');
+
+  //: ③ 접수 — 화면이 문구를 **지어내지 않고** 공용 함수가 준 것을 싣는다.
+  alerts.length = 0;
+  click();
+  await settle({ ok: true, outcome: 'ACCEPTED', releaseId: 'rel_1',
+    message: '릴리스 저장 접수를 확인했습니다. 목록에서 결과를 확인하십시오.' });
+  assert.equal(alerts.length, 1);
+  assert.match(alerts[0], /릴리스 저장 접수를 확인했습니다/, '접수 문구를 화면이 버렸다');
+
+  //: ④ ⚠️ `alert` 는 **전역**이다 — A 에서 요청한 결과가 B 화면 위에 뜨면 안 된다.
+  alerts.length = 0;
+  click();
+  current = 'B';
+  await settle({ ok: false, outcome: 'UNKNOWN', releaseId: null, message: '응답을 확인하지 못했습니다.' });
+  assert.deepEqual(alerts, [], 'A 의 저장 결과가 B 화면 위에 떴다');
+
+  //: ⑤ 양성 대조 — 화면이 그대로면 **반드시** 말한다.
+  current = 'A';
+  click();
+  await settle({ ok: true, outcome: 'ACCEPTED', releaseId: 'rel_2', message: '접수를 확인했습니다.' });
+  assert.equal(alerts.length, 1, '현재 화면인데 결과를 알리지 않았다');
+
+  //: ⑥ 확인 대화상자를 거부하면 **요청 자체가 없다**.
+  alerts.length = 0; pending = null;
+  make(false)();
+  await new Promise((r) => setTimeout(r, 0));
+  assert.equal(pending, null, '거부했는데 저장을 요청했다');
+  assert.deepEqual(alerts, []);
+});
+
+
+// ── 새 Studio 쪽 계약 — 여기서 만들지 말고 공용 `command` 를 **통과**해야 한다 ──────
+//   ★ 같은 명령이 두 화면에서 다른 규칙으로 처리되면, 미확정 잠금이 한쪽에만 걸린다.
+await test('검토용 버전 저장: 새 Studio 는 영수증 기반 공용 경로로만 보낸다', async () => {
+  const src = readScreen('../src/factory/RunControls.tsx');
+  const file = ts.createSourceFile('x.tsx', src, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+  let body = null;
+  (function walk(node) {
+    if (ts.isVariableDeclaration(node) && node.name.getText(file) === 'doRelease' && node.initializer) {
+      body = node.initializer.getText(file);
+    }
+    ts.forEachChild(node, walk);
+  })(file);
+  assert.ok(body, 'doRelease 를 찾지 못했다');
+
+  const calls = [];
+  const saved = [];
+  const store = { getState: () => ({ saveRelease: (pid) => { saved.push(pid); return Promise.resolve(saveResult); } }) };
+  let saveResult = { ok: true, outcome: 'ACCEPTED', releaseId: 'rel_9', message: '접수를 확인했습니다.' };
+  //: ⚠️ `doRelease` 는 `void command(...)` 다 — **돌려주지 않는다.** 결과를 보려면
+  //:   대역이 `work()` 의 약속을 붙들어야 한다(반환값을 기다리면 `undefined` 를 읽는다).
+  let lastWork = null;
+  const command = (label, work, observed, receiptBacked) => {
+    calls.push({ label, observed, receiptBacked });
+    lastWork = work();
+    return lastWork;
+  };
+  const build = (activeReason, hasResult) => compileApp(
+    '(activeReason, hasResult, command, useFactoryStore, pid) => (' + body + ')')(
+    activeReason, hasResult, command, store, 'A');
+
+  //: ① 결과가 없으면 **보내지 않는다** — 빈 스냅샷을 만들지 않는다.
+  build('', false)();
+  assert.deepEqual(calls, [], '저장할 결과가 없는데 요청했다');
+  //: ② 실행 중에도 보내지 않는다.
+  build('실행 중입니다.', true)();
+  assert.deepEqual(calls, [], '실행 중인데 저장을 요청했다');
+
+  //: ③ 정상 — 공용 `command` 로, **영수증 기반**으로 보낸다(원키 없는 UNKNOWN 을 또 만들지 않게).
+  build('', true)();
+  const out = await lastWork;
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].label, '검토용 버전 저장');
+  assert.equal(calls[0].receiptBacked, true, '영수증 없는 옛 방식으로 보냈다');
+  assert.deepEqual(saved, ['A'], '공용 store 의 saveRelease 를 쓰지 않았다');
+  assert.match(out.message, /배포·운영 승인은 별도/, '저장과 배포 승인을 구분해 말하지 않았다');
+
+  //: ④ 실패·미확정이면 화면이 문구를 **지어내지 않는다** — 받은 사유를 그대로 올린다.
+  saveResult = { ok: false, outcome: 'UNKNOWN', releaseId: null, message: '응답을 확인하지 못했습니다.' };
+  build('', true)();
+  const bad = await lastWork;
+  assert.equal(bad.message, '응답을 확인하지 못했습니다.', '실패 사유를 화면이 바꿔 말했다');
+  assert.equal(bad.outcome, 'UNKNOWN', '미확정 구분을 잃어버렸다');
+});
+
+
+
+// ── [§10.1] 구 통제실의 명령 결과 처리 — «말하지 않는 실패» 와 «거짓 확인» ─────────
+//   ⚠️⚠️ [2026-09-19 실측] 이 화면의 여덟 명령 자리가 결과를 제대로 보지 않았다.
+//     · 「중단」은 결과를 **버리고** 무조건 「정지했습니다」라고 말했다 — 실행 중 작업이 없으면
+//       서버는 409 다(격리 서버 실측). 가동이 도는 동안 멈췄다고 믿는 것이 가장 위험하다.
+//     · 「일시정지」는 이 화면만 `/sprint/pause` 로 직접 POST 하고 응답을 안 봤다(409 실측).
+//     · 「수정 요구」의 옛 접수는 **언제나 409** 다(`REVISION_REQUEST_REQUIRED`, 실측).
+//       그런데 화면은 `res.ok` 가 아니면 **아무 일도 하지 않았다** — 눌러도 반응이 없었다.
+//     · 「작업 시작」·「재시도」는 거절당해도 조용했고, 「기획 가동」·「재가동」·「재분할」은
+//       **미확정을 실패로 단정**했다.
+//   ★ 핸들러를 **뽑아서 실행**한다. 공용 판정(`tellCommandResult`)도 제품의 것을 그대로 쓴다.
+const panelSrc = readScreen('../src/components/ControlPanel.tsx');
+const panelFile = ts.createSourceFile('c.tsx', panelSrc, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+
+/** 이름으로 선언 본문을 뽑는다(함수 선언·const 초기화 둘 다). */
+function pickDecl(name) {
+  let found = null;
+  (function walk(node) {
+    if (ts.isFunctionDeclaration(node) && node.name && node.name.getText(panelFile) === name) {
+      found = node.getText(panelFile);
+    }
+    if (ts.isVariableDeclaration(node) && node.name.getText(panelFile) === name && node.initializer) {
+      found = 'const ' + name + ' = ' + node.initializer.getText(panelFile) + ';';
+    }
+    ts.forEachChild(node, walk);
+  })(panelFile);
+  assert.ok(found, name + ' 을(를) 찾지 못했다');
+  return found;
+}
+const tellSrc = pickDecl('tellCommandResult');
+//: 핵들러가 모듈 상수를 쓴다 — **제품의 그 문장**을 그대로 넣는다(대역을 지어내면 안내를 안 본다).
+const guideSrc = pickDecl('GUIDE_TEXT');
+
+/** 핸들러 하나를 대역과 함께 컴파일한다. 판정 helper 는 **제품의 것**을 함께 넣는다. */
+function buildHandler(name, deps) {
+  const names = Object.keys(deps);
+  const expr = '(' + names.join(', ') + ') => { ' + guideSrc + ' ' + tellSrc + ' ' + pickDecl(name)
+    + ' return ' + name + '; }';
+  return compileApp(expr)(...names.map((k) => deps[k]));
+}
+
+/** 공통 대역 한 벌. `current` 로 «지금 열린 프로젝트» 를 바꿔 본다. */
+function bench(overrides = {}) {
+  const b = {
+    alerts: [], current: 'A', activeSprintId: 'T1', cleared: [], fetched: [],
+    response: { ok: false, status: 409 },
+  };
+  b.deps = {
+    alert: (m) => b.alerts.push(String(m)),
+    confirm: () => true,
+    console: { error: () => {} },
+    useFactoryStore: { getState: () => ({ currentProjectId: b.current }) },
+    API_BASE_URL: 'http://x',
+    fetch: async (url) => { b.fetched.push(String(url)); return b.response; },
+    currentProjectId: 'A',
+    setIsStarting: () => {},
+    setActiveSprintId: (v) => { b.activeSprintId = v; b.cleared.push('activeSprintId=' + v); },
+    clearSprintData: () => b.cleared.push('sprintData'),
+    clearSuspendedQuota: () => b.cleared.push('suspendedQuota'),
+    setFeedback: (v) => b.cleared.push('feedback=' + JSON.stringify(v)),
+    setIdea: (v) => b.cleared.push('idea=' + JSON.stringify(v)),
+    setMasterData: () => {},
+    setSubmittedIdea: () => {},
+    fetchWBS: () => b.cleared.push('wbs'),
+    ...overrides,
+  };
+  b.head = () => String(b.alerts[b.alerts.length - 1] || '');
+  return b;
+}
+
+await test('구 통제실 「중단」: 서버가 거절하면 «정지했습니다» 라고 말하지 않는다', async () => {
+  const b = bench();
+  const stop = async () => ({ ok: false, outcome: 'REJECTED', message: '종료를 확인할 실행 중 작업이 없습니다.' });
+  const run = buildHandler('handleStopSprint', { ...b.deps, activeSprintId: 'T1', stopSprint: stop });
+  await run();
+  assert.equal(b.alerts.length, 1, '아무 말도 하지 않았다');
+  assert.ok(!/정지했습니다/.test(b.head()) || /받아들여지지/.test(b.head()),
+    '거절당했는데 «정지했습니다» 라고 말했다: ' + b.head());
+  assert.match(b.head(), /받아들여지지 않았습니다/);
+  assert.match(b.head(), /실행 중 작업이 없습니다/, '서버 사유를 버렸다');
+
+  //: ★ 양성 대조 — 접수되면 **반드시** 말한다(위가 「아무 말도 안 하는」 시험이 되지 않게).
+  const b2 = bench();
+  const ok = async () => ({ ok: true, outcome: 'ACCEPTED', message: '정지를 접수했습니다.' });
+  await buildHandler('handleStopSprint', { ...b2.deps, activeSprintId: 'T1', stopSprint: ok })();
+  assert.equal(b2.alerts.length, 1);
+  assert.match(b2.alerts[0], /접수했습니다/);
+
+  //: ⚠️ `alert` 는 전역 — 완료 시점에 화면이 B 면 아무 말도 하지 않는다.
+  const b3 = bench();
+  const late = async () => { b3.current = 'B'; return { ok: true, outcome: 'ACCEPTED', message: 'x' }; };
+  await buildHandler('handleStopSprint', { ...b3.deps, activeSprintId: 'T1', stopSprint: late })();
+  assert.deepEqual(b3.alerts, [], 'A 의 정지 결과가 B 화면 위에 떴다');
+});
+
+await test('구 통제실 「일시정지」: 409 여도 «멈춘 것처럼» 만들지 않는다', async () => {
+  const b = bench();
+  const paused = [];
+  const pause = async (pid, taskId) => {
+    paused.push([pid, taskId]);
+    return { ok: false, outcome: 'REJECTED', message: '종료를 확인할 실행 중 작업이 없습니다.' };
+  };
+  await buildHandler('handlePauseSprint', { ...b.deps, pauseSprint: pause })({ task_id: 'T1' });
+  assert.deepEqual(paused, [['A', 'T1']], '새 Studio 와 같은 공용 명령을 쓰지 않았다');
+  assert.deepEqual(b.fetched, [], '이 화면만 다른 주소로 직접 POST 했다');
+  assert.equal(b.alerts.length, 1, '거절을 말하지 않았다');
+  assert.ok(!b.cleared.includes('activeSprintId=null'), '실패했는데 진행 중 손잡이를 비웠다');
+
+  //: ★ 양성 대조 — 접수되면 손잡이를 비운다.
+  const b2 = bench();
+  await buildHandler('handlePauseSprint',
+    { ...b2.deps, pauseSprint: async () => ({ ok: true, outcome: 'ACCEPTED', message: 'ok' }) })({ task_id: 'T1' });
+  assert.ok(b2.cleared.includes('activeSprintId=null'), '접수됐는데 화면이 그대로다');
+});
+
+await test('구 통제실 「기획 가동」: 미확정에 손잡이를 버리지 않고 실패로 단정하지 않는다', async () => {
+  const mk = (result) => {
+    const b = bench({ idea: '아이디어', masterData: '' });
+    const deps = { ...b.deps, newPlanningTaskId: () => 'PLANNING_1',
+      startPlanning: async () => result };
+    return { b, run: buildHandler('handleStartPlanning', deps) };
+  };
+  //: ① 미확정 — 실패로 말하지 않고, `activeSprintId` 를 **비우지 않는다**.
+  const u = mk({ ok: false, outcome: 'UNKNOWN', message: '응답을 확인하지 못했습니다.' });
+  await u.run();
+  assert.equal(u.b.alerts.length, 1);
+  assert.match(u.b.head(), /다시 누르지 마십시오/, '미확정을 미확정으로 말하지 않았다');
+  assert.ok(!/받아들여지지 않았습니다/.test(u.b.head()), '미확정을 거절로 단정했다');
+  assert.ok(!u.b.cleared.includes('activeSprintId=null'), '미확정인데 진행 손잡이를 버렸다');
+  assert.ok(!u.b.cleared.some((c) => c.startsWith('idea=')), '미확정인데 입력을 비웠다');
+
+  //: ② 거절 — 이쪽은 손잡이를 비우고 거절로 말한다.
+  const r = mk({ ok: false, outcome: 'REJECTED', message: '권한이 없습니다.' });
+  await r.run();
+  assert.match(r.b.head(), /받아들여지지 않았습니다/);
+  assert.ok(r.b.cleared.includes('activeSprintId=null'));
+
+  //: ③ ★ 양성 대조 — 접수되면 입력을 비운다.
+  const ok = mk({ ok: true, outcome: 'ACCEPTED', message: '접수했습니다.' });
+  await ok.run();
+  assert.deepEqual(ok.b.alerts, [], '성공인데 경고가 떴다');
+  assert.ok(ok.b.cleared.includes('idea=""'), '접수됐는데 입력이 남았다');
+
+  //: ④ 예외 — 종전에는 console 에만 남아 «눌렀는데 아무 일도 없는» 화면이었다.
+  const b = bench({ idea: '아이디어', masterData: '' });
+  await buildHandler('handleStartPlanning', { ...b.deps, newPlanningTaskId: () => 'P1',
+    startPlanning: async () => { throw new Error('boom'); } })();
+  assert.equal(b.alerts.length, 1, '예외를 삼켰다 — 화면이 조용하다');
+  assert.match(b.head(), /확인하지 못했습니다/);
+});
+
+await test('구 통제실 「재가동」: 미확정에 보류 지점을 지우지 않는다', async () => {
+  const mk = (result) => {
+    const b = bench();
+    return { b, run: buildHandler('handleResumeQuota',
+      { ...b.deps, suspendedTaskId: 'T9', resumeAfterQuota: async () => result }) };
+  };
+  const u = mk({ ok: false, outcome: 'UNKNOWN', message: '응답을 확인하지 못했습니다.' });
+  await u.run();
+  assert.match(u.b.head(), /다시 누르지 마십시오/);
+  //: ⚠️ 보류 지점을 지우면 다음 재개가 «처음부터» 로 떨어지고 이미 쓴 LLM 비용을 다시 쓴다.
+  assert.ok(!u.b.cleared.includes('suspendedQuota'), '미확정인데 보류 지점을 지웠다');
+
+  const ok = mk({ ok: true, outcome: 'ACCEPTED', message: '재개를 접수했습니다.' });
+  await ok.run();
+  assert.deepEqual(ok.b.alerts, []);
+  assert.ok(ok.b.cleared.includes('suspendedQuota'), '접수됐는데 보류 지점이 남았다');
+});
+
+await test('구 통제실 「작업 시작·재시도」: 거절을 조용히 넘기지 않는다', async () => {
+  const state = {}, wbsData = { project_name: 'P' };
+  //: ① 작업 시작 — 종전에는 응답을 통째로 버려 «가동 중» 으로 보였다.
+  const b = bench({ state, wbsData });
+  b.response = { ok: false, status: 409 };
+  await buildHandler('handleStartSprint', b.deps)({ task_id: 'T1', title: '작업' });
+  assert.equal(b.alerts.length, 1, '거절당했는데 조용하다');
+  assert.match(b.head(), /가동하지 못했습니다/);
+  assert.ok(b.cleared.includes('activeSprintId=null'), '가동 실패인데 «가동 중» 표시가 남았다');
+
+  //: ② 실패 재시도 — 종전에는 상태만 조용히 되돌렸다.
+  const b2 = bench({ state, wbsData, lastSprintFailure: { taskId: 'T2' }, window: { prompt: () => '' } });
+  b2.response = { ok: false, status: 403 };
+  await buildHandler('handleRetryFailedTask', b2.deps)(false);
+  assert.equal(b2.alerts.length, 1, '재시도 거절을 말하지 않았다');
+  assert.match(b2.head(), /재시도를 시작하지 못했습니다/);
+
+  //: ③ ★ 양성 대조 — 접수되면 아무 말도 하지 않고 가동 표시를 유지한다.
+  const b3 = bench({ state, wbsData });
+  b3.response = { ok: true, status: 200 };
+  await buildHandler('handleStartSprint', b3.deps)({ task_id: 'T1', title: '작업' });
+  assert.deepEqual(b3.alerts, []);
+  assert.equal(b3.activeSprintId, 'T1', '가동 표시가 사라졌다');
+});
+
+
+
+// ── [§1] 미확정이면 «쓰기» 만 잠근다 — 멈추기와 조회는 열어 둔다 ──────────────
+//   ★ [Codex 정정 수용] 공용 `executeStudioCommand` 는 이미 첫 POST 전에 UNKNOWN 을 기록하고
+//     PAUSE/STOP 외의 새 명령을 **거절**한다. 그러니 이 작업은 「서버 재전송을 막는 일」이
+//     아니라 **「왜 막혔는지 보이게 하고 원요청을 조회할 입구를 주는 일」** 이다.
+//   ⚠️ 그래서 시험도 「POST 가 안 나간다」가 아니라 «버튼 판정식» 을 실제로 계산해 본다.
+await test('구 통제실: 미확정이면 쓰기 버튼이 잠기고 멈추기·내려받기는 열려 있다', () => {
+  /** 라벨로 버튼을 찾아 지정한 속성의 «식» 을 꺼낸다(없으면 null). */
+  const pickAttr = (marker, attr) => {
+    let found;
+    let seen = false;
+    (function walk(node) {
+      if (ts.isJsxOpeningLikeElement(node)) {
+        const element = ts.isJsxSelfClosingElement(node) ? node
+          : (node.parent && ts.isJsxElement(node.parent) ? node.parent : node);
+        const text = element.getText(panelFile);
+        if (node.tagName.getText(panelFile) === 'button' && text.includes(marker)) {
+          seen = true;
+          const a = node.attributes.properties.find(
+            (x) => ts.isJsxAttribute(x) && x.name.getText(panelFile) === attr);
+          found = a && a.initializer && ts.isJsxExpression(a.initializer)
+            ? a.initializer.expression.getText(panelFile) : null;
+        }
+      }
+      ts.forEachChild(node, walk);
+    })(panelFile);
+    assert.ok(seen, marker + ' 버튼을 찾지 못했다');
+    return found === undefined ? null : found;
+  };
+
+  //: 대역 상태 — 「미확정 말고는 전부 정상」인 상황을 만든다. 그래야 잠긴 이유가 하나다.
+  const free = { isStarting: false, activeSprintId: null, idea: '아이디어',
+    suspendedTaskId: 'T9', feedback: '고칠 것', task: { task_id: 'T1' } };
+  const decide = (expr, pendingReason) => {
+    const names = ['isStarting', 'activeSprintId', 'idea', 'suspendedTaskId', 'feedback', 'pendingReason'];
+    const values = [free.isStarting, free.activeSprintId, free.idea, free.suspendedTaskId,
+      free.feedback, pendingReason];
+    return !!compileApp('(' + names.join(', ') + ') => (' + expr + ')')(...values);
+  };
+
+  //: ① 쓰기 — 미확정이면 잠기고, 아니면 열린다. **둘 다** 본다(한쪽만 보면 항상 잠긴
+  //:   버튼도 통과한다).
+  const WRITES = ['🎯 기획 및 작업분해 시작', '▶️ 작업 시작', '▶️ 이어서 실행',
+    '🔁 오류 반영 재시도', '💬 지시 추가 후 재시도', '🔁 작업 다시 나누기',
+    '▶️ 중단 지점부터 재가동', '검토용 버전 저장'];
+  for (const label of WRITES) {
+    const expr = pickAttr(label, 'disabled');
+    assert.ok(expr, label + ' 에 disabled 판정이 없다');
+    assert.equal(decide(expr, '미확정이 있습니다.'), true, label + ' 이 미확정인데 열려 있다');
+    assert.equal(decide(expr, ''), false, label + ' 이 미확정이 아닌데 잠겨 있다');
+  }
+
+  //: ② 멈추기 — **미확정일수록 멈출 수 있어야 한다.** 공용 계층도 PAUSE/STOP 만 예외다.
+  for (const label of ['🛑 작업 일시 정지', '🛑 강제 정지']) {
+    const expr = pickAttr(label, 'disabled');
+    assert.ok(expr === null || decide(expr, '미확정이 있습니다.') === false,
+      label + ' 이 미확정이라고 잠겼다 — 멈출 수 없게 된다');
+  }
+
+  //: ③ 내려받기·조회는 미확정과 무관하다(읽기다).
+  const down = pickAttr('산출물 코드 ZIP 다운로드', 'disabled');
+  assert.ok(down === null || decide(down, '미확정이 있습니다.') === false,
+    '읽기인 내려받기가 미확정으로 잠겼다');
+});
+
+await test('구 통제실: 미확정 안내와 «기존» 조회 UI 를 띄운다 — 새 패널을 만들지 않는다', () => {
+  //: ⚠️ 새 조회 컴포넌트를 만들면 두 화면의 복구 규칙이 갈린다. 공용 것을 그대로 쓴다.
+  assert.match(panelSrc, /import \{[^}]*StudioExecutionRequests[^}]*\}\s*\r?\n?\s*from '\.\.\/factory\/StudioExecutionRequests'/,
+    '공용 조회 UI 를 가져오지 않았다');
+  assert.match(panelSrc, /<StudioExecutionRequests projectId=\{currentProjectId\}/,
+    '공용 조회 UI 를 렌더하지 않는다');
+  //: 자동 재전송·새 원키 발급을 하지 않는다.
+  //: ⚠️ «호출» 을 본다. 주석에 이름이 적혀 있는 것을 배선으로 세면 사실이 아니게 된다.
+  assert.ok(!/(recoverExecutionRequest|executeStudioCommand|crypto\.randomUUID)\s*\(/.test(panelSrc),
+    '구 화면이 원키 발급·자동 복구를 직접 한다');
+
+  //: 판정은 공용 훅 하나에서 온다 — 세 번째 구독 사본을 만들지 않는다.
+  assert.match(panelSrc, /useExecutionPending\(currentProjectId/, '공용 미확정 훅을 쓰지 않는다');
+  assert.ok(!/subscribeExecutionRecords/.test(panelSrc), '구독을 또 한 벌 만들었다');
+});
+
+await test('구 통제실 「수정 요구」: 닫힌 경로로 **보내지 않고** 실제 입구를 알린다', async () => {
+  const b = bench({ feedback: '이 부분을 고쳐주세요.' });
+  await buildHandler('handleSubmitFeedback', b.deps)();
+  //: ★ 완료 기준 — 폐쇄 endpoint POST **0회**. 안내를 보이려고 실패할 요청을 보내지 않는다.
+  assert.deepEqual(b.fetched, [], '닫힌 줄 알면서 요청을 보냈다');
+  assert.equal(b.alerts.length, 1, '아무 말도 하지 않았다');
+  assert.match(b.head(), /새 제작 화면/, '실제 입구를 말하지 않았다');
+  assert.match(b.head(), /수정 요청/, '그 화면에서 무엇을 눌러야 하는지 말하지 않았다');
+  assert.match(b.head(), /복사/, '입력이 자동으로 옮겨가지 않는다는 것을 말하지 않았다');
+  //: ⚠️ 입력을 지우지 않는다 — 사용자가 복사해 가야 한다.
+  assert.ok(!b.cleared.some((c) => c.startsWith('feedback=')), '안내만 하고 입력을 지웠다');
+  //: 서버 내부 경로를 사용자에게 보이지 않는다.
+  assert.ok(!/revision-requests|sprint\//.test(b.head()), '내부 경로를 그대로 보였다');
+
+  //: 빈 입력이면 입력부터 요구한다(안내로 대체하지 않는다).
+  const b2 = bench({ feedback: '   ' });
+  await buildHandler('handleSubmitFeedback', b2.deps)();
+  assert.deepEqual(b2.fetched, []);
+  assert.match(b2.head(), /입력/);
+});
+
 
 // ── [FIX3] 중복 mount·재조회 — React 훅을 «흉내 내어 실제로 두 번 렌더»한다 ──────
 //   ⚠️ 정적 검사가 아니다. useCallback/useMemo 는 실제 React 처럼 의존성 얕은비교로
