@@ -1,0 +1,112 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# [P1 · DEP-02/09/10] 배포 산출물 계약 — Linux 합성 검사
+#
+# ⚠️⚠️ **이 워크플로는 한 번도 실행된 적이 없다.** (2026-09-21 작성)
+#   Linux 러너도 원격 저장소도 이 자리에 없다. 아래는 «초안» 이고, 초록을 본 적이 없다.
+#   첫 실행에서 깨질 가장 그럴듯한 자리는 **대소문자** 다 — 개발은 Windows(대소문자 무시),
+#   러너는 Linux(구분)라서 `import Core.x` 같은 것이 여기서 처음 터진다. 그게 이 검사를
+#   두는 이유 중 하나다.
+#
+# ⚠️ [DEP-10] **원격 쪽 설정은 여기서 만들어지지 않는다.** 필수 검사 지정(branch
+#   protection)·요금제·승인 기능은 저장소 설정이며 **별도 확인 대상**이다.
+#   이 파일이 있다는 것만으로 「CI 가 구축됐다」고 보고하지 않는다.
+#
+# 무엇을 하나
+#   ① 프런트를 **실제로 빌드**한다 — `prebuild` 가 preview-vendor 3종을 만든다.
+#   ② 산출물 계약을 검사한다(허용목록·내용·완결성·필수 자산) → 걸리면 **실패**.
+#   ③ 검사기 자신을 시험한다 — 검사기가 틀리면 ②의 초록이 거짓이다.
+#   ④ manifest(경로별 SHA-256)를 남긴다 — 「무엇을 배포했나」에 나중에 답하려고.
+#
+# 무엇을 «안» 하나
+#   · 배포하지 않는다. P1 은 **계약** 이지 전달이 아니다.
+#   · 비밀을 쓰지 않는다. 이 작업에 필요한 secret 은 **하나도 없다**.
+#   · 제품 의존성(`requirements.txt`, torch·transformers 포함)을 설치하지 않는다 —
+#     검사기는 **표준 라이브러리만** 쓴다. 전체 제품 시험을 CI 에 올리는 것은 별건이다.
+# ─────────────────────────────────────────────────────────────────────────────
+name: artifact-contract
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+  workflow_dispatch:
+
+# 읽기만 한다. 이 작업은 저장소에 아무것도 쓰지 않는다.
+permissions:
+  contents: read
+
+concurrency:
+  group: artifact-contract-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    steps:
+      - name: 코드 받기
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false   # 이후 단계에 토큰을 남기지 않는다.
+
+      - name: Node 준비
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: 프런트 의존성 설치
+        working-directory: frontend
+        run: npm ci
+
+      # `build` = `tsc -b && vite build` 이고, `prebuild` 가 preview-vendor 3종을 만든다.
+      # ⚠️ 타입 검사는 반드시 `tsc -b` 여야 한다 — `tsc -p tsconfig.json` 은 0개 파일을
+      #   검사하고 **조용히 통과**한다. package.json 의 build 가 이미 `-b` 를 쓴다.
+      - name: 프런트 빌드(미리보기 vendor 포함)
+        working-directory: frontend
+        run: npm run build
+
+      - name: 빌드 산출물이 실제로 생겼는지
+        run: |
+          set -eu
+          for f in frontend/dist/index.html \
+                   frontend/dist/preview-vendor/runtime.js \
+                   frontend/dist/preview-vendor/babel.js \
+                   frontend/dist/preview-vendor/tailwind.js; do
+            test -s "$f" || { echo "::error::필수 자산이 없거나 비어 있다: $f"; exit 1; }
+          done
+
+      - name: Python 준비
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      # 검사기는 표준 라이브러리만 쓴다 — 설치할 것이 없다.
+      # 걸리면 manifest 를 만들지 않고 0 이 아닌 코드로 끝난다.
+      - name: 산출물 계약 검사 + manifest
+        run: python scripts/release_artifact.py --manifest artifacts/manifest.json
+
+      # ★ 검사기가 틀리면 위의 초록이 거짓이다. 그래서 검사기 자신도 시험한다.
+      #
+      # ⚠️ 저장소 `pytest.ini` 의 `addopts` 가 `-p tests.plugin_test_auth` 를 강제하고,
+      #   그 플러그인은 모듈 수준에서 **fastapi 를 import** 한다. 제품 의존성을 깔지 않는
+      #   이 작업에서는 거기서 죽는다. 그래서 **빈 설정으로 분리해** 돌린다 —
+      #   이 시험 파일은 도구를 «파일 경로로» 적재하고 합성 트리에서만 놀기 때문에
+      #   저장소 설정이 필요 없다(같은 방식으로 로컬에서 24건 초록을 확인했다).
+      - name: 검사기 시험
+        run: |
+          set -eu
+          python -m pip install --disable-pip-version-check --quiet pytest
+          echo "[pytest]" > "${RUNNER_TEMP}/pytest-ci.ini"
+          python -m pytest -c "${RUNNER_TEMP}/pytest-ci.ini" -p no:cacheprovider tests/test_release_artifact.py
+
+      - name: manifest 보관
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-manifest-${{ github.sha }}
+          path: artifacts/manifest.json
+          if-no-files-found: ignore
+          retention-days: 30

@@ -151,3 +151,6 @@ data_backup_*/
 #   위 `data/scope_policy.json` 과 똑같은 사고가 난다 — 한 환경에서 「쿼터 회피로 한시 전환」한
 #   것이 다른 환경의 라우팅을 덮어쓴다. 파일이 없으면 코드 기본값으로 부팅한다.
 data/model_routing_policy.json
+
+# CI 산출물 계약이 만드는 manifest — 저장소에 넣지 않는다.
+artifacts/

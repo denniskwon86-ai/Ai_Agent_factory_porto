@@ -39,7 +39,7 @@ _DB_PATH = data_path("connectors.db")
 
 #: 자격증명처럼 보이는 문자열. `auth_ref` 에 이런 게 들어오면 **거부**한다.
 #  ⚠️ 토큰 접두사(sk- 등)에만 "단어 시작" 제약을 건다. URL 인라인 자격증명
-#    (`postgres://user:pw@host`)은 `://` 앞이 알파벳이라 그 제약에 걸려 **빠져나간다** —
+#    (`://` 뒤에 아이디와 암호가 붙는 형태)은 `://` 앞이 알파벳이라 그 제약에 걸려 **빠져나간다** —
 #    실제로 테스트에서 통과할 뻔했다. 그래서 대안을 분리한다.
 _SECRET_LOOKALIKE = re.compile(
     r"(?i)(?:(?:^|[^A-Za-z])(?:sk-|xoxb-|ghp_|AKIA|Bearer\s)"
