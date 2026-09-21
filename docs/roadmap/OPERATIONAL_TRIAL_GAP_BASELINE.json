@@ -1,0 +1,1554 @@
+{
+  "schema_version": 3,
+  "baseline_id": "TRIAL-GAP-20260921-R3",
+  "status": "ACTIVE",
+  "assessed_at": "2026-09-21T14:02:00+09:00",
+  "delivery_steps": "docs/roadmap/OPERATIONAL_TRIAL_DELIVERY_STEPS.json",
+  "delivery_plan": "docs/roadmap/OPERATIONAL_TRIAL_DELIVERY_PLAN.md",
+  "basis_commit": "0d0789e97090e9f303fa343908fade8561047368",
+  "authority": "사용자 최신 지시: 기존 수 합산/점수 승계 대신 현재 구현↔달성 목표 Gap에서 전체 모수 재구성.",
+  "goal": "NCP에서 일부 실제 업무자료를 사용해 30명/동시10명의 1단계 원료구매 업무 운영 트라이얼을 수행하고, 자체 배포관리 UI+GitHub로 무중단 변경·복구한다.",
+  "scope": {
+    "business_path": "원료구매→물류/재고→생산·재무 영향→의사결정·실행·효과. 기존7앱·L2/초안/생성앱 계약은 제거하지 않음.",
+    "data": "승인된 회사/부서/기간의 실제 자료. 모든 ERP 양방향 연계를 1단계 필수로 가정하지 않되 실제 과제/증빙은 합성으로 대체하지 않음.",
+    "control": "사설 자체 웹UI 3메뉴·독립 관리DB/서버·GitHub 엔진·제한agent·로컬 Codex→PR. 새 Codex API·CS패키지·운영서버 직접수정 제외.",
+    "later": [
+      "100명/동시30과200명/동시50+ 수용",
+      "두 번째 실제 법인 확산",
+      "장기 코호트 ROI·그룹 전사 확산"
+    ],
+    "later_rule": "후속 목표로 보존; 삭제나 완료 처리 아님. 첫 업무 효과 기록은 M05/U01에 포함."
+  },
+  "supersedes": [
+    "docs/handoff/DECISION_CREATION_CONTRACT_REPAIR_2026-09-11.json",
+    "docs/handoff/TRIAL_PROGRESS_BASELINE_2026-09-21.json",
+    "docs/handoff/INTEGRATED_TRIAL_DELIVERY_STATUS_2026-09-21.md"
+  ],
+  "method": {
+    "derivation": "To-Be 11개→관측 가능한 납품/인수 대상→현행 코드/증거→Gap 유형→완료 조건/의존성/담당. 기존 21점/22점 승계 없음.",
+    "unit": "work_item은53개 목표/Gap 인벤토리이며 point=1은 목표 개수만 뜻한다. 실제 전체 진척은 별도 단계 원장의 고정 배점5300으로 계산한다. 완료18목표1800점 보존, 남은3500점은 기존 잔여시간 중간값 비율로 배분. 공수 실측/가동 확률이 아니다.",
+    "formula": "sum(delivery_step.points where status=accepted) / 5300 * 100",
+    "partial_credit": "상위 목표 미완료라도 수용된 중간 단계의 고정점수를 즉시 인정. 임의 진행률/투입시간/시험건수로 가산하지 않음.",
+    "statuses": {
+      "done": "해당 항목의 명시된 국소 출구에 대응하는 증거 확인",
+      "partial": "재사용 구현은 있으나 연결·정책·완결성 부족",
+      "gap": "필수 구현/연결 산출물이 부재 또는 현재 구조로 출구를 만족하지 못함",
+      "unverified": "실환경·실사용·운영 증거가 부족; 새 코딩이 필요하다고 단정하지 않음"
+    },
+    "completion": "모든 항목 done 및 trial 차단 P0/P1 0. U01/U02/U03 인수 필수. 승인 대기/설계/파일 존재만으로 실제 실행 출구 완료 불가.",
+    "freeze": "새 목표 변경 시 버전·추가/삭제 이유와 전후 분모/분자를 공개. 결함 수리·추가 테스트는 해당 항목 안에 기록. 항목 세분화는 총 점수를 유지하거나 명시 재기준화.",
+    "evidence": "문서의 PASS를 그대로 복사하지 않고 명시된 출구에 맞춰 판단. 오래된 문서의 미구현 표기는 현행 코드와 대조. 이번 미재실행 증거는 fresh_runtime_test=false."
+  },
+  "outcomes": [
+    {
+      "id": "A",
+      "name": "권한에 맞게 로그인하고 업무를 이어간다",
+      "to_be": "실제 사용자·조직·대상·입력·이벤트의 경계 일치"
+    },
+    {
+      "id": "L",
+      "name": "L2 골격을 설치·수정하고 부서 앱으로 사용한다",
+      "to_be": "참조 팩을 실제 부서/데이터/권한과 연결"
+    },
+    {
+      "id": "D",
+      "name": "실자료를 등록·검증·인증해 업무에 쓴다",
+      "to_be": "RAW 보존→오너 서명/정책→적격 앱·계산 소비"
+    },
+    {
+      "id": "F",
+      "name": "요구에서 실제 업무 앱을 만들고 수정한다",
+      "to_be": "초안→실제 제작→안전한 제어·비용"
+    },
+    {
+      "id": "R",
+      "name": "앱·산출물을 전달하고 안전하게 운영한다",
+      "to_be": "Host 계약→버전/미리보기/다운로드→승격/수락"
+    },
+    {
+      "id": "M",
+      "name": "근거로 계산·판단하고 실행 결과를 확인한다",
+      "to_be": "의미 경로→결정론 계산→승인→실행·효과"
+    },
+    {
+      "id": "P",
+      "name": "업무 정본이 PostgreSQL에서 보존·복구된다",
+      "to_be": "이관 도구뿐 아니라 실제 DB 업무 경로"
+    },
+    {
+      "id": "W",
+      "name": "서버를 바꿔도 작업·이벤트·파일이 유지된다",
+      "to_be": "다중 노드 소유권·재생·정본 파일·호환"
+    },
+    {
+      "id": "C",
+      "name": "자체 관리 UI로 신뢰 가능한 배포를 통제한다",
+      "to_be": "불변 artifact·GitHub 승인·원자 원장·agent 관측"
+    },
+    {
+      "id": "N",
+      "name": "NCP에서 무중단 변경과 운영 대응이 가능하다",
+      "to_be": "사설 보안·HA·전환/복구·관측·수정 PR 추적"
+    },
+    {
+      "id": "U",
+      "name": "실제 사용자가 반복 업무를 수행하고 인수한다",
+      "to_be": "업무완주·동시10·장애복구·운영인수"
+    }
+  ],
+  "progress": {
+    "authoritative_state": "delivery_steps의 accepted 상태/증거/검토/선행/승인",
+    "calculator": "scripts/check_trial_progress.py --markdown --forecast",
+    "total_points": 5300,
+    "opening_earned_points": 1800,
+    "opening_percent": 34.0,
+    "note": "아래 opening_assessment와 work_item.status는R2 초기 Gap 분류다. 현재 전체 진척은 매번 단계 원장에서 계산하고 상위 종결은 전체 자기 단계의 수용으로 파생한다."
+  },
+  "opening_assessment": {
+    "accepted": 18,
+    "total": 53,
+    "percent": 34,
+    "remaining": 35,
+    "status_counts": {
+      "done": 18,
+      "partial": 12,
+      "unverified": 12,
+      "gap": 11
+    },
+    "new_delivery_this_turn": 0,
+    "prior_52_5_status": "폐기된 현재지표; 역사 기록만",
+    "withdrawn_42_3_status": "기존 단계 승계식이므로 철회; 이번 분자 근거로 쓰지 않음."
+  },
+  "decision_register": [
+    {
+      "id": "DEC-AUTH",
+      "blocks": [
+        "A04",
+        "A05"
+      ],
+      "need": "실제 계정 인증 방식·viewer/member의 자기 범위 전환 정책",
+      "preparation": "현재 권한은 보존하고 일반 사용자 실패/허용 사례로 최소 변경안 작성",
+      "authority": "제품/보안 정책 결정자"
+    },
+    {
+      "id": "DEC-STATUS",
+      "blocks": [
+        "R04"
+      ],
+      "need": "일반 status 활성화 API가 요구할 정식 승격 근거",
+      "preparation": "모든 소비자와 우회 재현을 확인; 관리자라고 준비도 생략 허용으로 추정 금지",
+      "authority": "제품/보안 정책 결정자"
+    },
+    {
+      "id": "ENV-PG",
+      "blocks": [
+        "P03"
+      ],
+      "need": "승인된 격리 PG endpoint/driver 또는 로컬 격리 환경 확보",
+      "preparation": "schema/ETL/test 준비는 가능. 비밀/DSN 원문은 문서에 싣지 않음",
+      "authority": "로컬/DB 환경 담당"
+    },
+    {
+      "id": "DATA-ACTUAL",
+      "blocks": [
+        "D06",
+        "U01"
+      ],
+      "need": "자료 오너·회사/기간·인증자·실제 사용자 및 사용 승인",
+      "preparation": "이미 확보된 RAW/매핑 재사용; 승인자/유효기간을 임의 채우지 않음",
+      "authority": "실자료 소유자/사용자"
+    },
+    {
+      "id": "COST-EXEC",
+      "blocks": [
+        "F04",
+        "F05",
+        "N01",
+        "C05"
+      ],
+      "need": "실제 LLM 실행 상한·클라우드 견적/자원·GitHub 설정/외부 실행 승인",
+      "preparation": "로컬 계약/코드/명령 준비는 지속 가능",
+      "authority": "비용/계정 관리자"
+    },
+    {
+      "id": "OPS-ACCEPT",
+      "blocks": [
+        "N03",
+        "U03"
+      ],
+      "need": "실자료 보관/삭제·RPO/RTO·비상책임자·운영 인수",
+      "preparation": "이미 있는 격리 절차를 운영절차와 구분해 초안 작성",
+      "authority": "운영 책임자/사용자"
+    }
+  ],
+  "work_items": [
+    {
+      "id": "A01",
+      "outcome": "A",
+      "title": "직접 진입 대상 서버 확인",
+      "status": "done",
+      "current": "project/mega/kit_app/draft/release 진입 게이트와 소유 문맥/판본 확인 구현·검증 기록.",
+      "gap": "없음. 새 기능이나 게이트를 재구현하지 않음.",
+      "acceptance": "대표 대상의 정상 진입 및 없는/비가시 대상 거절을 기존 서버 권한으로 판단.",
+      "owner": "Codex",
+      "depends_on": [],
+      "evidence": [
+        "frontend/src/factory/studioDraftEntry.ts",
+        "docs/handoff/CLAUDE_REVIEW_REQUEST_CLOSEOUT_2026-09-19.md"
+      ],
+      "remaining_engineering_hours": [
+        0,
+        0
+      ],
+      "gap_type": "none",
+      "point": 1,
+      "evidence_scope": "명시한 국소 산출물·시험/관측의 완료. trial 전체 수용 아님.",
+      "fresh_runtime_test": false
+    },
+    {
+      "id": "A02",
+      "outcome": "A",
+      "title": "URL·히스토리·미저장 입력 보호",
+      "status": "done",
+      "current": "뒤로/앞으로·초안 닫기·URL 보존·동일 문서 이동 보호 실측 기록.",
+      "gap": "없음. 문서 이탈/배포 중 입력 보존의 최종 수용은 U02에서 확인.",
+      "acceptance": "동일 문서 이동에서 URL/화면 일치, 취소 시 입력 보존, 늦은 응답 오염 차단.",
+      "owner": "Codex",
+      "depends_on": [],
+      "evidence": [
+        "frontend/src/factory/studioLeaveGuard.ts",
+        "docs/handoff/CLAUDE_REVIEW_REQUEST_B6_CONTEXT_2026-09-18.md",
+        "docs/handoff/CLAUDE_REVIEW_REQUEST_CLOSEOUT_2026-09-19.md"
+      ],
+      "remaining_engineering_hours": [
+        0,
+        0
+      ],
+      "gap_type": "none",
+      "point": 1,
+      "evidence_scope": "명시한 국소 산출물·시험/관측의 완료. trial 전체 수용 아님.",
+      "fresh_runtime_test": false
+    },
+    {
+      "id": "A03",
+      "outcome": "A",
+      "title": "문맥 전환·현재 연결 소비 차단",
+      "status": "done",
+      "current": "회사 전환 재확인·합성 SSE 생산자→store→DOM 및 옛 연결 무시 시험/실측.",
+      "gap": "없음. 서버 이벤트 영속화·재생은 W02와 다른 일.",
+      "acceptance": "문맥 전환 시 이전 내용 차단, 재권한 확인, 옛 연결 이벤트 미반영 및 현재 이벤트 양성 대조.",
+      "owner": "Codex",
+      "depends_on": [],
+      "evidence": [
+        "docs/handoff/CLAUDE_REVIEW_REQUEST_B6_DECISIONS_2026-09-19.md",
+        "docs/handoff/CLAUDE_REVIEW_REQUEST_CLOSEOUT_2026-09-19.md"
+      ],
+      "remaining_engineering_hours": [
+        0,
+        0
+      ],
+      "gap_type": "none",
+      "point": 1,
+      "evidence_scope": "명시한 국소 산출물·시험/관측의 완료. trial 전체 수용 아님.",
+      "fresh_runtime_test": false
+    },
+    {
+      "id": "A04",
+      "outcome": "A",
+      "title": "실제 계정·역할·문맥 전환 운영 설정",
+      "status": "partial",
+      "current": "세션 토큰 인증 존재. AuthStore의 자격증명 미등록 분기는 공통 초기 비밀번호를 비교한다(core/auth.py:224). contexts/select의 admin.organization 요구가 viewer/member 전환을 제약. SSO는 별도 슬롯.",
+      "gap": "공통 초기 자격증명 fallback의 trial 사용을 차단하고 안전한 최초 등록/회수 검증. 운영 인증 방식·역할별 전환 정책 확정. 기존 사용자의 자격증명/권한을 임의 교체하지 않음.",
+      "acceptance": "승인된 인증 정책 아래 30명 계정/역할 관리. 미등록/공통 초기 자격증명으로 trial 로그인 불가, 일반 사용자는 자기 허용 범위 이동. 임의 관리자 승격 금지.",
+      "owner": "Codex + 사용자/인증 담당",
+      "depends_on": [],
+      "evidence": [
+        "core/auth.py",
+        "docs/handoff/CLAUDE_REVIEW_REQUEST_B6_DECISIONS_2026-09-19.md"
+      ],
+      "remaining_engineering_hours": [
+        4,
+        12
+      ],
+      "gap_type": "policy",
+      "point": 1,
+      "evidence_scope": "코드/문서 확인 범위. 미검증을 미구현과 구분.",
+      "fresh_runtime_test": false
+    },
+    {
+      "id": "A05",
+      "outcome": "A",
+      "title": "실자료 접근·역할 회수 통합 보안 수용",
+      "status": "unverified",
+      "current": "여러 개별 가시성/404 검증은 있으나 trial 실계정/실자료 통합 매트릭스 증거 없음.",
+      "gap": "목록/단건/첨부/생성앱/작업/SSE에 같은 접근 경계를 실환경으로 증명.",
+      "acceptance": "허용·금지 역할의 양성/음성 쌍, 세션/권한 회수·교차 문맥 유출0, 비밀/실자료 로그 노출0.",
+      "owner": "Codex",
+      "depends_on": [
+        "A04",
+        "D06",
+        "R05",
+        "P04"
+      ],
+      "evidence": [
+        "api/routes/program_control.py",
+        "docs/handoff/CLAUDE_TO_CODEX_REVIEW_2026-09-20_B.md"
+      ],
+      "remaining_engineering_hours": [
+        4,
+        10
+      ],
+      "gap_type": "validation",
+      "point": 1,
+      "evidence_scope": "코드/문서 확인 범위. 미검증을 미구현과 구분.",
+      "fresh_runtime_test": false
+    },
+    {
+      "id": "L01",
+      "outcome": "L",
+      "title": "고정 판본 표준 L2 팩 저장 계약",
+      "status": "done",
+      "current": "8L1/29L2 참조 팩·불변 원문/지문·version 충돌 검사 구현. NO_DATA/DOMAIN_REVIEW_REQUIRED 표기 유지.",
+      "gap": "없음. 현업 적합성 승인과 앱·데이터 완성은 L04.",
+      "acceptance": "팩 원문/ID/판본 고정, 변조/중복 버전 거절, REFERENCE_ONLY와 실사용 적격을 구분.",
+      "owner": "Claude",
+      "depends_on": [],
+      "evidence": [
+        "core/data_preparation/process_pack_artifacts.py",
+        "docs/handoff/L2_STUDIO_B2_SETUP_2026-09-13.md"
+      ],
+      "remaining_engineering_hours": [
+        0,
+        0
+      ],
+      "gap_type": "none",
+      "point": 1,
+      "evidence_scope": "명시한 국소 산출물·시험/관측의 완료. trial 전체 수용 아님.",
+      "fresh_runtime_test": false
+    },
+    {
+      "id": "L02",
+      "outcome": "L",
+      "title": "L1/L2 변경·제안·독립 승인",
+      "status": "done",
+      "current": "추가/사용상태/상위 이동/바로가기 변경과 제안·타인 승인·재조회 코드 및 집중 검사.",
+      "gap": "없음. 새 기획 없이 현재 기능을 trial에서 수용.",
+      "acceptance": "업무 ID와 기존 참조를 보존해 변경·차이 검토·독립 승인·조회 반영.",
+      "owner": "Codex",
+      "depends_on": [
+        "L01"
+      ],
+      "evidence": [
+        "docs/handoff/L2_STUDIO_B4_INSTALLATION_FLOW_2026-09-13.md",
+        "frontend/src/lib/processInstallationApi.ts",
+        "output/process-installation-check-a4a6bf37-2924-4837-9110-97cdb3a903ab/report.json"
+      ],
+      "remaining_engineering_hours": [
+        0,
+        0
+      ],
+      "gap_type": "none",
+      "point": 1,
+      "evidence_scope": "명시한 국소 산출물·시험/관측의 완료. trial 전체 수용 아님.",
+      "fresh_runtime_test": true
+    },
+    {
+      "id": "L03",
+      "outcome": "L",
+      "title": "키트 설치·실패 재개·문맥 결속",
+      "status": "done",
+      "current": "plan/start/resume/cancel, 적격자 인수, revision CAS·설치 상태와 DP/ECM 계약 구현·검사.",
+      "gap": "없음. 실제 설치 시 업무 준비도 승격은 L04.",
+      "acceptance": "같은 설치 재시도에서 중복 인스턴스/늦은 응답 오염 방지 및 명시적 승인.",
+      "owner": "Claude",
+      "depends_on": [
+        "L01"
+      ],
+      "evidence": [
+        "core/enterprise_context/process_installation.py",
+        "docs/handoff/L2_STUDIO_B2_SETUP_2026-09-13.md",
+        "output/process-installation-check-a4a6bf37-2924-4837-9110-97cdb3a903ab/report.json"
+      ],
+      "remaining_engineering_hours": [
+        0,
+        0
+      ],
+      "gap_type": "none",
+      "point": 1,
+      "evidence_scope": "명시한 국소 산출물·시험/관측의 완료. trial 전체 수용 아님.",
+      "fresh_runtime_test": true
+    },
+    {
+      "id": "L04",
+      "outcome": "L",
+      "title": "선정 부서 L2·7앱 실제 자료 연결",
+      "status": "partial",
+      "current": "기존7앱과 후보 업무 골격 존재. 코드 출구는 데이터 준비/현업 인증 완료를 명시적으로 제외.",
+      "gap": "도메인 담당 검토, 기존 앱별 인증 데이터/권한/업무 계약 결속 및 실행.",
+      "acceptance": "선정 원료구매 폐루프에 쓰는 기존7앱의 입력·책임·L2·자료·권한 연결이 실제 사용자 기준으로 성립.",
+      "owner": "Claude + 현업 담당",
+      "depends_on": [
+        "L02",
+        "L03",
+        "D06",
+        "R05"
+      ],
+      "evidence": [
+        "docs/handoff/L2_STUDIO_B2_SETUP_2026-09-13.md",
+        "docs/handoff/K1_C5_EXISTING_DEPARTMENT_ALIGNMENT_2026-09-10.md"
+      ],
+      "remaining_engineering_hours": [
+        8,
+        20
+      ],
+      "gap_type": "integration",
+      "point": 1,
+      "evidence_scope": "코드/문서 확인 범위. 미검증을 미구현과 구분.",
+      "fresh_runtime_test": false
+    },
+    {
+      "id": "D01",
+      "outcome": "D",
+      "title": "파일 등록·원천 결속·RAW 판 보존",
+      "status": "done",
+      "current": "기존 업로드/결속/스냅샷 API와 RAW 보존·재조회·대사 기록.",
+      "gap": "없음. 실제 자료 승인/인증과는 분리.",
+      "acceptance": "입력 원문·판본·체크섬·문맥·출처를 보존하고 잘못된 결속을 거절.",
+      "owner": "Claude",
+      "depends_on": [],
+      "evidence": [
+        "api/routes/data_preparation_control.py",
+        "docs/handoff/K1_C5_EXISTING_DEPARTMENT_ALIGNMENT_2026-09-10.md"
+      ],
+      "remaining_engineering_hours": [
+        0,
+        0
+      ],
+      "gap_type": "none",
+      "point": 1,
+      "evidence_scope": "명시한 국소 산출물·시험/관측의 완료. trial 전체 수용 아님.",
+      "fresh_runtime_test": false
+    },
+    {
+      "id": "D02",
+      "outcome": "D",
+      "title": "선행 데이터 참조 정렬",
+      "status": "done",
+      "current": "선행5종/1397행·6RAW판 및 기존자료 참조 대사 기록. 합성/미인증 성격 보존.",
+      "gap": "없음. 동일 자료 재적재 금지.",
+      "acceptance": "조직/달력/창고/조건/가격 자료를 원문 보존으로 정렬하고 참조 오류 확인.",
+      "owner": "Claude",
+      "depends_on": [
+        "D01"
+      ],
+      "evidence": [
+        "docs/handoff/FOUNDATION_ALIGNMENT_CHECKPOINT_2026-09-11.md"
+      ],
+      "remaining_engineering_hours": [
+        0,
+        0
+      ],
+      "gap_type": "none",
+      "point": 1,
+      "evidence_scope": "명시한 국소 산출물·시험/관측의 완료. trial 전체 수용 아님.",
+      "fresh_runtime_test": false
+    },
+    {
+      "id": "D03",
+      "outcome": "D",
+      "title": "사용 보류의 인증·소비 강제",
+      "status": "done",
+      "current": "usage_policy가 인증/준비도/객체/앱/계산을 차단하고 경쟁 쓰기 회귀 기록.",
+      "gap": "없음. 보류를 정식 해제한 증거는 D06.",
+      "acceptance": "미검증·잘못된 문맥·가격/기간 보류를 실제 인증·계산 경계에서 차단.",
+      "owner": "Claude",
+      "depends_on": [
+        "D01"
+      ],
+      "evidence": [
+        "core/data_preparation/usage_policy.py",
+        "docs/handoff/DATA_USAGE_HOLD_ENFORCEMENT_2026-09-12.md"
+      ],
+      "remaining_engineering_hours": [
+        0,
+        0
+      ],
+      "gap_type": "none",
+      "point": 1,
+      "evidence_scope": "명시한 국소 산출물·시험/관측의 완료. trial 전체 수용 아님.",
+      "fresh_runtime_test": false
+    },
+    {
+      "id": "D04",
+      "outcome": "D",
+      "title": "회사 실적 서명·인증 서버 계약",
+      "status": "done",
+      "current": "OWNER_CERTIFIED API·정책·서명과 최종 인증 원자성 구현, 133건 합동 회귀 기록.",
+      "gap": "없음. UI가 없는 것과 서버가 없는 것을 혼동하지 않음.",
+      "acceptance": "적격 주체/기간/용도 서명과 보류 검사, 마지막 서명/인증의 원자성 보장.",
+      "owner": "Claude",
+      "depends_on": [
+        "D03"
+      ],
+      "evidence": [
+        "api/routes/data_preparation_control.py",
+        "docs/handoff/PROPOSAL_ACTUAL_CERTIFICATION_2026-09-11.md",
+        "output/usage-holds-qkq_3qxq/tests.xml"
+      ],
+      "remaining_engineering_hours": [
+        0,
+        0
+      ],
+      "gap_type": "none",
+      "point": 1,
+      "evidence_scope": "명시한 국소 산출물·시험/관측의 완료. trial 전체 수용 아님.",
+      "fresh_runtime_test": true
+    },
+    {
+      "id": "D05",
+      "outcome": "D",
+      "title": "인증 정책·서명·반려 사용자 화면",
+      "status": "gap",
+      "current": "인증 API는 존재하나 frontend/src에서 certifications/OWNER_CERTIFIED/정책 API 소비 연결을 발견하지 못함.",
+      "gap": "화면 경로를 확인하고 미연결 소비자를 기존 API에 연결. 새 인증 정책 엔진을 만들지 않음.",
+      "acceptance": "Data Owner와 관리자가 기간/용도/보류/서명 현황을 보고 권한에 맞게 확인·서명·재검토 가능.",
+      "owner": "Codex",
+      "depends_on": [
+        "D04"
+      ],
+      "evidence": [
+        "frontend/src/components/DataPrepPanel.tsx",
+        "frontend/src/lib/dataPrepApi.ts",
+        "api/routes/data_preparation_control.py"
+      ],
+      "remaining_engineering_hours": [
+        6,
+        14
+      ],
+      "gap_type": "implementation",
+      "point": 1,
+      "evidence_scope": "코드/문서 확인 범위. 미검증을 미구현과 구분.",
+      "fresh_runtime_test": false
+    },
+    {
+      "id": "D06",
+      "outcome": "D",
+      "title": "승인 실자료 인증→앱·계산 소비",
+      "status": "unverified",
+      "current": "RAW·합성 정렬 증거는 있으나 실제 소유권·가격/시점 근거·회사 인증 및 대표 앱/계산 수용 미완료.",
+      "gap": "사용자가 승인한 자료/오너/기간으로 인증, 보류 해제 근거와 downstream 대사.",
+      "acceptance": "실제 자료가 적격 서명을 거쳐 해당 회사/기간 앱·계산에 사용되고 미승인 자료는 차단.",
+      "owner": "Claude + 실제 Data Owner",
+      "depends_on": [
+        "D02",
+        "D05",
+        "A04"
+      ],
+      "evidence": [
+        "docs/handoff/FOUNDATION_ALIGNMENT_CHECKPOINT_2026-09-11.md",
+        "docs/handoff/DATA_USAGE_HOLD_ENFORCEMENT_2026-09-12.md"
+      ],
+      "remaining_engineering_hours": [
+        4,
+        12
+      ],
+      "gap_type": "data_authorization",
+      "point": 1,
+      "evidence_scope": "코드/문서 확인 범위. 미검증을 미구현과 구분.",
+      "fresh_runtime_test": false
+    },
+    {
+      "id": "F01",
+      "outcome": "F",
+      "title": "요구 초안 저장·지정 판본 재개",
+      "status": "done",
+      "current": "BuildStartDialog·draft metadata/open·서버 소유 문맥·판본별 내용 복원 기록.",
+      "gap": "없음. 실제 제작 생산자 검증은 F04.",
+      "acceptance": "요구 입력을 저장하고 정확한 초안/판본/문맥으로 다시 연다. 저장을 제작/승인으로 오인하지 않음.",
+      "owner": "Codex",
+      "depends_on": [
+        "A01"
+      ],
+      "evidence": [
+        "frontend/src/factory/studioDraftEntry.ts",
+        "docs/handoff/CLAUDE_REVIEW_REQUEST_CLOSEOUT_2026-09-19.md"
+      ],
+      "remaining_engineering_hours": [
+        0,
+        0
+      ],
+      "gap_type": "none",
+      "point": 1,
+      "evidence_scope": "명시한 국소 산출물·시험/관측의 완료. trial 전체 수용 아님.",
+      "fresh_runtime_test": false
+    },
+    {
+      "id": "F02",
+      "outcome": "F",
+      "title": "제작 명령 영수증·미확정 보호",
+      "status": "done",
+      "current": "저장 초안·요청 신원·결과 영수증·UNKNOWN 보호·같은 사건 복구 계약 구현/검사 기록.",
+      "gap": "없음. 모든 실제 장기작업 제어의 정상완주는 F03/W01.",
+      "acceptance": "ACCEPTED/REJECTED/UNKNOWN 구분, 중복/늦은 응답 방지, 서버 접수와 실행 완료 분리.",
+      "owner": "Codex",
+      "depends_on": [],
+      "evidence": [
+        "docs/handoff/L2_STUDIO_B5_GENERAL_HOTL_CONSUMPTION_2026-09-14.md",
+        "frontend/src/factory/studioInputMemory.ts"
+      ],
+      "remaining_engineering_hours": [
+        0,
+        0
+      ],
+      "gap_type": "none",
+      "point": 1,
+      "evidence_scope": "명시한 국소 산출물·시험/관측의 완료. trial 전체 수용 아님.",
+      "fresh_runtime_test": false
+    },
+    {
+      "id": "F03",
+      "outcome": "F",
+      "title": "수정 요구·중단·재개의 사용자 동작",
+      "status": "partial",
+      "current": "RevisionRequestEditor·sprint actions 존재. 수정 요청은 TODO와 execution_started=False를 기록한다(studio_revision_requests.py:216). PROCESSING/UNKNOWN 잔류가 새 실행을 차단한다.",
+      "gap": "접수된 수정 TODO의 실제 실행/결과 연결, 잔류 미확정 복구와 새·구 제어 경로 대조. 안전하게 막는 것만으로 실행/복구 완료 처리 금지.",
+      "acceptance": "같은 산출물 기준으로 수정 요청이 실제 실행에 반영되고 pause/stop/recovery가 사실과 일치.",
+      "owner": "Codex",
+      "depends_on": [
+        "F02",
+        "W01"
+      ],
+      "evidence": [
+        "frontend/src/factory/RevisionRequestEditor.tsx",
+        "frontend/src/factory/sprintActions.ts",
+        "docs/handoff/CLAUDE_TO_CODEX_REVIEW_2026-09-19.md"
+      ],
+      "remaining_engineering_hours": [
+        4,
+        10
+      ],
+      "gap_type": "integration",
+      "point": 1,
+      "evidence_scope": "코드/문서 확인 범위. 미검증을 미구현과 구분.",
+      "fresh_runtime_test": false
+    },
+    {
+      "id": "F04",
+      "outcome": "F",
+      "title": "실제 제작→Host 계약→산출물",
+      "status": "partial",
+      "current": "생성기·Host 계약/물질화 경로 존재, 최근 주요 수용은 합성 fixture 중심.",
+      "gap": "승인된 실제 LLM 제작으로 계약·컴파일·물질화·미리보기·실행을 관통; 미연결만 수정.",
+      "acceptance": "실제 사용자 요구로 생성한 앱이 Host 계약과 데이터 경계를 상속하고 결과물을 만들며 수정 후 새판 생성.",
+      "owner": "Claude",
+      "depends_on": [
+        "F01",
+        "D06",
+        "R01"
+      ],
+      "evidence": [
+        "core/host_runtime_provider.py",
+        "docs/handoff/I4_HOST_RUNTIME_HANDOFF_2026-08-15.md",
+        "docs/handoff/CLAUDE_TO_CODEX_REVIEW_2026-09-20.md"
+      ],
+      "remaining_engineering_hours": [
+        8,
+        20
+      ],
+      "gap_type": "integration",
+      "point": 1,
+      "evidence_scope": "코드/문서 확인 범위. 미검증을 미구현과 구분.",
+      "fresh_runtime_test": false
+    },
+    {
+      "id": "F05",
+      "outcome": "F",
+      "title": "LLM 호출·재시도·비용 한도 운영 수용",
+      "status": "unverified",
+      "current": "모델/비용 계측 기반은 존재. 실제 trial 제작 동시 제한·실행 전 상한 집행 확인 미완료.",
+      "gap": "실행 모델/호출·토큰·재시도·시간·동시작업 상한과 비밀 관리 확인.",
+      "acceptance": "승인 예산 초과 작업은 접수/재시도 제한, 비용/실패가 보이며 운영 App/DB를 예산 때문에 삭제하지 않음.",
+      "owner": "Claude + 비용 승인자",
+      "depends_on": [
+        "F04"
+      ],
+      "evidence": [
+        "docs/roadmap/NCP_ZERO_DOWNTIME_DELIVERY_AND_CODEX_2026-09-20.md"
+      ],
+      "remaining_engineering_hours": [
+        4,
+        10
+      ],
+      "gap_type": "validation",
+      "point": 1,
+      "evidence_scope": "코드/문서 확인 범위. 미검증을 미구현과 구분.",
+      "fresh_runtime_test": false
+    },
+    {
+      "id": "R01",
+      "outcome": "R",
+      "title": "생성 앱 Host 보안·브리지 현행 수용",
+      "status": "partial",
+      "current": "Host wire/provider/bridge 존재. 실제 제공은 Native·Snapshot, 쓰기는 Native만. Connector·Derived는 지원 대기로 거절된다(host_runtime_provider.py:49).",
+      "gap": "대상7앱의 provider 요구 대조 및 필수 경로 구현/연결, 토큰·출처·능력·권한 상속 수용. 미지원 provider를 지원 완료/Native fallback으로 위장 금지. 옛 미착수 지시 재수행 금지.",
+      "acceptance": "생성 앱이 별도 인증/직접 DB 없이 Host로만 접근하고 미선언 능력·다른 조직·잘못된 origin을 거절.",
+      "owner": "Claude",
+      "depends_on": [
+        "A04"
+      ],
+      "evidence": [
+        "frontend/src/lib/hostRuntimeBridge.ts",
+        "core/host_runtime_wire.py",
+        "docs/handoff/I4_HOST_RUNTIME_HANDOFF_2026-08-15.md"
+      ],
+      "remaining_engineering_hours": [
+        4,
+        10
+      ],
+      "gap_type": "validation",
+      "point": 1,
+      "evidence_scope": "코드/문서 확인 범위. 미검증을 미구현과 구분.",
+      "fresh_runtime_test": false
+    },
+    {
+      "id": "R02",
+      "outcome": "R",
+      "title": "검토 버전·미리보기·내려받기 전달",
+      "status": "partial",
+      "current": "버전 저장 목록·실클릭 export200 및 ZIP 응답 기록. 디스크 저장은 미검증, 일부 자료는 합성.",
+      "gap": "실제 제작 산출물의 앱/보고서/문서 미리보기와 사용자 다운로드 파일 열기 확인.",
+      "acceptance": "정확한 판본의 결과를 저장/미리보기/내려받고 실패는 명시. 브라우저 제한을 디스크 성공으로 보고하지 않음.",
+      "owner": "Codex",
+      "depends_on": [
+        "F04"
+      ],
+      "evidence": [
+        "docs/handoff/CLAUDE_REVIEW_REQUEST_DOWNLOAD_2026-09-19.md",
+        "docs/handoff/CLAUDE_TO_CODEX_REVIEW_2026-09-19.md"
+      ],
+      "remaining_engineering_hours": [
+        2,
+        6
+      ],
+      "gap_type": "validation",
+      "point": 1,
+      "evidence_scope": "코드/문서 확인 범위. 미검증을 미구현과 구분.",
+      "fresh_runtime_test": false
+    },
+    {
+      "id": "R03",
+      "outcome": "R",
+      "title": "릴리스 단건 은닉·재개 원상 복원",
+      "status": "done",
+      "current": "비가시/없는 릴리스 동일404, 재개 원상상태·fingerprint·반복호출·원자성 보완과 관련 시험.",
+      "gap": "없음. 일반 status 승격은 R04에서 별도 차단.",
+      "acceptance": "단건 조회가 목록 가시성을 우회하지 않고 재개가 candidate를 active로 임의 승격하거나 지문을 잃지 않음.",
+      "owner": "Claude",
+      "depends_on": [],
+      "evidence": [
+        "docs/handoff/CLAUDE_TO_CODEX_REVIEW_2026-09-20_B.md",
+        "docs/handoff/CLAUDE_TO_CODEX_REVIEW_2026-09-21.md",
+        "core/program_lifecycle.py",
+        "output/usage-holds-qkq_3qxq/tests.xml"
+      ],
+      "remaining_engineering_hours": [
+        0,
+        0
+      ],
+      "gap_type": "none",
+      "point": 1,
+      "evidence_scope": "명시한 국소 산출물·시험/관측의 완료. trial 전체 수용 아님.",
+      "fresh_runtime_test": true
+    },
+    {
+      "id": "R04",
+      "outcome": "R",
+      "title": "모든 릴리스 활성화 진입의 준비도 일치",
+      "status": "partial",
+      "current": "일반 POST programs/{id}/status가 admin 검사 후 set_status를 직접 호출; 재개 수정만으로 전체 승격 봉쇄 아님.",
+      "gap": "정식 승격 근거와 일반 status API 허용 범위를 확정하고 우회·회귀 검사.",
+      "acceptance": "모든 candidate→active 경로에 승인·데이터/Host 준비도·동일 판본 근거가 일치; 예외는 명시 정책/감사.",
+      "owner": "Claude + 정책 결정자",
+      "depends_on": [
+        "R03"
+      ],
+      "evidence": [
+        "api/routes/program_control.py",
+        "docs/handoff/CLAUDE_TO_CODEX_REVIEW_2026-09-21.md"
+      ],
+      "remaining_engineering_hours": [
+        3,
+        8
+      ],
+      "gap_type": "policy",
+      "point": 1,
+      "evidence_scope": "코드/문서 확인 범위. 미검증을 미구현과 구분.",
+      "fresh_runtime_test": false
+    },
+    {
+      "id": "R05",
+      "outcome": "R",
+      "title": "생성 앱 전달·수락·실데이터 실행",
+      "status": "unverified",
+      "current": "전달/공유/승격 구성요소 존재. 실제 역할·인증자료·생성 결과가 연결된 반복 사용 증거 부족.",
+      "gap": "다른 실제 사용자 수락→실행→입력/조회→감사 검증.",
+      "acceptance": "앱 수락이 데이터 권한 부여로 바뀌지 않고 사용자별 허용 자료만 실행. 부적격 릴리스 실행 차단.",
+      "owner": "Claude",
+      "depends_on": [
+        "F04",
+        "R01",
+        "R04",
+        "D06"
+      ],
+      "evidence": [
+        "frontend/src/components/KitAppPanel.tsx",
+        "core/host_runtime_provider.py"
+      ],
+      "remaining_engineering_hours": [
+        4,
+        12
+      ],
+      "gap_type": "validation",
+      "point": 1,
+      "evidence_scope": "코드/문서 확인 범위. 미검증을 미구현과 구분.",
+      "fresh_runtime_test": false
+    },
+    {
+      "id": "M01",
+      "outcome": "M",
+      "title": "업무 의미 경로·근거 탐색 현행 연결",
+      "status": "partial",
+      "current": "ontology_runtime/resolvers/path와 API/UI 존재. 오래된 헌장의 런타임 부재 주장은 현행과 다름.",
+      "gap": "대표 원료 지연→공장/생산/현금흐름 질문의 승인 관계·권한·시점 연결을 검증.",
+      "acceptance": "중간 비가시 노드를 건너뛰지 않고 객체·관계·출처·기준시점·품질을 설명하며 수치는 계산엔진에 위임.",
+      "owner": "Codex",
+      "depends_on": [
+        "D06"
+      ],
+      "evidence": [
+        "core/ontology_runtime.py",
+        "core/ontology_resolvers.py",
+        "api/routes/ontology_control.py"
+      ],
+      "remaining_engineering_hours": [
+        4,
+        12
+      ],
+      "gap_type": "integration",
+      "point": 1,
+      "evidence_scope": "코드/문서 확인 범위. 미검증을 미구현과 구분.",
+      "fresh_runtime_test": false
+    },
+    {
+      "id": "M02",
+      "outcome": "M",
+      "title": "공개 관측→동인→결정론적 계산",
+      "status": "done",
+      "current": "WorldBank240행 수집·승격·동인·시나리오·SOURCE_CERTIFIED 대표 경로 기록.",
+      "gap": "없음. 회사 실적/다원천 운영 수용과 분리.",
+      "acceptance": "대표 공개 원천의 출처/판본을 보존하고 승인 동인·계산으로 연결.",
+      "owner": "Claude",
+      "depends_on": [],
+      "evidence": [
+        "docs/test_plan/F8_REAL_WALK.md",
+        "docs/handoff/SESSION_2026-09-11_WORLDBANK_LIVE_RUN.md"
+      ],
+      "remaining_engineering_hours": [
+        0,
+        0
+      ],
+      "gap_type": "none",
+      "point": 1,
+      "evidence_scope": "명시한 국소 산출물·시험/관측의 완료. trial 전체 수용 아님.",
+      "fresh_runtime_test": false
+    },
+    {
+      "id": "M03",
+      "outcome": "M",
+      "title": "의사결정 근거 결속·작성 API",
+      "status": "done",
+      "current": "baseline/scenario/engine_version 결속과 실제 UI 요청의 API 재대입·임시원장 검증 기록.",
+      "gap": "없음. 실제 실행/효과는 M05.",
+      "acceptance": "안건이 정확한 계산/원천 근거와 묶여 저장되고 근거 누락·불일치가 거절.",
+      "owner": "Codex",
+      "depends_on": [
+        "M02"
+      ],
+      "evidence": [
+        "docs/handoff/DECISION_CREATION_CONTRACT_REPAIR_2026-09-11.json",
+        "api/routes/decision_control.py"
+      ],
+      "remaining_engineering_hours": [
+        0,
+        0
+      ],
+      "gap_type": "none",
+      "point": 1,
+      "evidence_scope": "명시한 국소 산출물·시험/관측의 완료. trial 전체 수용 아님.",
+      "fresh_runtime_test": false
+    },
+    {
+      "id": "M04",
+      "outcome": "M",
+      "title": "회사 실적 대사·Replay/Backtest",
+      "status": "unverified",
+      "current": "계산·시나리오 기반 존재; 같은 회사/기간의 인증 실적 백테스트 수용 미완료.",
+      "gap": "실적 입력과 기준선·산식·단위·통화·기간을 고정하고 오차/기여를 대사.",
+      "acceptance": "선정 업무의 물량/원가/현금흐름 결과가 재현되고 실제 대비 차이와 근거가 설명됨.",
+      "owner": "Claude + 현업",
+      "depends_on": [
+        "D06",
+        "M01",
+        "M02"
+      ],
+      "evidence": [
+        "core/planning_engine.py",
+        "core/enterprise_financial_model.py"
+      ],
+      "remaining_engineering_hours": [
+        6,
+        16
+      ],
+      "gap_type": "validation",
+      "point": 1,
+      "evidence_scope": "코드/문서 확인 범위. 미검증을 미구현과 구분.",
+      "fresh_runtime_test": false
+    },
+    {
+      "id": "M05",
+      "outcome": "M",
+      "title": "결정→실행과제→증빙·효과 폐루프",
+      "status": "partial",
+      "current": "의사결정/실행/효과 이력과 합성 어댑터 경로 존재. 실제 trial 반복 업무는 미완료.",
+      "gap": "실제 책임자의 승인·과제/실행·증빙·예상 대비 효과를 같은 업무ID로 결속.",
+      "acceptance": "내부 실제 과제 실행 및 결과를 추적; 외부 전송을 사용하는 경우 승인된 실제 어댑터로 검증. mock은 대체 불가.",
+      "owner": "Codex + 현업",
+      "depends_on": [
+        "M03",
+        "M04",
+        "R05"
+      ],
+      "evidence": [
+        "docs/test_plan/F8_REAL_WALK.md",
+        "core/decision_case.py"
+      ],
+      "remaining_engineering_hours": [
+        6,
+        16
+      ],
+      "gap_type": "integration",
+      "point": 1,
+      "evidence_scope": "코드/문서 확인 범위. 미검증을 미구현과 구분.",
+      "fresh_runtime_test": false
+    },
+    {
+      "id": "M06",
+      "outcome": "M",
+      "title": "Task ID 없는 근거 질문·안전한 행동 제안",
+      "status": "partial",
+      "current": "Jarvis/ontology/decision 경로는 존재하나 선정 업무 실자료에서 전 구간 수용 미확인.",
+      "gap": "권한 기반 질의·설명·영향 미리보기·사람 승인까지 연결 검사.",
+      "acceptance": "프로젝트ID 없이도 허용 근거로 답하고 데이터 누락/충돌을 알리며 승인 없이 실행하지 않음.",
+      "owner": "Codex",
+      "depends_on": [
+        "M01",
+        "M05"
+      ],
+      "evidence": [
+        "docs/AI_FACTORY_STUDIO_PRODUCT_BIBLE.md",
+        "api/routes/ontology_control.py"
+      ],
+      "remaining_engineering_hours": [
+        4,
+        12
+      ],
+      "gap_type": "validation",
+      "point": 1,
+      "evidence_scope": "코드/문서 확인 범위. 미검증을 미구현과 구분.",
+      "fresh_runtime_test": false
+    },
+    {
+      "id": "P01",
+      "outcome": "P",
+      "title": "현행 DB·파일 이관 대상 지도",
+      "status": "done",
+      "current": "20파일/95표/16startup ALTER와 업무14·캐시5·빈파일1, JSON정본 분리 실측.",
+      "gap": "없음. 전부 PG 이관으로 가정하지 않음.",
+      "acceptance": "저장소 종류·DB밖 정본·첫 경로·기동 DDL·소유/수명 차이 명시.",
+      "owner": "Claude",
+      "depends_on": [],
+      "evidence": [
+        "docs/handoff/CLAUDE_DB0_DELTA_AND_FIRST_SLICE_2026-09-20.md"
+      ],
+      "remaining_engineering_hours": [
+        0,
+        0
+      ],
+      "gap_type": "none",
+      "point": 1,
+      "evidence_scope": "명시한 국소 산출물·시험/관측의 완료. trial 전체 수용 아님.",
+      "fresh_runtime_test": false
+    },
+    {
+      "id": "P02",
+      "outcome": "P",
+      "title": "DB 방언 어댑터·첫 schema 계약",
+      "status": "done",
+      "current": "core/db wrapper·auth/ECM 주입점·7테이블 설치SQL·SQLite/대역20검사 기록.",
+      "gap": "없음. 실제 PG 실행은 P03.",
+      "acceptance": "잘못된 backend/DSN 누락 거절, SQL 변환 및 기본 SQLite 호환을 검증한 adapter/설치 명세.",
+      "owner": "Claude",
+      "depends_on": [
+        "P01"
+      ],
+      "evidence": [
+        "core/db/__init__.py",
+        "core/db/schema/001_auth_and_context.sql",
+        "docs/handoff/CLAUDE_DB1_FIRST_ADAPTER_2026-09-21.md",
+        "output/usage-holds-qkq_3qxq/tests.xml"
+      ],
+      "remaining_engineering_hours": [
+        0,
+        0
+      ],
+      "gap_type": "none",
+      "point": 1,
+      "evidence_scope": "명시한 국소 산출물·시험/관측의 완료. trial 전체 수용 아님.",
+      "fresh_runtime_test": true
+    },
+    {
+      "id": "P03",
+      "outcome": "P",
+      "title": "실제 PG 인증·문맥·티켓 경로",
+      "status": "partial",
+      "current": "PG 설치SQL은 있으나 실제 PG 실행0확인. 기본 Docker endpoint도 연결 실패.",
+      "gap": "격리 PG/driver 확보, runtime DDL 분리, empty→NULL 이관과 동시 소비 검증.",
+      "acceptance": "실제 PG 로그인/문맥/권한/티켓1회소비·대사·재시작이 정상, 기동 DDL0.",
+      "owner": "Claude",
+      "depends_on": [
+        "P02"
+      ],
+      "evidence": [
+        "docs/handoff/CLAUDE_DB1_FIRST_ADAPTER_2026-09-21.md"
+      ],
+      "remaining_engineering_hours": [
+        4,
+        8
+      ],
+      "gap_type": "environment",
+      "point": 1,
+      "evidence_scope": "코드/문서 확인 범위. 미검증을 미구현과 구분.",
+      "fresh_runtime_test": false
+    },
+    {
+      "id": "P04",
+      "outcome": "P",
+      "title": "나머지 필수 업무 저장소 PG 전환",
+      "status": "gap",
+      "current": "기동 DDL 분리는 조사 단계. data_preparation/decision/planning/advisor 등 SQLite 핵심 경로 잔존.",
+      "gap": "첫 slice 이외 필수 저장소별 migration·SQL·락/트리거·runtime DDL 제거 및 시험.",
+      "acceptance": "트라이얼 필수 업무 경로가 실제 PG로 실행; startup seed/DDL0, 업무 제약·권한·N/N-1 호환 유지.",
+      "owner": "Claude",
+      "depends_on": [
+        "P03"
+      ],
+      "evidence": [
+        "docs/handoff/CLAUDE_DB0_BOOT_DDL_SEPARATION_2026-09-21.md",
+        "core/data_preparation/store.py"
+      ],
+      "remaining_engineering_hours": [
+        24,
+        60
+      ],
+      "gap_type": "implementation",
+      "point": 1,
+      "evidence_scope": "코드/문서 확인 범위. 미검증을 미구현과 구분.",
+      "fresh_runtime_test": false
+    },
+    {
+      "id": "P05",
+      "outcome": "P",
+      "title": "승인 자료 ETL·DB/파일 대사·복원",
+      "status": "gap",
+      "current": "조사/기존RAW사본 도구는 존재하나 승인 자료의 PG ETL·정본파일 교차대사·복원 증거 없음.",
+      "gap": "비밀 제외한 이관/대사/복원 도구와 사본 리허설, 승인 후 actual cutover.",
+      "acceptance": "row/key/hash/권한/파일참조 대사와 복원 후 업무 재실행 성공, 원본 불변/복구 가능.",
+      "owner": "Claude",
+      "depends_on": [
+        "P04",
+        "W03"
+      ],
+      "evidence": [
+        "docs/handoff/CLAUDE_DB0_DELTA_AND_FIRST_SLICE_2026-09-20.md"
+      ],
+      "remaining_engineering_hours": [
+        8,
+        20
+      ],
+      "gap_type": "implementation",
+      "point": 1,
+      "evidence_scope": "코드/문서 확인 범위. 미검증을 미구현과 구분.",
+      "fresh_runtime_test": false
+    },
+    {
+      "id": "W01",
+      "outcome": "W",
+      "title": "영속 작업큐·단일 실행 소유권",
+      "status": "gap",
+      "current": "active_tasks는 Dict[str, asyncio.Task], create_task 프로세스 실행. DB영수증은 작업영속성 자체가 아님.",
+      "gap": "durable job/lease/fencing·재시작/두worker 인수·중복 side effect 방지 구현.",
+      "acceptance": "배포/worker 재시작 중 접수 작업 유실/중복 실행0, 현재 소유권과 실행 상태 복구.",
+      "owner": "Claude",
+      "depends_on": [
+        "P03"
+      ],
+      "evidence": [
+        "core/async_orchestrator.py",
+        "core/studio_execution_guard.py"
+      ],
+      "remaining_engineering_hours": [
+        12,
+        28
+      ],
+      "gap_type": "implementation",
+      "point": 1,
+      "evidence_scope": "코드/문서 확인 범위. 미검증을 미구현과 구분.",
+      "fresh_runtime_test": false
+    },
+    {
+      "id": "W02",
+      "outcome": "W",
+      "title": "프로세스 밖 이벤트·SSE 재생",
+      "status": "gap",
+      "current": "SSEBroadcaster.clients와 asyncio.Queue가 메모리; 프런트 옛 연결 가드와는 별개.",
+      "gap": "공유 이벤트 저장/브로커·cursor·재생/중복/권한 재검사 연결.",
+      "acceptance": "다른 App노드/재시작 후 이벤트 누락·중복 표시·권한 밖 반영0.",
+      "owner": "Claude",
+      "depends_on": [
+        "P03",
+        "A03"
+      ],
+      "evidence": [
+        "core/broadcaster.py"
+      ],
+      "remaining_engineering_hours": [
+        8,
+        20
+      ],
+      "gap_type": "implementation",
+      "point": 1,
+      "evidence_scope": "코드/문서 확인 범위. 미검증을 미구현과 구분.",
+      "fresh_runtime_test": false
+    },
+    {
+      "id": "W03",
+      "outcome": "W",
+      "title": "프로젝트·릴리스 파일 공유·원자 저장",
+      "status": "gap",
+      "current": "projects/latest_state.json·library/release.json와 DB상태 분리. 표식 디렉터리는 실제 공유증거 아님.",
+      "gap": "공유 저장 위치·노드 접근/권한·원자쓰기·DB파일 일관성/복구 연결.",
+      "acceptance": "두 노드가 같은 판본을 안전하게 읽고 동시쓰기/장애 시 부분/옛파일·다른문맥 노출 방지.",
+      "owner": "Claude",
+      "depends_on": [
+        "P01"
+      ],
+      "evidence": [
+        "docs/handoff/CLAUDE_DB0_DELTA_AND_FIRST_SLICE_2026-09-20.md",
+        "docs/handoff/CLAUDE_DEP_R1R4_REMEDIATION_2026-09-21.md"
+      ],
+      "remaining_engineering_hours": [
+        8,
+        20
+      ],
+      "gap_type": "implementation",
+      "point": 1,
+      "evidence_scope": "코드/문서 확인 범위. 미검증을 미구현과 구분.",
+      "fresh_runtime_test": false
+    },
+    {
+      "id": "W04",
+      "outcome": "W",
+      "title": "구/신 버전 API·assets·worker 호환/드레인",
+      "status": "gap",
+      "current": "계획은 있으나 구UI chunk·장기작업·API/schema 동시호환/드레인 실측 미확인.",
+      "gap": "호환창·이전asset보존·worker payload·장기작업 인계/완료 정책 구현.",
+      "acceptance": "열린 입력/세션/작업을 강제로 잃지 않고 N/N-1 병행 및 SSE 재연결.",
+      "owner": "Codex + Claude",
+      "depends_on": [
+        "P04",
+        "W01",
+        "W02",
+        "W03"
+      ],
+      "evidence": [
+        "docs/roadmap/NCP_ZERO_DOWNTIME_DELIVERY_AND_CODEX_2026-09-20.md"
+      ],
+      "remaining_engineering_hours": [
+        6,
+        16
+      ],
+      "gap_type": "implementation",
+      "point": 1,
+      "evidence_scope": "코드/문서 확인 범위. 미검증을 미구현과 구분.",
+      "fresh_runtime_test": false
+    },
+    {
+      "id": "C01",
+      "outcome": "C",
+      "title": "배포계약·보안/실행 경계 확정",
+      "status": "done",
+      "current": "R1 명세/API 및 지정6건 독립 재검토/구조 검증 완료.",
+      "gap": "없음. 계약 완료를 backend/실배포로 합산하지 않음.",
+      "acceptance": "요청자·승인·claim·lease·원자완료·복귀새계획·독립PG·관측 정책의 구현 기준 확정.",
+      "owner": "Codex",
+      "depends_on": [],
+      "evidence": [
+        "docs/handoff/CODEX_HYBRID_DEPLOYMENT_R1_2026-09-21.md"
+      ],
+      "remaining_engineering_hours": [
+        0,
+        0
+      ],
+      "gap_type": "none",
+      "point": 1,
+      "evidence_scope": "명시한 국소 산출물·시험/관측의 완료. trial 전체 수용 아님.",
+      "fresh_runtime_test": false
+    },
+    {
+      "id": "C02",
+      "outcome": "C",
+      "title": "불변 artifact·출처·Linux CI",
+      "status": "partial",
+      "current": "파일 색인/허용목록 도구·24시험과 artifact-contract.yml 초안. 원격 CI 미실행.",
+      "gap": "fullmanifest/digest/runtime lock/SBOM/provenance·Linux실행·변조/비밀 배제 증거.",
+      "acceptance": "같은 소스에서 신뢰 가능한 불변 산출물 생성, 원격 CI 확인, 검증불가 artifact 배포 차단.",
+      "owner": "Codex",
+      "depends_on": [
+        "C01"
+      ],
+      "evidence": [
+        ".github/workflows/artifact-contract.yml",
+        "scripts/release_artifact.py"
+      ],
+      "remaining_engineering_hours": [
+        4,
+        8
+      ],
+      "gap_type": "implementation",
+      "point": 1,
+      "evidence_scope": "코드/문서 확인 범위. 미검증을 미구현과 구분.",
+      "fresh_runtime_test": false
+    },
+    {
+      "id": "C03",
+      "outcome": "C",
+      "title": "독립 관리 PG·원자 계획 API",
+      "status": "gap",
+      "current": "ops_control은 7상태 SQLite 미연결 prototype; 원자성 반례 존재.",
+      "gap": "R1 상태모델/독립PG migration·auth·lease·멱등·감사 구현. 구 원장 재완성 금지.",
+      "acceptance": "경쟁/실패 때 단일 current pointer/상태/감사가 원자적, 업무DB fallback/기동 DDL0.",
+      "owner": "Codex",
+      "depends_on": [
+        "C01"
+      ],
+      "evidence": [
+        "ops_control/deploy_ledger.py",
+        "ops_control/counterexamples_deploy_ledger.py"
+      ],
+      "remaining_engineering_hours": [
+        8,
+        16
+      ],
+      "gap_type": "implementation",
+      "point": 1,
+      "evidence_scope": "코드/문서 확인 범위. 미검증을 미구현과 구분.",
+      "fresh_runtime_test": false
+    },
+    {
+      "id": "C04",
+      "outcome": "C",
+      "title": "자체 배포관리 UI 3메뉴",
+      "status": "gap",
+      "current": "상세 설계만 있고 ops_control에 UI/API 구현을 찾지 못함.",
+      "gap": "준비/환경·배포 상세·이력 화면 및 상태/권한/오류 연결.",
+      "acceptance": "실제 backend로 안전한 요청/관측/이력 탐색, UNKNOWN/stale를 성공으로 표시하지 않음.",
+      "owner": "Codex",
+      "depends_on": [
+        "C03"
+      ],
+      "evidence": [
+        "docs/design/DEPLOYMENT_CONTROL_PLANE_V1_2026-09-21.md"
+      ],
+      "remaining_engineering_hours": [
+        8,
+        12
+      ],
+      "gap_type": "implementation",
+      "point": 1,
+      "evidence_scope": "코드/문서 확인 범위. 미검증을 미구현과 구분.",
+      "fresh_runtime_test": false
+    },
+    {
+      "id": "C05",
+      "outcome": "C",
+      "title": "GitHub 신원·승인·claim 통합",
+      "status": "gap",
+      "current": "user dispatch/OIDC/회수 확인·환경 보호는 명세. 실제 설정/권한·실행 증거 없음.",
+      "gap": "GitHub App/환경/보호·user run 신원/claim·결과 대조 연결; 지원 플랜 확인.",
+      "acceptance": "실제 사용자·run·plan 신원 일치, 자기승인/회수/중복/미보호 실행 차단.",
+      "owner": "Codex + 저장소 관리자",
+      "depends_on": [
+        "C02",
+        "C03"
+      ],
+      "evidence": [
+        "docs/design/contracts/deployment-control-v1.openapi.json"
+      ],
+      "remaining_engineering_hours": [
+        8,
+        16
+      ],
+      "gap_type": "environment",
+      "point": 1,
+      "evidence_scope": "코드/문서 확인 범위. 미검증을 미구현과 구분.",
+      "fresh_runtime_test": false
+    },
+    {
+      "id": "C06",
+      "outcome": "C",
+      "title": "제한 agent·실제 readiness 관측",
+      "status": "gap",
+      "current": "readiness 선언/표식만으로 READY 거절하게 보완됐지만 실제 관측 생산자 미구현.",
+      "gap": "mTLS agent·명령 allowlist·실제 DB/mount/slot/version freshness 관측 구현.",
+      "acceptance": "승인된 plan/현재lease만 실행, 오래되거나 없는 증거는 차단, 업무 App와 독립 동작.",
+      "owner": "Codex + Claude 관측",
+      "depends_on": [
+        "C03",
+        "P03",
+        "W03"
+      ],
+      "evidence": [
+        "docs/handoff/CLAUDE_DEP_R1R4_REMEDIATION_2026-09-21.md"
+      ],
+      "remaining_engineering_hours": [
+        8,
+        16
+      ],
+      "gap_type": "implementation",
+      "point": 1,
+      "evidence_scope": "코드/문서 확인 범위. 미검증을 미구현과 구분.",
+      "fresh_runtime_test": false
+    },
+    {
+      "id": "N01",
+      "outcome": "N",
+      "title": "NCP 격리 인프라·TLS·HA·비밀",
+      "status": "unverified",
+      "current": "구성/예산 권고만 확인. 현재 클라우드 실구축 상태를 조회하지 않음.",
+      "gap": "승인견적·망/방화벽·TLS·DB HA·비밀·staging/trial 자료 분리 구성/검증.",
+      "acceptance": "실자료와 관리면이 필요한 주체에게만 열리고 HA/백업/운영 권한 최소화.",
+      "owner": "인프라 담당 + Codex",
+      "depends_on": [
+        "C01"
+      ],
+      "evidence": [
+        "docs/roadmap/NCP_ZERO_DOWNTIME_DELIVERY_AND_CODEX_2026-09-20.md"
+      ],
+      "remaining_engineering_hours": [
+        8,
+        16
+      ],
+      "gap_type": "environment",
+      "point": 1,
+      "evidence_scope": "코드/문서 확인 범위. 미검증을 미구현과 구분.",
+      "fresh_runtime_test": false
+    },
+    {
+      "id": "N02",
+      "outcome": "N",
+      "title": "실제 무중단 전환·새 계획 rollback",
+      "status": "unverified",
+      "current": "블루그린·LB/드레인·실환경 복귀 증거 없음. API 기능 지원도 확인 필요.",
+      "gap": "이중slot·트래픽/관측·새복귀계획을 실제 업무부하에서 리허설.",
+      "acceptance": "배포기인5xx/세션유실/쓰기유실/명령중복0, 실패 시 호환코드로 복귀; DB 자동되감기 금지.",
+      "owner": "Codex + 인프라",
+      "depends_on": [
+        "N01",
+        "W04",
+        "C05",
+        "C06",
+        "P05"
+      ],
+      "evidence": [
+        "docs/roadmap/NCP_ZERO_DOWNTIME_DELIVERY_AND_CODEX_2026-09-20.md"
+      ],
+      "remaining_engineering_hours": [
+        8,
+        16
+      ],
+      "gap_type": "validation",
+      "point": 1,
+      "evidence_scope": "코드/문서 확인 범위. 미검증을 미구현과 구분.",
+      "fresh_runtime_test": false
+    },
+    {
+      "id": "N03",
+      "outcome": "N",
+      "title": "운영 관측·감사·백업·비용 알림",
+      "status": "unverified",
+      "current": "각 계측/감사 기반 및 예산정책 존재; trial 수집/보관/알림·복구/비밀정제 전구간 미검증.",
+      "gap": "메트릭/로그/감사·권한보관·복구목표·비용 알림과 운영절차 연결.",
+      "acceptance": "오류/비용/자료접근/배포 이력 관측, 승인RPO/RTO로 복원, 자료 유출 없는 진단 가능.",
+      "owner": "Codex + 운영자",
+      "depends_on": [
+        "N01",
+        "P05",
+        "F05"
+      ],
+      "evidence": [
+        "docs/roadmap/NCP_ZERO_DOWNTIME_DELIVERY_AND_CODEX_2026-09-20.md"
+      ],
+      "remaining_engineering_hours": [
+        6,
+        12
+      ],
+      "gap_type": "integration",
+      "point": 1,
+      "evidence_scope": "코드/문서 확인 범위. 미검증을 미구현과 구분.",
+      "fresh_runtime_test": false
+    },
+    {
+      "id": "N04",
+      "outcome": "N",
+      "title": "운영 이슈→로컬 수정→PR→승인 배포",
+      "status": "unverified",
+      "current": "Codex 로컬 소스 수정 방식 결정. 새 모델 API/운영서버 직접수정은 제외.",
+      "gap": "운영버전/정제로그 기반 실제 작은 수정 한 건으로 PR/CI/staging/trial 추적.",
+      "acceptance": "운영비밀/실자료를 자동 모델에 보내지 않고 승인된 소스 변경만 검증·배포, 요청부터 결과까지 추적.",
+      "owner": "Codex",
+      "depends_on": [
+        "C02",
+        "C05",
+        "N02"
+      ],
+      "evidence": [
+        "docs/design/DEPLOYMENT_CONTROL_PLANE_V1_2026-09-21.md"
+      ],
+      "remaining_engineering_hours": [
+        2,
+        6
+      ],
+      "gap_type": "validation",
+      "point": 1,
+      "evidence_scope": "코드/문서 확인 범위. 미검증을 미구현과 구분.",
+      "fresh_runtime_test": false
+    },
+    {
+      "id": "U01",
+      "outcome": "U",
+      "title": "실제 원료구매 업무 반복 폐루프 인수",
+      "status": "unverified",
+      "current": "컴포넌트/합성/일부API 실측이 분산돼 있음. 실제 역할·자료로 전체반복완주 기록 부족.",
+      "gap": "원료구매→물류/재고→생산/재무 영향→결정/실행/효과를 실제 담당자로 반복.",
+      "acceptance": "합의된 대상업무/기간/책임자의 반복 수용, 데이터 근거와 실행 결과 대사, 해당경로 P0/P1차단결함0.",
+      "owner": "실제 현업 + Codex",
+      "depends_on": [
+        "A05",
+        "L04",
+        "R02",
+        "M05",
+        "M06",
+        "N02"
+      ],
+      "evidence": [
+        "docs/strategy/AI_FACTORY_STUDIO_UNIQUE_PRODUCT_STRATEGY_2026-08-03.md"
+      ],
+      "remaining_engineering_hours": [
+        8,
+        16
+      ],
+      "gap_type": "user_acceptance",
+      "point": 1,
+      "evidence_scope": "코드/문서 확인 범위. 미검증을 미구현과 구분.",
+      "fresh_runtime_test": false
+    },
+    {
+      "id": "U02",
+      "outcome": "U",
+      "title": "사용자30·동시10·배포중 부하 수용",
+      "status": "unverified",
+      "current": "부하목표만 있음. 동시10 혼합업무/제작제한/배포장애 시험 기록 미확인.",
+      "gap": "실제 workload 비율·자료량·SLO 확정, 정상10/스트레스15 및 배포중 수용.",
+      "acceptance": "일반API p95≤1.5초·정상망SSE재연결≤5초 목표와 유실/중복0 검증; 목표 미달이면 차단/승인 재조정.",
+      "owner": "Codex + Claude",
+      "depends_on": [
+        "U01",
+        "F05",
+        "N02"
+      ],
+      "evidence": [
+        "docs/roadmap/NCP_ZERO_DOWNTIME_DELIVERY_AND_CODEX_2026-09-20.md"
+      ],
+      "remaining_engineering_hours": [
+        6,
+        12
+      ],
+      "gap_type": "validation",
+      "point": 1,
+      "evidence_scope": "코드/문서 확인 범위. 미검증을 미구현과 구분.",
+      "fresh_runtime_test": false
+    },
+    {
+      "id": "U03",
+      "outcome": "U",
+      "title": "운영 인수·복구 훈련·최종 개시 판정",
+      "status": "unverified",
+      "current": "격리 검증 절차는 있으나 trial 운영 책임/온보딩·복구 훈련·실자료보관 최종인수 없음.",
+      "gap": "운영자 계정/권한·백업/복구/장애·자료보관·비상절차와 사용자 안내 수용.",
+      "acceptance": "운영자가 직접 복구·장애 대응·배포 이력을 확인, 모든 필수 Gap 닫힘 및 개시 승인. 100%여도 미해결P0/P1이면 개시금지.",
+      "owner": "운영자 + 사용자",
+      "depends_on": [
+        "U02",
+        "N03",
+        "N04"
+      ],
+      "evidence": [
+        "docs/handoff/ISOLATED_VERIFICATION_ENV_2026-09-16.md"
+      ],
+      "remaining_engineering_hours": [
+        4,
+        8
+      ],
+      "gap_type": "user_acceptance",
+      "point": 1,
+      "evidence_scope": "코드/문서 확인 범위. 미검증을 미구현과 구분.",
+      "fresh_runtime_test": false
+    }
+  ],
+  "validation": {
+    "server": {
+      "command": "venv/Scripts/python.exe -X utf8 -B scripts/verify_data_usage_holds.py --target tests/test_actual_certification.py --target tests/test_db_adapter_first_slice.py --target tests/test_program_reactivate_restores_prior_state.py --target tests/test_release_item_visibility.py --target tests/test_release_artifact.py --strict-writes",
+      "passed": 93,
+      "failed": 0,
+      "exit_code": 0,
+      "evidence": "output/usage-holds-qkq_3qxq/isolation.json",
+      "scope": "국소 서버 계약·합성 SQLite. 실제 PG/클라우드/전체서버 수용 아님."
+    },
+    "frontend": {
+      "command": "node frontend/scripts/check-process-installation.mjs (cwd frontend에서는 node scripts/check-process-installation.mjs)",
+      "passed": 105,
+      "exit_code": 0,
+      "evidence": "output/process-installation-check-a4a6bf37-2924-4837-9110-97cdb3a903ab/report.json",
+      "scope": "합성/모의API·STATIC1 포함, 실제 브라우저 아님."
+    },
+    "independent_review": "별도 Codex Popper 읽기 전용 정적 검토: 인증 초기 fallback, 일반 역할 전환, 일반 활성화, Host provider 제한, 수정 TODO/미확정 실행 경계 5건. 메인이 코드 재대조 후 A04/R01/F03에 보강; R04는 기존 잔여 유지. 전체 제품/보안 PASS나 실환경 검증 아님."
+  },
+  "estimates": {
+    "unit": "예비 순수 엔지니어 시간 범위. 실자료/사용자/외부승인 대기 제외, 일정 약속 아님.",
+    "remaining_sum_hours": [
+      223,
+      526
+    ],
+    "limitation": "코드 변경·통합·검증까지 포함한 거친 예산이며 각 실제 첫 경로에서 재추정. 2명으로 단순 나눠 달력 일정을 약속하지 않음. 기존 관리툴6~11인일은 업무DB/제품갭 제외 추정이라 전체 개시 ETA가 아님."
+  }
+}

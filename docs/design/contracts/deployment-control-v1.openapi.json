@@ -1,0 +1,3426 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "AFS Deployment Control Plane V1",
+    "version": "1.0.0-design-r1",
+    "description": "R1 보완 설계 계약이며 구현된 서비스가 아니다. SEC-01/02, EXE-01~04, DEP 통합 경계 반영. 승인 endpoint 없음."
+  },
+  "x-plan-digest-fixture": {
+    "description": "Synthetic canonical plan fixture only; not a real deployment. plan_id maps from Plan.id. All 18 fields are mandatory; preflight and display fields are excluded.",
+    "payload": {
+      "plan_id": "00000000-0000-4000-8000-000000000001",
+      "environment": "staging",
+      "release_id": "00000000-0000-4000-8000-000000000002",
+      "operation": "DEPLOY",
+      "artifact_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "source_commit": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "workflow_ref": "example/afs/.github/workflows/deploy.yml@refs/tags/ops-workflow-v1",
+      "workflow_sha": "cccccccccccccccccccccccccccccccccccccccc",
+      "config_digest": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+      "migration_plan_digest": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+      "policy_digest": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "policy_version": 1,
+      "expected_environment_generation": 0,
+      "current_serving_digest": null,
+      "observed_schema_epoch": 1,
+      "actor_id": "123",
+      "format_version": 1,
+      "service": "afs-platform"
+    },
+    "canonical_json": "{\"actor_id\":\"123\",\"artifact_sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"config_digest\":\"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\",\"current_serving_digest\":null,\"environment\":\"staging\",\"expected_environment_generation\":0,\"format_version\":1,\"migration_plan_digest\":\"eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee\",\"observed_schema_epoch\":1,\"operation\":\"DEPLOY\",\"plan_id\":\"00000000-0000-4000-8000-000000000001\",\"policy_digest\":\"ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff\",\"policy_version\":1,\"release_id\":\"00000000-0000-4000-8000-000000000002\",\"service\":\"afs-platform\",\"source_commit\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"workflow_ref\":\"example/afs/.github/workflows/deploy.yml@refs/tags/ops-workflow-v1\",\"workflow_sha\":\"cccccccccccccccccccccccccccccccccccccccc\"}",
+    "sha256": "c19eac686302a22fec0cf309a9b2754b64a063dc5493081e46aa94604b31d5d6"
+  },
+  "servers": [
+    {
+      "url": "https://ops.example.invalid",
+      "description": "Placeholder only; configured private same-origin host required"
+    }
+  ],
+  "security": [
+    {
+      "OpsSession": []
+    }
+  ],
+  "paths": {
+    "/ops/api/v1/session": {
+      "get": {
+        "operationId": "getSession",
+        "summary": "Current identity and CSRF token",
+        "tags": [
+          "console"
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Session"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Access denied",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Missing or invisible resource",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid input",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Dependency unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "operationId": "logout",
+        "summary": "Revoke local session and retained user token",
+        "tags": [
+          "console"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Csrf"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Authentication required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Access denied",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/ops/api/v1/environments": {
+      "get": {
+        "operationId": "listEnvironments",
+        "summary": "Visible environments with cached observations",
+        "tags": [
+          "console"
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EnvironmentList"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Access denied",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Missing or invisible resource",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid input",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Dependency unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/ops/api/v1/environments/{environment}": {
+      "get": {
+        "operationId": "getEnvironment",
+        "summary": "Actual serving state; stale is not healthy",
+        "tags": [
+          "console"
+        ],
+        "parameters": [
+          {
+            "name": "environment",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/EnvironmentName"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Environment"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Access denied",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Missing or invisible resource",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid input",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Dependency unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/ops/api/v1/releases": {
+      "get": {
+        "operationId": "listReleases",
+        "summary": "Trusted platform artifact catalog",
+        "tags": [
+          "console"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Limit"
+          },
+          {
+            "$ref": "#/components/parameters/Cursor"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReleaseList"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Access denied",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Missing or invisible resource",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid input",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Dependency unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/ops/api/v1/releases/{release_id}": {
+      "get": {
+        "operationId": "getRelease",
+        "summary": "Platform release manifest and eligibility",
+        "tags": [
+          "console"
+        ],
+        "parameters": [
+          {
+            "name": "release_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Release"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Access denied",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Missing or invisible resource",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid input",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Dependency unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/ops/api/v1/plans": {
+      "get": {
+        "operationId": "listPlans",
+        "summary": "Deployment history",
+        "tags": [
+          "console"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Limit"
+          },
+          {
+            "$ref": "#/components/parameters/Cursor"
+          },
+          {
+            "name": "environment",
+            "in": "query",
+            "schema": {
+              "$ref": "#/components/schemas/EnvironmentName"
+            }
+          },
+          {
+            "name": "state",
+            "in": "query",
+            "schema": {
+              "$ref": "#/components/schemas/PlanState"
+            }
+          },
+          {
+            "name": "from",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlanList"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Access denied",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Missing or invisible resource",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid input",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Dependency unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "operationId": "createPlan",
+        "summary": "Create immutable plan and preflight; no external mutation",
+        "tags": [
+          "console"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          },
+          {
+            "$ref": "#/components/parameters/Csrf"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PlanCreate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Plan"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Access denied",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Missing or invisible resource",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "State or idempotency conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid input",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "428": {
+            "description": "Missing precondition",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Dependency unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/ops/api/v1/plans/{plan_id}": {
+      "get": {
+        "operationId": "getPlan",
+        "summary": "Plan, authorization, execution and evidence snapshot",
+        "tags": [
+          "console"
+        ],
+        "parameters": [
+          {
+            "name": "plan_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Plan"
+                }
+              }
+            },
+            "headers": {
+              "ETag": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Quoted revision for conditional dispatch/cancel."
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Access denied",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Missing or invisible resource",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid input",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Dependency unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/ops/api/v1/plans/{plan_id}/dispatch": {
+      "post": {
+        "operationId": "dispatchPlan",
+        "summary": "Atomically enqueue a single user-attributed workflow request",
+        "tags": [
+          "console"
+        ],
+        "parameters": [
+          {
+            "name": "plan_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          },
+          {
+            "$ref": "#/components/parameters/Csrf"
+          },
+          {
+            "$ref": "#/components/parameters/IfMatch"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {},
+                "required": []
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Plan"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Access denied",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Missing or invisible resource",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "State or idempotency conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "Stale revision",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid input",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "428": {
+            "description": "Missing precondition",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Dependency unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "description": "작성자만 요청 가능: session.user_id=plan.actor_id=사용 user token /user.id. 다른 operator는403. run 정상 응답과 UNKNOWN 재결속 모두 run.actor.id 일치. 권한 검사는 멱등 응답보다 먼저."
+      }
+    },
+    "/ops/api/v1/plans/{plan_id}/cancel": {
+      "post": {
+        "operationId": "cancelPlan",
+        "summary": "Revoke unclaimed plan; never kill an executing deployment",
+        "tags": [
+          "console"
+        ],
+        "parameters": [
+          {
+            "name": "plan_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          },
+          {
+            "$ref": "#/components/parameters/Csrf"
+          },
+          {
+            "$ref": "#/components/parameters/IfMatch"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CancelRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Plan"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Access denied",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Missing or invisible resource",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "State or idempotency conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "Stale revision",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid input",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "428": {
+            "description": "Missing precondition",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Dependency unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/ops/api/v1/plans/{plan_id}/events": {
+      "get": {
+        "operationId": "listPlanEvents",
+        "summary": "Redacted append-only audit events",
+        "tags": [
+          "console"
+        ],
+        "parameters": [
+          {
+            "name": "plan_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/Limit"
+          },
+          {
+            "$ref": "#/components/parameters/Cursor"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuditList"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Access denied",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Missing or invisible resource",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid input",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Dependency unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/ops/v1/claims": {
+      "post": {
+        "operationId": "claimExecution",
+        "summary": "Single approved GitHub run claims immutable plan",
+        "tags": [
+          "internal"
+        ],
+        "security": [
+          {
+            "GithubOidc": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ClaimRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Claim"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Access denied",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Missing or invisible resource",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "State or idempotency conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid input",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Dependency unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "description": "actor_id/event_name 포함 OIDC·run·계획 결속, trial 승인/보호 및 환경별 preflight 확인. 직전10초 이내 현재 repository write 이상/환경 operator/명시 회수 재확인; session 만료와 회수를 구분. 조회 불가503, 회수403, claim0. local grant version은 DB 잠금 안에서 재확인. RELEASED/EXPIRED 재획득409."
+      }
+    },
+    "/internal/ops/v1/claims/{claim_id}/heartbeat": {
+      "post": {
+        "operationId": "heartbeatExecution",
+        "summary": "Renew a live run-bound lease; never revive expired lease",
+        "tags": [
+          "internal"
+        ],
+        "security": [
+          {
+            "GithubOidc": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "claim_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/HeartbeatRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Claim"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Access denied",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Missing or invisible resource",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "State or idempotency conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid input",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Dependency unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "description": "EXECUTING/CLEANUP_ONLY만 연장. RELEASED/EXPIRED는409. 최종 영수증 수락 후 결과 대조를 위해 실행권을 연장하지 않는다."
+      }
+    },
+    "/internal/ops/v1/claims/{claim_id}/steps/{step}/complete": {
+      "post": {
+        "operationId": "completeStep",
+        "summary": "Accept reference to independently retrieved mTLS agent receipt",
+        "tags": [
+          "internal"
+        ],
+        "security": [
+          {
+            "GithubOidc": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "claim_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "step",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/StepName"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StepReceipt"
+              }
+            }
+          }
+        },
+        "description": "Control이 설정된 agent에서 mTLS로 영수증을 독립 조회한다. observe SUCCEEDED 수락은 step/claim RELEASED/finalization deadline(+600초)/audit 원자 기록. cleanup_candidate SUCCEEDED는 안전 증거 후 FAILED/claim RELEASED/lock 해제 원자 기록. 종료 뒤 동일 수락 영수증 재전송만 유효한 같은 run/fence로 멱등 반환; 신규 단계 금지. 실패 전환/cleanup 제한은 설계 §8.4를 따른다.",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StepResult"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Access denied",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Missing or invisible resource",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "State or idempotency conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid input",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Dependency unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/ops/v1/claims/{claim_id}/execution-context": {
+      "get": {
+        "operationId": "getAgentExecutionContext",
+        "summary": "인증된 agent의 현재 실행 문맥 조회",
+        "description": "인증서 등록 agent/환경=claim 환경, plan_id/fence 및 현재 active_plan 일치 검사. valid_until=min(checked_at+5초,lease_expires_at). 읽기 전용·lease 연장 없음. 해당 단계 최초/후속 부작용 전 다시 조회; 이미 시작한 외부 작업의 취소 보장은 아니다. 상세 §7.4.",
+        "tags": [
+          "internal"
+        ],
+        "security": [
+          {
+            "AgentMtls": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "claim_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "plan_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "fence",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "실행 가능한 현재 문맥",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExecutionContext"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Access denied",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "없는 claim 또는 인증서 환경 밖 claim",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "old fence, plan 불일치, 만료/종료 claim 또는 active_plan 불일치",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid input",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Dependency unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/ops/v1/environments/{environment}/observations": {
+      "post": {
+        "operationId": "recordObservation",
+        "summary": "Accept monotonic actual-state observation from authorized agent",
+        "tags": [
+          "internal"
+        ],
+        "security": [
+          {
+            "AgentMtls": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "environment",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/EnvironmentName"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ObservationInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Observation"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Access denied",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Missing or invisible resource",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "State or idempotency conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid input",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Dependency unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/ops/auth/login": {
+      "get": {
+        "operationId": "beginGithubLogin",
+        "tags": [
+          "auth"
+        ],
+        "summary": "Server generates single-use state and PKCE, then redirects",
+        "security": [],
+        "responses": {
+          "302": {
+            "description": "Redirect to fixed GitHub authorize URL",
+            "headers": {
+              "Location": {
+                "schema": {
+                  "type": "string",
+                  "format": "uri"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/ops/auth/callback": {
+      "get": {
+        "operationId": "finishGithubLogin",
+        "tags": [
+          "auth"
+        ],
+        "summary": "Validate one-time state, exchange code, verify identity; redirect to /ops",
+        "security": [],
+        "parameters": [
+          {
+            "name": "code",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "state",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "302": {
+            "description": "Set HttpOnly session cookie; redirect to fixed /ops"
+          },
+          "400": {
+            "description": "Invalid or expired OAuth response; no credentials in error"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "OpsSession": {
+        "type": "apiKey",
+        "in": "cookie",
+        "name": "__Host-ops_session"
+      },
+      "GithubOidc": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "GitHub OIDC JWT"
+      },
+      "AgentMtls": {
+        "type": "mutualTLS"
+      }
+    },
+    "parameters": {
+      "IdempotencyKey": {
+        "name": "Idempotency-Key",
+        "in": "header",
+        "required": true,
+        "schema": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "description": "Same user + operation + key: replay same request, reject a different body. Authorization precedes replay."
+      },
+      "Csrf": {
+        "name": "X-CSRF-Token",
+        "in": "header",
+        "required": true,
+        "schema": {
+          "type": "string"
+        }
+      },
+      "IfMatch": {
+        "name": "If-Match",
+        "in": "header",
+        "required": true,
+        "schema": {
+          "type": "string",
+          "pattern": "^\"[1-9][0-9]*\"$"
+        },
+        "description": "Strong ETag of plan revision."
+      },
+      "Limit": {
+        "name": "limit",
+        "in": "query",
+        "schema": {
+          "type": "integer",
+          "default": 20,
+          "minimum": 1,
+          "maximum": 100
+        }
+      },
+      "Cursor": {
+        "name": "cursor",
+        "in": "query",
+        "schema": {
+          "type": "string"
+        }
+      }
+    },
+    "schemas": {
+      "EnvironmentName": {
+        "type": "string",
+        "enum": [
+          "staging",
+          "trial"
+        ]
+      },
+      "PlanState": {
+        "type": "string",
+        "enum": [
+          "READY",
+          "BLOCKED",
+          "DISPATCHING",
+          "DISPATCH_UNKNOWN",
+          "QUEUED",
+          "APPROVAL_PENDING",
+          "PREPARING",
+          "VERIFYING",
+          "PROMOTING",
+          "DRAINING",
+          "FINALIZING",
+          "SUCCEEDED",
+          "FAILED",
+          "CANCELLED",
+          "RECOVERY_REQUIRED"
+        ]
+      },
+      "StepName": {
+        "type": "string",
+        "enum": [
+          "install",
+          "migrate_expand",
+          "start_candidate",
+          "verify",
+          "switch_traffic",
+          "drain",
+          "observe",
+          "cleanup_candidate"
+        ]
+      },
+      "Error": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "code": {
+            "type": "string",
+            "enum": [
+              "AUTH_REQUIRED",
+              "ACCESS_DENIED",
+              "NOT_FOUND",
+              "VALIDATION_ERROR",
+              "ENV_BUSY",
+              "STALE_PLAN",
+              "IDEMPOTENCY_CONFLICT",
+              "UNSAFE_CANCEL",
+              "PRECONDITION_FAILED",
+              "REQUIRED_PRECONDITION",
+              "DEPENDENCY_UNAVAILABLE",
+              "APPROVAL_UNAVAILABLE",
+              "DISPATCH_UNKNOWN",
+              "LEASE_LOST",
+              "INVALID_EVIDENCE"
+            ]
+          },
+          "message": {
+            "type": "string"
+          },
+          "request_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "retryable": {
+            "type": "boolean"
+          },
+          "details": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "field": {
+                  "type": "string"
+                },
+                "reason": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "field",
+                "reason"
+              ]
+            }
+          }
+        },
+        "required": [
+          "code",
+          "message",
+          "request_id",
+          "retryable",
+          "details"
+        ]
+      },
+      "Session": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "user_id": {
+            "type": "string",
+            "pattern": "^[1-9][0-9]*$"
+          },
+          "login": {
+            "type": "string"
+          },
+          "roles": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "viewer",
+                "operator"
+              ]
+            }
+          },
+          "environments": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/EnvironmentName"
+            }
+          },
+          "csrf_token": {
+            "type": "string"
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "user_id",
+          "login",
+          "roles",
+          "environments",
+          "csrf_token",
+          "expires_at"
+        ]
+      },
+      "Check": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "code": {
+            "type": "string",
+            "pattern": "^[A-Z0-9_]+$"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "PASS",
+              "FAIL",
+              "UNKNOWN"
+            ]
+          },
+          "message": {
+            "type": "string"
+          },
+          "checked_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "evidence_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "code",
+          "status",
+          "message",
+          "checked_at",
+          "evidence_id"
+        ]
+      },
+      "Preflight": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "checked_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "inputs_digest": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "checks": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Check"
+            }
+          },
+          "passed": {
+            "type": "boolean",
+            "description": "해당 환경의 모든 필수 검사 PASS. 누락/알 수 없는 값은 통과 불가. 이전 staging 성공은 trial만 요구한다."
+          },
+          "environment": {
+            "$ref": "#/components/schemas/EnvironmentName"
+          },
+          "staging_evidence_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "checked_at",
+          "expires_at",
+          "inputs_digest",
+          "checks",
+          "passed",
+          "environment",
+          "staging_evidence_id"
+        ]
+      },
+      "Manifest": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "format_version": {
+            "type": "integer",
+            "const": 1
+          },
+          "release_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "source_commit": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{40}$"
+          },
+          "source_repo_id": {
+            "type": "string",
+            "pattern": "^[1-9][0-9]*$"
+          },
+          "build_run_id": {
+            "type": "string",
+            "pattern": "^[1-9][0-9]*$"
+          },
+          "build_run_attempt": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "build_workflow_sha": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{40}$"
+          },
+          "target_os": {
+            "type": "string",
+            "const": "linux"
+          },
+          "target_arch": {
+            "type": "string",
+            "enum": [
+              "amd64",
+              "arm64"
+            ]
+          },
+          "python_version": {
+            "type": "string"
+          },
+          "node_version": {
+            "type": "string"
+          },
+          "artifact_sha256": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "file_index_sha256": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "dependency_lock_sha256": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "sbom_sha256": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "provenance_ref": {
+            "type": "string",
+            "description": "Server-validated private evidence reference, not a client fetch URL."
+          },
+          "schema_read_min": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "schema_read_max": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "schema_write_min": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "schema_write_max": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "config_schema_version": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "format_version",
+          "release_id",
+          "source_commit",
+          "source_repo_id",
+          "build_run_id",
+          "build_run_attempt",
+          "build_workflow_sha",
+          "target_os",
+          "target_arch",
+          "python_version",
+          "node_version",
+          "artifact_sha256",
+          "file_index_sha256",
+          "dependency_lock_sha256",
+          "sbom_sha256",
+          "provenance_ref",
+          "schema_read_min",
+          "schema_read_max",
+          "schema_write_min",
+          "schema_write_max",
+          "config_schema_version",
+          "created_at"
+        ]
+      },
+      "Release": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "display_name": {
+            "type": "string"
+          },
+          "manifest": {
+            "$ref": "#/components/schemas/Manifest"
+          },
+          "eligible": {
+            "type": "boolean",
+            "description": "환경 공통 artifact 검증만. staging 성공/환경 사전검사는 포함하지 않는다. 실제 실행 가능성은 Plan.preflight로 판정한다."
+          },
+          "blockers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Check"
+            }
+          },
+          "verified_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "staging_evidence_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "동일 digest staging SUCCEEDED 증거 참조. null이어도 최초 staging 가능; trial은 정책에 맞는 증거 필수."
+          }
+        },
+        "required": [
+          "id",
+          "display_name",
+          "manifest",
+          "eligible",
+          "blockers",
+          "verified_at",
+          "staging_evidence_id"
+        ]
+      },
+      "Slot": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "type": "string",
+            "enum": [
+              "blue",
+              "green"
+            ]
+          },
+          "artifact_sha256": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[a-f0-9]{64}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "ready": {
+            "type": "boolean"
+          },
+          "traffic_enabled": {
+            "type": "boolean"
+          },
+          "active_requests": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "active_job_leases": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "name",
+          "artifact_sha256",
+          "ready",
+          "traffic_enabled",
+          "active_requests",
+          "active_job_leases"
+        ]
+      },
+      "ObservationPayload": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "serving_artifact_sha256": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[a-f0-9]{64}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "schema_epoch": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "health": {
+            "type": "string",
+            "enum": [
+              "HEALTHY",
+              "DEGRADED",
+              "UNKNOWN"
+            ]
+          },
+          "slots": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Slot"
+            }
+          },
+          "lb_configuration_digest": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "smoke_passed": {
+            "type": "boolean"
+          },
+          "unresolved_job_handoffs": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "readiness_evidence": {
+            "type": "array",
+            "minItems": 0,
+            "maxItems": 2,
+            "items": {
+              "$ref": "#/components/schemas/ReadinessEvidence"
+            },
+            "description": "slot별 실제 관측. 미관측/시작 전은 []와 health=UNKNOWN; HEALTHY에는 필수 역할/저장소의 실제 증거가 필요하다."
+          }
+        },
+        "required": [
+          "serving_artifact_sha256",
+          "schema_epoch",
+          "health",
+          "slots",
+          "lb_configuration_digest",
+          "smoke_passed",
+          "unresolved_job_handoffs",
+          "readiness_evidence"
+        ],
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "health": {
+                  "const": "HEALTHY"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "readiness_evidence": {
+                  "minItems": 1
+                }
+              }
+            }
+          }
+        ]
+      },
+      "Observation": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "environment": {
+            "$ref": "#/components/schemas/EnvironmentName"
+          },
+          "agent_id": {
+            "type": "string"
+          },
+          "agent_sequence": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "observed_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "received_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "payload": {
+            "$ref": "#/components/schemas/ObservationPayload"
+          }
+        },
+        "required": [
+          "id",
+          "environment",
+          "agent_id",
+          "agent_sequence",
+          "observed_at",
+          "received_at",
+          "payload"
+        ]
+      },
+      "Environment": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "$ref": "#/components/schemas/EnvironmentName"
+          },
+          "generation": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "active_plan_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "desired_release_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "observed": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Observation"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "fresh": {
+            "type": "boolean"
+          },
+          "drift": {
+            "type": "boolean"
+          },
+          "github_checked_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "trial_approval_available": {
+            "type": "boolean"
+          },
+          "blockers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Check"
+            }
+          }
+        },
+        "required": [
+          "name",
+          "generation",
+          "active_plan_id",
+          "desired_release_id",
+          "observed",
+          "fresh",
+          "drift",
+          "github_checked_at",
+          "trial_approval_available",
+          "blockers"
+        ]
+      },
+      "GithubRun": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "run_id": {
+            "type": "string",
+            "pattern": "^[1-9][0-9]*$"
+          },
+          "run_attempt": {
+            "type": "integer",
+            "const": 1
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "queued",
+              "in_progress",
+              "waiting",
+              "completed",
+              "unknown"
+            ]
+          },
+          "conclusion": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "success",
+                  "failure",
+                  "cancelled",
+                  "timed_out",
+                  "action_required",
+                  "neutral",
+                  "skipped",
+                  "stale",
+                  "startup_failure",
+                  "unknown"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "html_url": {
+            "type": "string",
+            "format": "uri"
+          },
+          "checked_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "approver_user_ids": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^[1-9][0-9]*$"
+            }
+          },
+          "approval_observed": {
+            "type": "boolean"
+          },
+          "actor_id": {
+            "type": "string",
+            "pattern": "^[1-9][0-9]*$",
+            "description": "plan.actor_id와 일치하는 실제 workflow 요청자"
+          }
+        },
+        "required": [
+          "run_id",
+          "run_attempt",
+          "status",
+          "conclusion",
+          "html_url",
+          "checked_at",
+          "approver_user_ids",
+          "approval_observed",
+          "actor_id"
+        ]
+      },
+      "PlanCreate": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "environment": {
+            "$ref": "#/components/schemas/EnvironmentName"
+          },
+          "release_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "operation": {
+            "type": "string",
+            "enum": [
+              "DEPLOY",
+              "ROLLBACK"
+            ]
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          }
+        },
+        "required": [
+          "environment",
+          "release_id",
+          "operation",
+          "reason"
+        ]
+      },
+      "Plan": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "environment": {
+            "$ref": "#/components/schemas/EnvironmentName"
+          },
+          "release_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "operation": {
+            "type": "string",
+            "enum": [
+              "DEPLOY",
+              "ROLLBACK"
+            ]
+          },
+          "reason": {
+            "type": "string"
+          },
+          "actor_id": {
+            "type": "string",
+            "pattern": "^[1-9][0-9]*$",
+            "description": "작성자이자 V1 유일 dispatch 요청자. session/token/run/OIDC의 numeric ID 일치."
+          },
+          "plan_digest": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "state": {
+            "$ref": "#/components/schemas/PlanState"
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "artifact_sha256": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "source_commit": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{40}$"
+          },
+          "workflow_ref": {
+            "type": "string"
+          },
+          "workflow_sha": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{40}$"
+          },
+          "config_digest": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "migration_plan_digest": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "policy_digest": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "expected_environment_generation": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "policy_version": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "current_serving_digest": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[a-f0-9]{64}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "observed_schema_epoch": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "preflight": {
+            "$ref": "#/components/schemas/Preflight"
+          },
+          "github_run": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/GithubRun"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "can_cancel": {
+            "type": "boolean"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "can_dispatch": {
+            "type": "boolean",
+            "description": "현재 사용자=작성자이며 권한·state·preflight가 허용하는 경우만 true. 서버에서 재검증."
+          },
+          "execution_mode": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ClaimMode"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "finalization_deadline": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "environment",
+          "release_id",
+          "operation",
+          "reason",
+          "actor_id",
+          "plan_digest",
+          "state",
+          "revision",
+          "artifact_sha256",
+          "source_commit",
+          "workflow_ref",
+          "workflow_sha",
+          "config_digest",
+          "migration_plan_digest",
+          "policy_digest",
+          "expected_environment_generation",
+          "policy_version",
+          "current_serving_digest",
+          "observed_schema_epoch",
+          "preflight",
+          "github_run",
+          "can_cancel",
+          "created_at",
+          "updated_at",
+          "can_dispatch",
+          "execution_mode",
+          "finalization_deadline"
+        ]
+      },
+      "AuditEvent": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "plan_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "environment": {
+            "$ref": "#/components/schemas/EnvironmentName"
+          },
+          "actor_type": {
+            "type": "string",
+            "enum": [
+              "USER",
+              "GITHUB",
+              "RUNNER",
+              "AGENT",
+              "SYSTEM"
+            ]
+          },
+          "actor_id": {
+            "type": "string"
+          },
+          "action": {
+            "type": "string"
+          },
+          "outcome": {
+            "type": "string"
+          },
+          "request_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "summary": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "plan_id",
+          "environment",
+          "actor_type",
+          "actor_id",
+          "action",
+          "outcome",
+          "request_id",
+          "summary",
+          "created_at"
+        ]
+      },
+      "EnvironmentList": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Environment"
+            }
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "items",
+          "next_cursor"
+        ]
+      },
+      "ReleaseList": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Release"
+            }
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "items",
+          "next_cursor"
+        ]
+      },
+      "PlanList": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Plan"
+            }
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "items",
+          "next_cursor"
+        ]
+      },
+      "AuditList": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AuditEvent"
+            }
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "items",
+          "next_cursor"
+        ]
+      },
+      "CancelRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "reason": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          }
+        },
+        "required": [
+          "reason"
+        ]
+      },
+      "ClaimRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "plan_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "plan_digest": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "environment": {
+            "$ref": "#/components/schemas/EnvironmentName"
+          }
+        },
+        "required": [
+          "plan_id",
+          "plan_digest",
+          "environment"
+        ]
+      },
+      "Claim": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "plan_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "environment": {
+            "$ref": "#/components/schemas/EnvironmentName"
+          },
+          "run_id": {
+            "type": "string",
+            "pattern": "^[1-9][0-9]*$"
+          },
+          "fence": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "lease_expires_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "plan": {
+            "$ref": "#/components/schemas/Plan"
+          },
+          "allowed_steps": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/StepName"
+            },
+            "maxItems": 1,
+            "uniqueItems": true
+          },
+          "mode": {
+            "$ref": "#/components/schemas/ClaimMode"
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "authorization_checked_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "plan_id",
+          "environment",
+          "run_id",
+          "fence",
+          "lease_expires_at",
+          "plan",
+          "allowed_steps",
+          "mode",
+          "finished_at",
+          "authorization_checked_at"
+        ],
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "mode": {
+                  "enum": [
+                    "RELEASED",
+                    "EXPIRED"
+                  ]
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "allowed_steps": {
+                  "maxItems": 0
+                },
+                "finished_at": {
+                  "type": "string",
+                  "format": "date-time"
+                }
+              }
+            },
+            "else": {
+              "properties": {
+                "allowed_steps": {
+                  "minItems": 1
+                },
+                "finished_at": {
+                  "type": "null"
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "mode": {
+                  "const": "CLEANUP_ONLY"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "allowed_steps": {
+                  "items": {
+                    "const": "cleanup_candidate"
+                  }
+                }
+              }
+            }
+          }
+        ]
+      },
+      "HeartbeatRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "fence": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "required": [
+          "fence"
+        ]
+      },
+      "StepReceipt": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "fence": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "agent_receipt_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "receipt_digest": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "result": {
+            "type": "string",
+            "enum": [
+              "SUCCEEDED",
+              "FAILED",
+              "UNKNOWN"
+            ]
+          }
+        },
+        "required": [
+          "fence",
+          "agent_receipt_id",
+          "receipt_digest",
+          "result"
+        ]
+      },
+      "StepResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "plan_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "state": {
+            "$ref": "#/components/schemas/PlanState"
+          },
+          "step": {
+            "$ref": "#/components/schemas/StepName"
+          },
+          "accepted": {
+            "type": "boolean"
+          },
+          "claim_mode": {
+            "$ref": "#/components/schemas/ClaimMode"
+          },
+          "finalization_deadline": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "plan_id",
+          "state",
+          "step",
+          "accepted",
+          "claim_mode",
+          "finalization_deadline"
+        ]
+      },
+      "ClaimMode": {
+        "type": "string",
+        "enum": [
+          "EXECUTING",
+          "CLEANUP_ONLY",
+          "RELEASED",
+          "EXPIRED"
+        ],
+        "description": "실행권 수명. 종료 mode는 되살리지 않으며 논리적 환경 잠금과 별개다."
+      },
+      "ExecutionContext": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "AgentMtls 전용 no-store 응답. 조회는 권한 발급/연장이 아니다. mode는 실행 가능한 둘만 반환, 종료/만료는409.",
+        "properties": {
+          "claim_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "plan_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "environment": {
+            "$ref": "#/components/schemas/EnvironmentName"
+          },
+          "agent_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
+          },
+          "fence": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "EXECUTING",
+              "CLEANUP_ONLY"
+            ]
+          },
+          "plan": {
+            "$ref": "#/components/schemas/Plan"
+          },
+          "target_slot": {
+            "type": "string",
+            "enum": [
+              "blue",
+              "green"
+            ]
+          },
+          "previous_active_slot": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "blue",
+                  "green"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "allowed_steps": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 1,
+            "uniqueItems": true,
+            "items": {
+              "$ref": "#/components/schemas/StepName"
+            }
+          },
+          "checked_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "valid_until": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "lease_expires_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "claim_id",
+          "plan_id",
+          "environment",
+          "agent_id",
+          "fence",
+          "mode",
+          "plan",
+          "target_slot",
+          "previous_active_slot",
+          "allowed_steps",
+          "checked_at",
+          "valid_until",
+          "lease_expires_at"
+        ],
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "mode": {
+                  "const": "CLEANUP_ONLY"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "allowed_steps": {
+                  "items": {
+                    "const": "cleanup_candidate"
+                  }
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "mode": {
+                  "const": "EXECUTING"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "allowed_steps": {
+                  "items": {
+                    "not": {
+                      "const": "cleanup_candidate"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        ]
+      },
+      "ReadinessEvidence": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "실제 업무 노드에서 수집한 정제 증거. 선언값/표식만으로 PASS 금지. backend 결속 digest에는 DSN/비밀을 넣지 않는다.",
+        "properties": {
+          "node_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
+          },
+          "slot": {
+            "type": "string",
+            "enum": [
+              "blue",
+              "green"
+            ]
+          },
+          "observed_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "runtime_artifact_sha256": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "runtime_config_digest": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "db_backend": {
+            "type": "string",
+            "enum": [
+              "postgresql"
+            ]
+          },
+          "db_binding_digest": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "storage_binding_digest": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "checks": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "$ref": "#/components/schemas/Check"
+            }
+          }
+        },
+        "required": [
+          "node_id",
+          "slot",
+          "observed_at",
+          "runtime_artifact_sha256",
+          "runtime_config_digest",
+          "db_backend",
+          "db_binding_digest",
+          "storage_binding_digest",
+          "checks"
+        ]
+      },
+      "ObservationInput": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "agent_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
+          },
+          "agent_sequence": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "observed_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "payload": {
+            "$ref": "#/components/schemas/ObservationPayload"
+          }
+        },
+        "required": [
+          "agent_id",
+          "agent_sequence",
+          "observed_at",
+          "payload"
+        ]
+      }
+    }
+  }
+}

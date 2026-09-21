@@ -1,0 +1,48 @@
+{
+  "document_kind": "evidence_template_not_deployment_config",
+  "template_version": 1,
+  "execution_status": "NOT_RUN",
+  "plan_id": null,
+  "environment": null,
+  "source": {"commit_sha": null, "dirty": null},
+  "artifact": {"digest": null, "manifest_reference": null},
+  "configuration": {"non_secret_digest": null, "secret_values_included": false},
+  "schema": {"before": null, "after": null, "compatibility_evidence": null},
+  "approval": {"actor_reference": null, "approved_at": null, "bound_plan_digest": null},
+  "test_run": {"started_at": null, "ended_at": null, "environment_reference": null},
+  "scenarios": [
+    {"id": "Z01", "status": "NOT_RUN", "evidence": []},
+    {"id": "Z02", "status": "NOT_RUN", "evidence": []},
+    {"id": "Z03", "status": "NOT_RUN", "evidence": []},
+    {"id": "Z04", "status": "NOT_RUN", "evidence": []},
+    {"id": "Z05", "status": "NOT_RUN", "evidence": []},
+    {"id": "Z06", "status": "NOT_RUN", "evidence": []},
+    {"id": "Z07", "status": "NOT_RUN", "evidence": []},
+    {"id": "Z08", "status": "NOT_RUN", "evidence": []},
+    {"id": "Z09", "status": "NOT_RUN", "evidence": []},
+    {"id": "Z10", "status": "NOT_RUN", "evidence": []}
+  ],
+  "measurements": {
+    "concurrent_users": null,
+    "observation_seconds": null,
+    "request_count": null,
+    "api_p95_ms": null,
+    "deployment_attributed_5xx": null,
+    "lost_sessions": null,
+    "lost_writes": null,
+    "duplicate_external_effects": null,
+    "sse_reconnect_ms": null,
+    "missing_events": null,
+    "actual_recovery_point_loss_seconds": null,
+    "actual_restore_seconds": null
+  },
+  "backup": {"reference": null, "file_manifest_reference": null, "restoration_evidence": null},
+  "final_observation": {"serving_digest": null, "traffic_state": null, "job_reconciliation": null},
+  "decision": {"result": "NOT_EVALUATED", "reviewer_reference": null, "blocking_items": []},
+  "notes": [
+    "null은 미측정이며 0 또는 통과가 아니다.",
+    "빈 blocking_items는 승인 또는 차단 없음 판정이 아니다.",
+    "실자료·비밀·세션 토큰 대신 접근 통제된 증거 참조만 기록한다.",
+    "이 양식만으로 배포를 승인하거나 실행하지 않는다."
+  ]
+}

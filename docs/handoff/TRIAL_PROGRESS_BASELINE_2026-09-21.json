@@ -1,0 +1,831 @@
+{
+  "schema_version": 1,
+  "baseline_id": "TRIAL-1-20260921-R1",
+  "assessed_at": "2026-09-21T13:05:50+09:00",
+  "basis_commit": "0d0789e97090e9f303fa343908fade8561047368",
+  "status": "WITHDRAWN",
+  "superseded_by": "docs/roadmap/OPERATIONAL_TRIAL_GAP_BASELINE.json",
+  "withdrawal_reason": "기존 단계 점수 승계 대신 목표/현행 Gap에서 전면 재구성하라는 사용자 지시. 현재34.0% 기준의 근거로 이 파일의22/52를 사용하지 않음.",
+  "goal": "최대 사용자30명·동시10명의 NCP 1단계 운영 트라이얼: 제품 업무 기능·승인 실자료·PG 이관·자체 배포관리/GitHub CI/CD·무중단/복구·실사용 수용 완료.",
+  "scope_decision": "사용자의 변경된 1단계 목표와 전체 모수 재산정 지시에 따라 적용. 장기 ROI/다법인 확산은 후속 단계로 보존하며 제품에서 삭제하지 않음.",
+  "supersedes": {
+    "historical_baseline": "docs/handoff/DECISION_CREATION_CONTRACT_REPAIR_2026-09-11.json",
+    "historical_score": 21,
+    "historical_possible": 40,
+    "historical_percent": 52.5,
+    "integrated_report": "docs/handoff/INTEGRATED_TRIAL_DELIVERY_STATUS_2026-09-21.md"
+  },
+  "method": {
+    "formula": "sum(weight where status=done) / sum(weight) * 100",
+    "unit": "완료 기준 1개 = 1점; 작업 시간/시험 수/가동 확률/노력 가중치가 아님",
+    "product": "D01~D07 7영역 × 기존 4단계 = 28점",
+    "delivery": "T01~T12 12묶음 × 산출물/수용 2단계 = 24점",
+    "partial_credit": false,
+    "rounding_decimals": 1,
+    "stage_order_enforced": true,
+    "freeze_rule": "새 목표/출구 변경 시 baseline 버전과 전후 분자·분모·매핑 공개; 같은 항목 내 결함 수리를 새 점수로 추가하지 않음"
+  },
+  "migration": {
+    "denominator_bridge": "40 - D08/D09/D10의 12칸 + T01~T12의 24칸 = 52",
+    "numerator_bridge": "21 - D08/D09/D10의 설계 인정 3점 + T01/T02 각2점 = 22",
+    "D08": "기존4칸을 제거하고 T02/T04/T05/T06/T07/T11로 세분 통합; 옛 설계1점을 추가 가산하지 않음.",
+    "D09": "1단계 반복 업무 수용은 T12. 장기 코호트/ROI 입증은 후속 목표. 옛 설계1점 승계 없음.",
+    "D10": "두 번째 실제 법인 확산/그룹 ROI는 후속 목표로 보존. 1단계 분모에서 제외; 기능 삭제나 완료 처리 아님.",
+    "D01_D07": "18/28 승계. D03 인증 API·D04 정렬/보류 완료를 잔여에서 제거하되 전체 연결 단계의 추가 인정 증거가 없어 점수는 승계.",
+    "duplication_rule": "제품별 동작은 D01~D07, 배포 시스템의 동작과 통합 환경은 T영역. T04 첫 slice는 T05 대상에서 제외. T08 로컬 관리 계약은 T10 실제 외부 통합과 분리. T12는 실제 배포 환경의 결합·부하·인수 증거이며 앞선 시험 결과 복사로 통과 금지."
+  },
+  "post_trial_backlog": [
+    {
+      "id": "D09-longitudinal",
+      "goal": "실제 업무 주기/코호트 장기 ROI 입증",
+      "status": "retained_not_complete"
+    },
+    {
+      "id": "D10-expansion",
+      "goal": "두 번째 실제 법인의 무포크 적용·격리·통화/내부거래/기간 집계",
+      "status": "retained_not_complete"
+    },
+    {
+      "id": "CAPACITY-2-3",
+      "goal": "100명/동시30 → 200명/동시50+ 용량 수용",
+      "status": "retained_not_complete"
+    }
+  ],
+  "groups": [
+    {
+      "id": "D01",
+      "name": "기본 기능·UI",
+      "track": "product",
+      "owner": "Codex 통합 수용",
+      "legacy_mapping": [
+        "D01"
+      ],
+      "evidence": [
+        "frontend/src/components/KitAppPanel.tsx",
+        "docs/handoff/RELEASE_CATALOG_CLEANUP_2026-09-08.md",
+        "docs/handoff/CLAUDE_TO_CODEX_REVIEW_2026-09-20_B.md"
+      ],
+      "assessment": "기존 인정 단계 승계 + 2026-09-21 통합 대조. 모든 영역의 현행 실사용 재시험이 아님.",
+      "remaining": "진입·탐색·저장/내려받기·오류/복귀를 실제 사용자 반복 업무로 수용. 일반 status 활성화 경로 등 권한·자료손실 차단 결함 미해결 시 완료 금지.",
+      "milestones": [
+        {
+          "id": "D01-1",
+          "name": "설계",
+          "weight": 1,
+          "status": "done",
+          "acceptance": "해당 제품 영역의 책임·범위·출구가 명시된 설계.",
+          "basis": "inherited_accepted"
+        },
+        {
+          "id": "D01-2",
+          "name": "구현",
+          "weight": 1,
+          "status": "done",
+          "acceptance": "해당 제품 영역의 핵심 경로 구현과 집중 시험 증거. 보조 모듈만으로 완료 불가.",
+          "basis": "inherited_accepted"
+        },
+        {
+          "id": "D01-3",
+          "name": "연결 검증",
+          "weight": 1,
+          "status": "done",
+          "acceptance": "대표 제품 생산자→소비자·문맥·권한·상태의 연결 증거. 핵심 계약 파손 시 재개방.",
+          "basis": "inherited_accepted"
+        },
+        {
+          "id": "D01-4",
+          "name": "실사용 검증",
+          "weight": 1,
+          "status": "in_progress",
+          "acceptance": "진입·탐색·저장/내려받기·오류/복귀를 실제 사용자 반복 업무로 수용. 일반 status 활성화 경로 등 권한·자료손실 차단 결함 미해결 시 완료 금지.",
+          "basis": "not_accepted"
+        }
+      ]
+    },
+    {
+      "id": "D02",
+      "name": "업무키트",
+      "track": "product",
+      "owner": "제품 기능 담당(배포/DB와 별도 순서 조율)",
+      "legacy_mapping": [
+        "D02"
+      ],
+      "evidence": [
+        "frontend/src/components/KitAppPanel.tsx",
+        "docs/handoff/K1_C5_EXISTING_DEPARTMENT_ALIGNMENT_2026-09-10.md"
+      ],
+      "assessment": "기존 인정 단계 승계 + 2026-09-21 통합 대조. 모든 영역의 현행 실사용 재시험이 아님.",
+      "remaining": "L2 표준 골격의 변경 가능성, 기존 7개 대상 앱의 데이터 인증·권한·실행 연결과 부서 사용자 수용.",
+      "milestones": [
+        {
+          "id": "D02-1",
+          "name": "설계",
+          "weight": 1,
+          "status": "done",
+          "acceptance": "해당 제품 영역의 책임·범위·출구가 명시된 설계.",
+          "basis": "inherited_accepted"
+        },
+        {
+          "id": "D02-2",
+          "name": "구현",
+          "weight": 1,
+          "status": "done",
+          "acceptance": "해당 제품 영역의 핵심 경로 구현과 집중 시험 증거. 보조 모듈만으로 완료 불가.",
+          "basis": "inherited_accepted"
+        },
+        {
+          "id": "D02-3",
+          "name": "연결 검증",
+          "weight": 1,
+          "status": "in_progress",
+          "acceptance": "대표 제품 생산자→소비자·문맥·권한·상태의 연결 증거. 핵심 계약 파손 시 재개방.",
+          "basis": "not_accepted"
+        },
+        {
+          "id": "D02-4",
+          "name": "실사용 검증",
+          "weight": 1,
+          "status": "not_verified",
+          "acceptance": "L2 표준 골격의 변경 가능성, 기존 7개 대상 앱의 데이터 인증·권한·실행 연결과 부서 사용자 수용.",
+          "basis": "not_accepted"
+        }
+      ]
+    },
+    {
+      "id": "D03",
+      "name": "현업 데이터 입력·등록",
+      "track": "product",
+      "owner": "제품 기능 담당(배포/DB와 별도 순서 조율)",
+      "legacy_mapping": [
+        "D03"
+      ],
+      "evidence": [
+        "api/routes/data_preparation_control.py",
+        "frontend/src/components/DataPrepPanel.tsx",
+        "core/actual_certification_policy.py",
+        "api/routes/admin_control.py",
+        "docs/handoff/PROPOSAL_ACTUAL_CERTIFICATION_2026-09-11.md"
+      ],
+      "assessment": "기존 인정 단계 승계 + 2026-09-21 통합 대조. 모든 영역의 현행 실사용 재시험이 아님.",
+      "remaining": "존재하는 인증 API를 정책/서명 화면 및 실제 입력·OWNER_CERTIFIED·업무 소비까지 연결. 인증 API 재구현을 잔여로 세지 않음.",
+      "milestones": [
+        {
+          "id": "D03-1",
+          "name": "설계",
+          "weight": 1,
+          "status": "done",
+          "acceptance": "해당 제품 영역의 책임·범위·출구가 명시된 설계.",
+          "basis": "inherited_accepted"
+        },
+        {
+          "id": "D03-2",
+          "name": "구현",
+          "weight": 1,
+          "status": "done",
+          "acceptance": "해당 제품 영역의 핵심 경로 구현과 집중 시험 증거. 보조 모듈만으로 완료 불가.",
+          "basis": "inherited_accepted"
+        },
+        {
+          "id": "D03-3",
+          "name": "연결 검증",
+          "weight": 1,
+          "status": "in_progress",
+          "acceptance": "대표 제품 생산자→소비자·문맥·권한·상태의 연결 증거. 핵심 계약 파손 시 재개방.",
+          "basis": "not_accepted"
+        },
+        {
+          "id": "D03-4",
+          "name": "실사용 검증",
+          "weight": 1,
+          "status": "not_verified",
+          "acceptance": "존재하는 인증 API를 정책/서명 화면 및 실제 입력·OWNER_CERTIFIED·업무 소비까지 연결. 인증 API 재구현을 잔여로 세지 않음.",
+          "basis": "not_accepted"
+        }
+      ]
+    },
+    {
+      "id": "D04",
+      "name": "초기 데이터 준비",
+      "track": "product",
+      "owner": "제품 기능 담당(배포/DB와 별도 순서 조율)",
+      "legacy_mapping": [
+        "D04"
+      ],
+      "evidence": [
+        "core/data_preparation/snapshot_service.py",
+        "core/data_preparation/store.py",
+        "docs/handoff/K1_C5_EXISTING_DEPARTMENT_ALIGNMENT_2026-09-10.md",
+        "output/kit-logistics-review-2026-09-10/factory-rehearsal-7h8jvgww/logistics-raw-batch-eweopj4t/batch-result.json",
+        "output/kit-logistics-review-2026-09-10/factory-rehearsal-7h8jvgww/logistics-raw-batch-eweopj4t/verification-notes.json",
+        "docs/handoff/FOUNDATION_ALIGNMENT_CHECKPOINT_2026-09-11.md",
+        "docs/handoff/DATA_USAGE_HOLD_ENFORCEMENT_2026-09-12.md"
+      ],
+      "assessment": "기존 인정 단계 승계 + 2026-09-21 통합 대조. 모든 영역의 현행 실사용 재시험이 아님.",
+      "remaining": "완료한 선행 5종 정렬·보류 강제는 재작업하지 않음. 정식 소유권/인증·보류 해제 근거와 같은 회사/기간의 앱·계산 연결 수용.",
+      "milestones": [
+        {
+          "id": "D04-1",
+          "name": "설계",
+          "weight": 1,
+          "status": "done",
+          "acceptance": "해당 제품 영역의 책임·범위·출구가 명시된 설계.",
+          "basis": "inherited_accepted"
+        },
+        {
+          "id": "D04-2",
+          "name": "구현",
+          "weight": 1,
+          "status": "done",
+          "acceptance": "해당 제품 영역의 핵심 경로 구현과 집중 시험 증거. 보조 모듈만으로 완료 불가.",
+          "basis": "inherited_accepted"
+        },
+        {
+          "id": "D04-3",
+          "name": "연결 검증",
+          "weight": 1,
+          "status": "in_progress",
+          "acceptance": "대표 제품 생산자→소비자·문맥·권한·상태의 연결 증거. 핵심 계약 파손 시 재개방.",
+          "basis": "not_accepted"
+        },
+        {
+          "id": "D04-4",
+          "name": "실사용 검증",
+          "weight": 1,
+          "status": "not_verified",
+          "acceptance": "완료한 선행 5종 정렬·보류 강제는 재작업하지 않음. 정식 소유권/인증·보류 해제 근거와 같은 회사/기간의 앱·계산 연결 수용.",
+          "basis": "not_accepted"
+        }
+      ]
+    },
+    {
+      "id": "D05",
+      "name": "외부 공개자료 수집·갱신",
+      "track": "product",
+      "owner": "Codex 통합 수용",
+      "legacy_mapping": [
+        "D05"
+      ],
+      "evidence": [
+        "docs/handoff/SESSION_2026-09-11_WORLDBANK_LIVE_RUN.md",
+        "docs/test_plan/F8_REAL_WALK.md",
+        "core/external_intelligence/snapshot_export.py",
+        "core/data_preparation/models.py",
+        "tests/test_snapshot_export.py"
+      ],
+      "assessment": "기존 인정 단계 승계 + 2026-09-21 통합 대조. 모든 영역의 현행 실사용 재시험이 아님.",
+      "remaining": "현재 대표 공개 원천의 반복 갱신·실패 복구·출처/인증 표시 수용. 기존 연결 인정을 전체 Provider 운영 검증으로 확대하지 않음.",
+      "milestones": [
+        {
+          "id": "D05-1",
+          "name": "설계",
+          "weight": 1,
+          "status": "done",
+          "acceptance": "해당 제품 영역의 책임·범위·출구가 명시된 설계.",
+          "basis": "inherited_accepted"
+        },
+        {
+          "id": "D05-2",
+          "name": "구현",
+          "weight": 1,
+          "status": "done",
+          "acceptance": "해당 제품 영역의 핵심 경로 구현과 집중 시험 증거. 보조 모듈만으로 완료 불가.",
+          "basis": "inherited_accepted"
+        },
+        {
+          "id": "D05-3",
+          "name": "연결 검증",
+          "weight": 1,
+          "status": "done",
+          "acceptance": "대표 제품 생산자→소비자·문맥·권한·상태의 연결 증거. 핵심 계약 파손 시 재개방.",
+          "basis": "inherited_accepted"
+        },
+        {
+          "id": "D05-4",
+          "name": "실사용 검증",
+          "weight": 1,
+          "status": "in_progress",
+          "acceptance": "현재 대표 공개 원천의 반복 갱신·실패 복구·출처/인증 표시 수용. 기존 연결 인정을 전체 Provider 운영 검증으로 확대하지 않음.",
+          "basis": "not_accepted"
+        }
+      ]
+    },
+    {
+      "id": "D06",
+      "name": "부서·전사 시뮬레이션",
+      "track": "product",
+      "owner": "Codex 통합 수용",
+      "legacy_mapping": [
+        "D06"
+      ],
+      "evidence": [
+        "core/planning_drivers.py",
+        "core/planning_engine.py",
+        "core/enterprise_financial_model.py",
+        "docs/test_plan/05_northstar_verification_plan_2026-09-08.md",
+        "docs/test_plan/F8_REAL_WALK.md"
+      ],
+      "assessment": "기존 인정 단계 승계 + 2026-09-21 통합 대조. 모든 영역의 현행 실사용 재시험이 아님.",
+      "remaining": "실제 회사·기간의 인증 자료로 Replay/Backtest 및 사용자 결과 확인.",
+      "milestones": [
+        {
+          "id": "D06-1",
+          "name": "설계",
+          "weight": 1,
+          "status": "done",
+          "acceptance": "해당 제품 영역의 책임·범위·출구가 명시된 설계.",
+          "basis": "inherited_accepted"
+        },
+        {
+          "id": "D06-2",
+          "name": "구현",
+          "weight": 1,
+          "status": "done",
+          "acceptance": "해당 제품 영역의 핵심 경로 구현과 집중 시험 증거. 보조 모듈만으로 완료 불가.",
+          "basis": "inherited_accepted"
+        },
+        {
+          "id": "D06-3",
+          "name": "연결 검증",
+          "weight": 1,
+          "status": "done",
+          "acceptance": "대표 제품 생산자→소비자·문맥·권한·상태의 연결 증거. 핵심 계약 파손 시 재개방.",
+          "basis": "inherited_accepted"
+        },
+        {
+          "id": "D06-4",
+          "name": "실사용 검증",
+          "weight": 1,
+          "status": "in_progress",
+          "acceptance": "실제 회사·기간의 인증 자료로 Replay/Backtest 및 사용자 결과 확인.",
+          "basis": "not_accepted"
+        }
+      ]
+    },
+    {
+      "id": "D07",
+      "name": "AI·의사결정·보고·실행",
+      "track": "product",
+      "owner": "Codex 통합 수용",
+      "legacy_mapping": [
+        "D07"
+      ],
+      "evidence": [
+        "api/routes/decision_control.py",
+        "core/decision_case.py",
+        "frontend/src/lib/decisionApi.ts",
+        "frontend/src/features/collaboration/DecisionCenter.tsx",
+        "docs/test_plan/F8_REAL_WALK.md",
+        "tests/test_decision_creation_contract.py",
+        "tests/decision_browser_contract_checks.py",
+        "output/decision-ui-r5soclz6/browser-report.json",
+        "output/decision-create-g1kphf05/tests.xml",
+        "output/decision-create-g1kphf05/isolation.json"
+      ],
+      "assessment": "기존 인정 단계 승계 + 2026-09-21 통합 대조. 모든 영역의 현행 실사용 재시험이 아님.",
+      "remaining": "실제 인증 사용자·자료로 작성→검토→판단→실행/보고를 반복 수용. 승인된 외부 전달 경계 검증; 유료 제작 1회만으로 완료 금지.",
+      "milestones": [
+        {
+          "id": "D07-1",
+          "name": "설계",
+          "weight": 1,
+          "status": "done",
+          "acceptance": "해당 제품 영역의 책임·범위·출구가 명시된 설계.",
+          "basis": "inherited_accepted"
+        },
+        {
+          "id": "D07-2",
+          "name": "구현",
+          "weight": 1,
+          "status": "done",
+          "acceptance": "해당 제품 영역의 핵심 경로 구현과 집중 시험 증거. 보조 모듈만으로 완료 불가.",
+          "basis": "inherited_accepted"
+        },
+        {
+          "id": "D07-3",
+          "name": "연결 검증",
+          "weight": 1,
+          "status": "done",
+          "acceptance": "대표 제품 생산자→소비자·문맥·권한·상태의 연결 증거. 핵심 계약 파손 시 재개방.",
+          "basis": "inherited_accepted"
+        },
+        {
+          "id": "D07-4",
+          "name": "실사용 검증",
+          "weight": 1,
+          "status": "in_progress",
+          "acceptance": "실제 인증 사용자·자료로 작성→검토→판단→실행/보고를 반복 수용. 승인된 외부 전달 경계 검증; 유료 제작 1회만으로 완료 금지.",
+          "basis": "not_accepted"
+        }
+      ]
+    },
+    {
+      "id": "T01",
+      "name": "범위·배포 R1 계약",
+      "track": "delivery",
+      "owner": "Codex",
+      "legacy_mapping": [
+        "T01"
+      ],
+      "evidence": [
+        "docs/handoff/CODEX_HYBRID_DEPLOYMENT_R1_2026-09-21.md"
+      ],
+      "assessment": "2026-09-21 문서/검토 결과 대조로 산출물·수용 인정. 조사/설계 완료이지 배포 완료 아님.",
+      "milestones": [
+        {
+          "id": "T01-1",
+          "name": "산출물 완료",
+          "weight": 1,
+          "status": "done",
+          "acceptance": "범위·UI·API·인증·상태·DB호환·실행 경계를 고정한 R1 명세 작성.",
+          "basis": "reviewed_document_evidence"
+        },
+        {
+          "id": "T01-2",
+          "name": "수용 완료",
+          "weight": 1,
+          "status": "done",
+          "acceptance": "독립 검토 지적 반영과 지정 범위 재검토·문서 구조 검증. 제품 실행이나 클라우드 수용으로 세지 않음.",
+          "basis": "reviewed_document_evidence"
+        }
+      ]
+    },
+    {
+      "id": "T02",
+      "name": "DB·파일 현황 지도",
+      "track": "delivery",
+      "owner": "Claude",
+      "legacy_mapping": [
+        "T02",
+        "D08"
+      ],
+      "evidence": [
+        "docs/handoff/CLAUDE_DB0_DELTA_AND_FIRST_SLICE_2026-09-20.md",
+        "docs/handoff/CLAUDE_DB0_BOOT_DDL_SEPARATION_2026-09-21.md"
+      ],
+      "assessment": "2026-09-21 문서/검토 결과 대조로 산출물·수용 인정. 조사/설계 완료이지 배포 완료 아님.",
+      "milestones": [
+        {
+          "id": "T02-1",
+          "name": "산출물 완료",
+          "weight": 1,
+          "status": "done",
+          "acceptance": "현행 DB/테이블·파일 정본·startup DDL 차이 지도 작성.",
+          "basis": "reviewed_document_evidence"
+        },
+        {
+          "id": "T02-2",
+          "name": "수용 완료",
+          "weight": 1,
+          "status": "done",
+          "acceptance": "읽기 전용 실측과 코드 대조로 업무/캐시/파일 경계·첫 7테이블 경로 확인. 실제 PG 실행을 뜻하지 않음.",
+          "basis": "reviewed_document_evidence"
+        }
+      ]
+    },
+    {
+      "id": "T03",
+      "name": "정식 산출물·CI",
+      "track": "delivery",
+      "owner": "Codex / OPS-P1",
+      "legacy_mapping": [
+        "T03"
+      ],
+      "evidence": [
+        "docs/handoff/CLAUDE_DEP_R1R4_REMEDIATION_2026-09-21.md"
+      ],
+      "assessment": "부분 자산은 인정 점수 없이 진행 상태로 보존; 정식 산출물·실행 증거 부족.",
+      "milestones": [
+        {
+          "id": "T03-1",
+          "name": "산출물 완료",
+          "weight": 1,
+          "status": "in_progress",
+          "acceptance": "기존 파일 선별기를 full manifest/digest/provenance/runtime lock/Linux build·CI 정의로 연결; 비밀·DB·관리툴 혼입 차단.",
+          "basis": "not_accepted"
+        },
+        {
+          "id": "T03-2",
+          "name": "수용 완료",
+          "weight": 1,
+          "status": "not_verified",
+          "acceptance": "실제 GitHub CI에서 동일 소스로 산출물 생성, 출처·변조·비밀 배제 검증과 실행 기록 확보. 승인 전 원격 실행은 미완료.",
+          "basis": "not_accepted"
+        }
+      ]
+    },
+    {
+      "id": "T04",
+      "name": "실제 PG 첫 경로",
+      "track": "delivery",
+      "owner": "Claude / DB-1",
+      "legacy_mapping": [
+        "T04",
+        "D08"
+      ],
+      "evidence": [
+        "docs/handoff/CLAUDE_DB1_FIRST_ADAPTER_2026-09-21.md"
+      ],
+      "assessment": "부분 자산은 인정 점수 없이 진행 상태로 보존; 정식 산출물·실행 증거 부족.",
+      "milestones": [
+        {
+          "id": "T04-1",
+          "name": "산출물 완료",
+          "weight": 1,
+          "status": "in_progress",
+          "acceptance": "auth·ECM 7테이블을 실제 PG에 설치하고 로그인→문맥→SSE 티켓 경로 실행. 런타임 DDL 분리. SQLite/대역만으로 불가.",
+          "basis": "not_accepted"
+        },
+        {
+          "id": "T04-2",
+          "name": "수용 완료",
+          "weight": 1,
+          "status": "not_verified",
+          "acceptance": "실제 PG에서 자료 대사·권한 거절·티켓 동시 1회 소비·재시작 검증.",
+          "basis": "not_accepted"
+        }
+      ]
+    },
+    {
+      "id": "T05",
+      "name": "필수 업무 DB 이관 구현",
+      "track": "delivery",
+      "owner": "Claude / DB 후속",
+      "legacy_mapping": [
+        "T05",
+        "D08"
+      ],
+      "evidence": [
+        "docs/handoff/CLAUDE_DB0_BOOT_DDL_SEPARATION_2026-09-21.md"
+      ],
+      "assessment": "부분 자산은 인정 점수 없이 진행 상태로 보존; 정식 산출물·실행 증거 부족.",
+      "milestones": [
+        {
+          "id": "T05-1",
+          "name": "산출물 완료",
+          "weight": 1,
+          "status": "in_progress",
+          "acceptance": "T04 첫 slice를 제외한 트라이얼 필수 저장소의 명시적 migration/SQL·기동 DDL 분리 구현; 이관 대상/제외 사유 고정.",
+          "basis": "not_accepted"
+        },
+        {
+          "id": "T05-2",
+          "name": "수용 완료",
+          "weight": 1,
+          "status": "not_verified",
+          "acceptance": "실제 PG에서 필수 업무 경로·제약·트랜잭션·N/N-1 schema 호환 검증. 95테이블 모두 이관으로 추정하지 않음.",
+          "basis": "not_accepted"
+        }
+      ]
+    },
+    {
+      "id": "T06",
+      "name": "실제 자료 이관·대사·복원",
+      "track": "delivery",
+      "owner": "Claude / DB·운영",
+      "legacy_mapping": [
+        "T06",
+        "D08"
+      ],
+      "evidence": [
+        "docs/handoff/CLAUDE_DB0_DELTA_AND_FIRST_SLICE_2026-09-20.md"
+      ],
+      "assessment": "부분 자산은 인정 점수 없이 진행 상태로 보존; 정식 산출물·실행 증거 부족.",
+      "milestones": [
+        {
+          "id": "T06-1",
+          "name": "산출물 완료",
+          "weight": 1,
+          "status": "not_started",
+          "acceptance": "승인 자료 범위의 복사/변환/대사/복원 도구와 보호된 백업·실행 절차 준비.",
+          "basis": "not_accepted"
+        },
+        {
+          "id": "T06-2",
+          "name": "수용 완료",
+          "weight": 1,
+          "status": "not_verified",
+          "acceptance": "격리 리허설 후 승인된 trial 이관에서 row/key/hash/권한 대사와 복원 성공. 도구만으로 완료 불가.",
+          "basis": "not_accepted"
+        }
+      ]
+    },
+    {
+      "id": "T07",
+      "name": "다중 인스턴스 업무 실행",
+      "track": "delivery",
+      "owner": "Claude / 업무 런타임",
+      "legacy_mapping": [
+        "T07",
+        "D08"
+      ],
+      "evidence": [
+        "docs/handoff/CLAUDE_DB0_DELTA_AND_FIRST_SLICE_2026-09-20.md"
+      ],
+      "assessment": "부분 자산은 인정 점수 없이 진행 상태로 보존; 정식 산출물·실행 증거 부족.",
+      "milestones": [
+        {
+          "id": "T07-1",
+          "name": "산출물 완료",
+          "weight": 1,
+          "status": "in_progress",
+          "acceptance": "작업 소유권·중복 실행 방지·영속 이벤트/SSE·공유 파일의 프로세스 밖 저장 경로 구현.",
+          "basis": "not_accepted"
+        },
+        {
+          "id": "T07-2",
+          "name": "수용 완료",
+          "weight": 1,
+          "status": "not_verified",
+          "acceptance": "두 인스턴스·재시작·연결 교체에서 세션/작업/파일 유실·중복·다른 문맥 반영 방지 검증.",
+          "basis": "not_accepted"
+        }
+      ]
+    },
+    {
+      "id": "T08",
+      "name": "독립 배포 backend",
+      "track": "delivery",
+      "owner": "Codex / OPS-P2",
+      "legacy_mapping": [
+        "T08"
+      ],
+      "evidence": [
+        "docs/handoff/CODEX_HYBRID_DEPLOYMENT_R1_2026-09-21.md",
+        "docs/handoff/CLAUDE_DEP_R1R4_REMEDIATION_2026-09-21.md"
+      ],
+      "assessment": "부분 자산은 인정 점수 없이 진행 상태로 보존; 정식 산출물·실행 증거 부족.",
+      "milestones": [
+        {
+          "id": "T08-1",
+          "name": "산출물 완료",
+          "weight": 1,
+          "status": "not_started",
+          "acceptance": "업무 DB와 분리된 PG·R1 API/원자 전이·인증/권한·lease/감사 구현. 구 7상태 원장을 완료로 인정하지 않음.",
+          "basis": "not_accepted"
+        },
+        {
+          "id": "T08-2",
+          "name": "수용 완료",
+          "weight": 1,
+          "status": "not_verified",
+          "acceptance": "실제 관리 PG/API에서 경쟁·멱등·권한 회수·실패/복구·불변 계획 검증. live GitHub·agent 통합은 T10에서만 가산.",
+          "basis": "not_accepted"
+        }
+      ]
+    },
+    {
+      "id": "T09",
+      "name": "자체 배포관리 UI",
+      "track": "delivery",
+      "owner": "Codex / OPS-P3",
+      "legacy_mapping": [
+        "T09"
+      ],
+      "evidence": [
+        "docs/handoff/CODEX_HYBRID_DEPLOYMENT_R1_2026-09-21.md"
+      ],
+      "assessment": "부분 자산은 인정 점수 없이 진행 상태로 보존; 정식 산출물·실행 증거 부족.",
+      "milestones": [
+        {
+          "id": "T09-1",
+          "name": "산출물 완료",
+          "weight": 1,
+          "status": "not_started",
+          "acceptance": "R1 3메뉴·배포 준비/상세/이력·stale/UNKNOWN/권한/오류 표시와 API 연결 구현.",
+          "basis": "not_accepted"
+        },
+        {
+          "id": "T09-2",
+          "name": "수용 완료",
+          "weight": 1,
+          "status": "not_verified",
+          "acceptance": "실제 관리 backend에 연결한 브라우저로 준비/요청/관측/실패/복구 표시 수용. 새 UI 인증정책 우회 없음.",
+          "basis": "not_accepted"
+        }
+      ]
+    },
+    {
+      "id": "T10",
+      "name": "GitHub·agent·실제 노드 관측",
+      "track": "delivery",
+      "owner": "Codex / OPS-P4 + Claude 관측",
+      "legacy_mapping": [
+        "T10"
+      ],
+      "evidence": [
+        "docs/handoff/CODEX_HYBRID_DEPLOYMENT_R1_2026-09-21.md"
+      ],
+      "assessment": "부분 자산은 인정 점수 없이 진행 상태로 보존; 정식 산출물·실행 증거 부족.",
+      "milestones": [
+        {
+          "id": "T10-1",
+          "name": "산출물 완료",
+          "weight": 1,
+          "status": "not_started",
+          "acceptance": "dispatch/run/OIDC/claim·agent mTLS·보호/정책·노드 DB/마운트/slot 실측 수집 연결 구현.",
+          "basis": "not_accepted"
+        },
+        {
+          "id": "T10-2",
+          "name": "수용 완료",
+          "weight": 1,
+          "status": "not_verified",
+          "acceptance": "승인된 환경의 실제 GitHub·agent·노드로 정상/거절/lease/결과 대조 검증. 표식·수동 PASS로 대체 금지.",
+          "basis": "not_accepted"
+        }
+      ]
+    },
+    {
+      "id": "T11",
+      "name": "NCP 무중단·복구",
+      "track": "delivery",
+      "owner": "Codex / 인프라·운영",
+      "legacy_mapping": [
+        "T11",
+        "D08"
+      ],
+      "evidence": [
+        "docs/handoff/CODEX_HYBRID_DEPLOYMENT_R1_2026-09-21.md"
+      ],
+      "assessment": "부분 자산은 인정 점수 없이 진행 상태로 보존; 정식 산출물·실행 증거 부족.",
+      "milestones": [
+        {
+          "id": "T11-1",
+          "name": "산출물 완료",
+          "weight": 1,
+          "status": "not_started",
+          "acceptance": "승인된 NCP 네트워크/권한/DB/두 slot·트래픽 전환·백업·관측 구성과 실행 절차 마련.",
+          "basis": "not_accepted"
+        },
+        {
+          "id": "T11-2",
+          "name": "수용 완료",
+          "weight": 1,
+          "status": "not_verified",
+          "acceptance": "실제 트래픽 중 정상 배포·장애·N/N-1 호환·코드 복귀·DB 복원 리허설. 파괴적 schema 변경의 무조건 무중단을 의미하지 않음.",
+          "basis": "not_accepted"
+        }
+      ]
+    },
+    {
+      "id": "T12",
+      "name": "1단계 통합 실사용 수용",
+      "track": "delivery",
+      "owner": "Codex + 실제 사용자/운영 담당",
+      "legacy_mapping": [
+        "T12",
+        "D09(stage1_subset)"
+      ],
+      "evidence": [
+        "docs/handoff/INTEGRATED_TRIAL_DELIVERY_STATUS_2026-09-21.md"
+      ],
+      "assessment": "부분 자산은 인정 점수 없이 진행 상태로 보존; 정식 산출물·실행 증거 부족.",
+      "milestones": [
+        {
+          "id": "T12-1",
+          "name": "산출물 완료",
+          "weight": 1,
+          "status": "not_started",
+          "acceptance": "제품 D01~D07과 운영 T03~T11을 한 trial에 연결하고 사용자30/동시10·승인 자료·반복 업무·오류/보안·운영 책임 수용 시나리오 준비.",
+          "basis": "not_accepted"
+        },
+        {
+          "id": "T12-2",
+          "name": "수용 완료",
+          "weight": 1,
+          "status": "not_verified",
+          "acceptance": "실제 사용자가 선정 업무를 반복 수행하고 동시10·권한·자료보호·감사·복구를 수용. 앞선 제품 단계 증거 재가산만으로 완료 불가; 해당 업무의 P0/P1 차단 결함0.",
+          "basis": "not_accepted"
+        }
+      ]
+    }
+  ],
+  "summary": {
+    "earned": 22,
+    "possible": 52,
+    "percent": 42.3,
+    "remaining": 30,
+    "product": {
+      "earned": 18,
+      "possible": 28
+    },
+    "delivery": {
+      "earned": 4,
+      "possible": 24
+    },
+    "prior_percent": 52.5,
+    "percentage_point_rebase": -10.2,
+    "change_type": "scope_rebase_not_new_function_delivery"
+  },
+  "completion_rule": "52/52 및 미해결 trial 차단 P0/P1 0. T12 실제 사용자 수용 필수. 실자료/실서버/과금/권한 정책 실행은 별도 승인 경계를 유지하며 승인 대기를 완료로 바꾸지 않음.",
+  "limitations": [
+    "승계한18점은 기존 인정 증거이며 이번에 7영역의 모든 제품 시험을 재실행한 것이 아님.",
+    "이번 작업은 계획/진척 기준 변경이며 제품 구현 진도 증가가 아님.",
+    "제품 전 생애/그룹 확산률이 아닌 현재 승인 목표인 1단계 통합 전체 진척률."
+  ],
+  "reporting": {
+    "headline": "1단계 통합 전체 진척 22/52 = 42.3%",
+    "next_codex": "OPS-P1 산출물 첫30분 checkpoint; 전체0.5~1인일 잠정",
+    "next_claude": "DB-1 실제 PG 경로; 환경 확보 후4~8시간 잠정; 새 지시 수신 미확인"
+  }
+}
