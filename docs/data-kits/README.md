@@ -33,7 +33,8 @@
 | [`LSMNM_BATTERY_NEWBIZ_REVIEW_2026-09-16.md`](LSMNM_BATTERY_NEWBIZ_REVIEW_2026-09-16.md) | 실적이 없는 **신규 사업부**에 키트를 어떻게 주나 |
 | [`../handoff/PLATFORM_REVIEW_ABSOLUTE_DRIVERS_2026-09-16.md`](../handoff/PLATFORM_REVIEW_ABSOLUTE_DRIVERS_2026-09-16.md) | 플랫폼 검토 건 — 동인이 **절대량**을 담지 못한다 |
 | [`../handoff/DIFFUSION_SESSION_HANDOFF_2026-09-17.md`](../handoff/DIFFUSION_SESSION_HANDOFF_2026-09-17.md) | **인수인계** — 어디까지 왔고 다음에 무엇을 하나 · **조심할 것** |
-| [`../decisions/DOMAIN_REVIEW_KIT_2026-09-21.md`](../decisions/DOMAIN_REVIEW_KIT_2026-09-21.md) | **도메인 검토 요청** — 현업에 드리는 물음 넷. 나머지 설계가 이 답을 기다린다 |
+| [`../decisions/DOMAIN_REVIEW_SMELTING_2026-09-22.md`](../decisions/DOMAIN_REVIEW_SMELTING_2026-09-22.md) | **도메인 검토 — 제련.** 담당이 다르므로 사업별로 갈랐다 |
+| [`../decisions/DOMAIN_REVIEW_BATTERY_2026-09-22.md`](../decisions/DOMAIN_REVIEW_BATTERY_2026-09-22.md) | **도메인 검토 — 전지소재.** 리튬 배합 결함 포함 |
 
 #### 이 검토에서 실제로 바뀐 것
 

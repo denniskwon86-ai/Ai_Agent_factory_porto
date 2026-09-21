@@ -167,10 +167,16 @@
   범용 제조업의 것뿐**이다. 시험 `test_사업이_달라도_같은_동인만_나온다` 가
   **깨지는 날**이 그 답이 반영된 날이다.
 
-★ **현업에 드릴 문서로 정리했다(2026-09-21)**:
-  [`docs/decisions/DOMAIN_REVIEW_KIT_2026-09-21.md`](../decisions/DOMAIN_REVIEW_KIT_2026-09-21.md)
-  — 표의 빈칸만 채우면 되게 썼고, **회사 실제 수치를 요구하지 않는다**(업계 통상치면
-  된다). 답이 오면 1·2 는 바로 새 판본으로 반영한다.
+★ **현업에 드릴 문서로 정리했다(2026-09-22)** — **사업별로 갈랐다.** 키트가 각각
+  구성되고 **답할 담당도 다르기 때문이다.**
+
+| 문서 | 받는 분 | 특징 |
+|---|---|---|
+| [`DOMAIN_REVIEW_SMELTING_2026-09-22`](../decisions/DOMAIN_REVIEW_SMELTING_2026-09-22.md) | 제련·정련 현업 | 손익 동인 다섯 초안이 있다 |
+| [`DOMAIN_REVIEW_BATTERY_2026-09-22`](../decisions/DOMAIN_REVIEW_BATTERY_2026-09-22.md) | 전지소재 현업 | **동인 초안이 없어 열린 질문**이다. 그리고 **리튬 배합 결함**을 함께 묻는다 |
+
+각 `.md` 옆에 **Word 본**을 두었다 — 현업에게 `.md` 를 보낼 수는 없다(5.12).
+`.md` 가 정본이고 Word 는 배포본이다.
 
 | | 무엇 |
 |---|---|
@@ -304,6 +310,24 @@ info`)조차 없었다. 나는 그것을 「실패 8 건」으로 읽었다.
 한 곳에 모았고, 내부 구현이 사라지면 `app.openapi()` 로 떨어지게 했다 — **조용히
 빈손이 되지 않게.**
 
+### 5.12 ★ 읽는 사람이 다르면 **형식도 문서도 갈라야 한다**
+
+두 번 틀렸다.
+
+| | 무엇을 놓쳤나 |
+|---|---|
+| **형식** | 현업에 보낼 요청서를 `.md` 로 만들어 놓고 「그대로 보내시면 됩니다」라고 했다. 메일에 붙이면 표가 깨지고, 첨부해도 열지 못하고, **빈칸을 채울 수도 없다** |
+| **범위** | 제련과 전지소재를 **한 문서**에 담았다. 키트가 각각 구성되고 **답할 담당도 다른데**, 제련 담당은 램프업을, 전지소재 담당은 부산물을 답할 수 없다 |
+
+★ **「내용이 맞나」만 검토하고 「누가 어떻게 받나」를 검토하지 않았다.** 받는 사람이
+  다르면 **문서도 형식도 갈라야 한다** — 그 둘은 내용만큼 중요하다.
+
+    docs/decisions/DOMAIN_REVIEW_SMELTING_2026-09-22.md  + Word 본
+    docs/decisions/DOMAIN_REVIEW_BATTERY_2026-09-22.md   + Word 본
+
+`.md` 가 정본이고 Word 는 배포본이다 — **내용을 고치면 둘 다 고쳐야 한다.** 생성
+스크립트는 스크래치패드에 있고, 저장소에는 산출물만 둔다.
+
 ---
 
 ## 6. 재현 명령
@@ -365,7 +389,8 @@ AFS_STARTER_KITS_DIR=/opt/afs/data/kits .venv/Scripts/python.exe scripts/kit_she
 
 | 문서 | 받는 쪽 | 무엇 |
 |---|---|---|
-| [`decisions/DOMAIN_REVIEW_KIT_2026-09-21`](../decisions/DOMAIN_REVIEW_KIT_2026-09-21.md) | **현업** | 답이 필요한 물음 넷. 표만 채우면 된다 |
+| [`decisions/DOMAIN_REVIEW_SMELTING_2026-09-22`](../decisions/DOMAIN_REVIEW_SMELTING_2026-09-22.md) | **제련 현업** | 표만 채우면 된다 · Word 본 동봉 |
+| [`decisions/DOMAIN_REVIEW_BATTERY_2026-09-22`](../decisions/DOMAIN_REVIEW_BATTERY_2026-09-22.md) | **전지소재 현업** | 〃 · **리튬 배합 결함**을 함께 묻는다 |
 | [`KIT_VERSION_1_2_0_NOTICE`](KIT_VERSION_1_2_0_NOTICE_2026-09-17.md) | 플랫폼 | 1.2.0 을 냈다 · 플랫폼은 여전히 1.0.0 을 본다 |
 | [`PLATFORM_REVIEW_ABSOLUTE_DRIVERS`](PLATFORM_REVIEW_ABSOLUTE_DRIVERS_2026-09-16.md) | 플랫폼 | 동인이 **절대량**을 담지 못한다 |
 | [`PLATFORM_ROUTER_TESTS_STALE`](PLATFORM_ROUTER_TESTS_STALE_2026-09-21.md) | 플랫폼 | 라우터는 정상, 시험이 낡았다 — ✅ 고쳤다 |
