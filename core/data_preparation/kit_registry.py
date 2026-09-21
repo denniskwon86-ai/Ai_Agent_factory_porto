@@ -54,9 +54,39 @@ class LoadedKit(NamedTuple):
     frozen: bool = False
 
 
-def kits_dir() -> str:
+#: ⚠️ **키트를 코드 배포에서 떼어내기 위한 자리다.**
+#:
+#:   `deploy/update.sh` 는 `/opt/afs/app` 을 `git pull` 로 갈아 끼우고 `/opt/afs/data`
+#:   는 남긴다. 그런데 키트는 **app 쪽**에 있어 코드 릴리스에 묶여 있다 — 산업이 늘면
+#:   **모든 고객 서버가 그 짐을 함께 받고**, 제련만 쓰는 곳도 전선·화학 키트를 받는다.
+#:
+#:   환경변수를 두면 지금은 아무것도 달라지지 않고(기본값이 같다), 나중에
+#:   `/opt/afs/data/kits/` 로 옮기거나 배급 시스템을 붙일 때 **설정 한 줄**이면 된다.
+KITS_DIR_ENV = "AFS_KITS_DIR"
+STARTER_KITS_DIR_ENV = "AFS_STARTER_KITS_DIR"
+
+
+def _dir_from_env(env_name: str, default_rel: str) -> str:
+    """환경변수가 있으면 그곳, 없으면 저장소 안의 기본 자리.
+
+    ⚠️ **상대 경로는 `PROJECT_ROOT` 기준으로 읽는다.** cwd 기준으로 두면 서비스로
+      돌 때와 손으로 돌릴 때가 달라져, 「키트가 없다」가 조용히 나온다.
+    """
     from core.paths import PROJECT_ROOT
-    return os.path.join(PROJECT_ROOT, KITS_DIRNAME)
+    raw = (os.environ.get(env_name) or "").strip()
+    if not raw:
+        return os.path.join(PROJECT_ROOT, default_rel)
+    return raw if os.path.isabs(raw) else os.path.join(PROJECT_ROOT, raw)
+
+
+def kits_dir() -> str:
+    """Profile(`*.kit.json`) 디렉터리. `AFS_KITS_DIR` 이 우선한다."""
+    return _dir_from_env(KITS_DIR_ENV, KITS_DIRNAME)
+
+
+def starter_packages_dir() -> str:
+    """Starter Kit 디렉터리. `AFS_STARTER_KITS_DIR` 이 우선한다."""
+    return _dir_from_env(STARTER_KITS_DIR_ENV, STARTER_PACKAGES_DIRNAME)
 
 
 def _freeze_state(version_root: str) -> Dict[str, Any]:
@@ -85,7 +115,7 @@ def starter_package_catalog(directory: str = "") -> List[Dict[str, Any]]:
     import json
     from core.paths import PROJECT_ROOT
 
-    root = directory or os.path.join(PROJECT_ROOT, STARTER_PACKAGES_DIRNAME)
+    root = directory or starter_packages_dir()
     if not os.path.isdir(root):
         return []
     out: List[Dict[str, Any]] = []

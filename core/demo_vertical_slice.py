@@ -159,8 +159,13 @@ def rebase(sl: Dict[str, Tuple[List[Dict[str, str]], List[str]]], days: int
 
 
 def kit_root() -> str:
-    here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    return os.path.join(here, "starter_kits", KIT_ID, KIT_VERSION)
+    """정본 키트 판본 디렉터리.
+
+    ⚠️ 예전에는 **파일 위치에서 직접 조립**했다. 그러면 키트를 코드 배포에서
+      떼어낼 수 없다 — `kit_registry` 가 환경변수로 받는 자리를 함께 쓴다.
+    """
+    from core.data_preparation import kit_registry
+    return os.path.join(kit_registry.starter_packages_dir(), KIT_ID, KIT_VERSION)
 
 
 def _read(key: str) -> Tuple[List[Dict[str, str]], List[str]]:
