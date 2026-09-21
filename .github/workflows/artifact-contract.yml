@@ -1,11 +1,17 @@
 # ─────────────────────────────────────────────────────────────────────────────
 # [P1 · DEP-02/09/10] 배포 산출물 계약 — Linux 합성 검사
 #
-# ⚠️⚠️ **이 워크플로는 한 번도 실행된 적이 없다.** (2026-09-21 작성)
-#   Linux 러너도 원격 저장소도 이 자리에 없다. 아래는 «초안» 이고, 초록을 본 적이 없다.
-#   첫 실행에서 깨질 가장 그럴듯한 자리는 **대소문자** 다 — 개발은 Windows(대소문자 무시),
-#   러너는 Linux(구분)라서 `import Core.x` 같은 것이 여기서 처음 터진다. 그게 이 검사를
-#   두는 이유 중 하나다.
+# ── 실행 이력 (정정) ─────────────────────────────────────────────────────────
+# 처음 여기에 「한 번도 실행된 적이 없다」고 적었다. **지금은 사실이 아니다** —
+# 2026-09-21 푸시와 함께 4번 돌았다. 그 기록을 남긴다:
+#
+#   #1~#4  전부 Failure. 다만 «빌드 · 자산 확인 · 산출물 계약 검사 · manifest» 까지는
+#          통과했다(실행 결과에 manifest 35.5KB 가 남아 있고, 검사가 걸리면 manifest 를
+#          만들지 않는다). 즉 Linux 에서 npm ci · tsc -b · vite build · preview-vendor
+#          3종 · 허용목록 · 완결성 · 비밀검사가 실제로 돌았다.
+#   원인   마지막 「검사기 시험」 단계 하나. 아래 참조.
+#
+# ★ 걱정했던 대소문자 문제는 나오지 않았다. Linux 빌드는 통과했다.
 #
 # ⚠️ [DEP-10] **원격 쪽 설정은 여기서 만들어지지 않는다.** 필수 검사 지정(branch
 #   protection)·요금제·승인 기능은 저장소 설정이며 **별도 확인 대상**이다.
@@ -14,14 +20,26 @@
 # 무엇을 하나
 #   ① 프런트를 **실제로 빌드**한다 — `prebuild` 가 preview-vendor 3종을 만든다.
 #   ② 산출물 계약을 검사한다(허용목록·내용·완결성·필수 자산) → 걸리면 **실패**.
-#   ③ 검사기 자신을 시험한다 — 검사기가 틀리면 ②의 초록이 거짓이다.
-#   ④ manifest(경로별 SHA-256)를 남긴다 — 「무엇을 배포했나」에 나중에 답하려고.
+#   ③ manifest(경로별 SHA-256)를 남긴다 — 「무엇을 배포했나」에 나중에 답하려고.
+#
+# ⚠️⚠️ **「검사기 자신을 시험한다」 단계는 여기서 뺐다** (2026-09-21).
+#   처음엔 pytest 만 설치해 돌리려 했다. 「검사기는 표준 라이브러리만 쓴다」는 말은
+#   맞지만 **시험 단계에는 적용되지 않았다** — `tests/conftest.py` 가 LLM 호출 격리를
+#   걸려고 제품 모듈을 import 하고, 실패하면 «테스트를 실행하지 않음» 으로 닫는다.
+#   그래서 `No module named 'langchain_core'` 로 24건이 통째로 error 났다.
+#   ★ 그 conftest 는 **옳은 fail-closed 통제**다. `--confcutdir` 로 건너뛰어 초록을
+#     만들지 않는다 — 그건 격리 통제를 꺼서 통과시키는 것이다.
+#   ★ 의존성을 하나씩 채우는 것도 답이 아니었다: langchain-core 다음은 google, 그 뒤로
+#     LLM 공급자들이 줄줄이 이어진다(실측). `requirements.txt` 전체는 torch·transformers
+#     까지 끌고 온다.
+#   → **검사기 시험 29건은 로컬 격리 러너에서 돈다**(`scripts/verify_data_usage_holds.py`,
+#     쓰기 보호·감사 포함). CI 에 올리려면 제품 의존성을 설치하는 «별도 job» 이 필요하고,
+#     그건 비용이 드는 CI 설계 결정이라 소유자 판단으로 남긴다.
 #
 # 무엇을 «안» 하나
 #   · 배포하지 않는다. P1 은 **계약** 이지 전달이 아니다.
 #   · 비밀을 쓰지 않는다. 이 작업에 필요한 secret 은 **하나도 없다**.
-#   · 제품 의존성(`requirements.txt`, torch·transformers 포함)을 설치하지 않는다 —
-#     검사기는 **표준 라이브러리만** 쓴다. 전체 제품 시험을 CI 에 올리는 것은 별건이다.
+#   · 제품 의존성을 설치하지 않는다 — 위 이유로 시험 단계 자체를 두지 않는다.
 # ─────────────────────────────────────────────────────────────────────────────
 name: artifact-contract
 
@@ -46,12 +64,12 @@ jobs:
 
     steps:
       - name: 코드 받기
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           persist-credentials: false   # 이후 단계에 토큰을 남기지 않는다.
 
       - name: Node 준비
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: "20"
           cache: npm
@@ -79,7 +97,7 @@ jobs:
           done
 
       - name: Python 준비
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: "3.11"
 
@@ -88,23 +106,9 @@ jobs:
       - name: 산출물 계약 검사 + manifest
         run: python scripts/release_artifact.py --manifest artifacts/manifest.json
 
-      # ★ 검사기가 틀리면 위의 초록이 거짓이다. 그래서 검사기 자신도 시험한다.
-      #
-      # ⚠️ 저장소 `pytest.ini` 의 `addopts` 가 `-p tests.plugin_test_auth` 를 강제하고,
-      #   그 플러그인은 모듈 수준에서 **fastapi 를 import** 한다. 제품 의존성을 깔지 않는
-      #   이 작업에서는 거기서 죽는다. 그래서 **빈 설정으로 분리해** 돌린다 —
-      #   이 시험 파일은 도구를 «파일 경로로» 적재하고 합성 트리에서만 놀기 때문에
-      #   저장소 설정이 필요 없다(같은 방식으로 로컬에서 24건 초록을 확인했다).
-      - name: 검사기 시험
-        run: |
-          set -eu
-          python -m pip install --disable-pip-version-check --quiet pytest
-          echo "[pytest]" > "${RUNNER_TEMP}/pytest-ci.ini"
-          python -m pytest -c "${RUNNER_TEMP}/pytest-ci.ini" -p no:cacheprovider tests/test_release_artifact.py
-
       - name: manifest 보관
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: release-manifest-${{ github.sha }}
           path: artifacts/manifest.json
