@@ -104,6 +104,7 @@ def test_release_body_and_ledger_binding_cannot_be_tampered(stores):
 
 def test_product_routes_are_mounted():
     import main
-    paths = {route.path for route in main.app.routes}
+    from conftest import app_paths
+    paths = app_paths(main.app)
     assert "/api/v1/planning/drivers/{driver_code}/approve" in paths
     assert "/api/v1/planning/drivers/{driver_code}/revoke" in paths

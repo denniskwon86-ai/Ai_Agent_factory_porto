@@ -176,9 +176,12 @@ def test_계약이_가리키는_경로가_실제로_서버에_있다():
     """★★★ **계약과 배선을 대조한다.** 이 저장소가 반복해 다친 유형이 「시험이 실제 배선을
     타지 않아 초록이 거짓인」 경우다 — 계약에만 있고 서버에 없는 경로는 브리지 구현자를
     데이터셋 없는 우회로로 몰아넣는다."""
+    from conftest import app_endpoints
     from main import app
-    have = {(m, r.path) for r in app.routes
-            for m in (getattr(r, "methods", None) or ())}
+#: ⚠️ `app.routes` 를 직접 훑으면 **5 개만 보인다** — FastAPI 0.139 의
+#:   `include_router()` 는 `_IncludedRouter` 를 넣고 실제 경로를 그 안에 둔다.
+#:   `conftest.app_paths`/`app_endpoints` 가 한 겹 펼친다.
+    have = app_endpoints(app)
     for op, (method, path) in wire.SERVER_ROUTES.items():
         real = path.replace("{record_id}", "{record_id}")
         assert (method, real) in have, f"{op} 경로가 서버에 없다: {method} {real}"
@@ -189,8 +192,11 @@ def test_데이터셋을_말하지_않는_레코드_경로는_되살아나지_�
     """⚠️ 「쓰는 데가 없지만 남겨 둔다」는 것은 **다음 사람이 그 경로를 쓰도록 남겨 두는 것**
     이다. 그 모양은 안전하게 만들 수 없다 — 호출자가 데이터셋을 말하지 않으므로 소속을
     대조할 대상이 없다."""
+    from conftest import app_paths
     from main import app
-    bad = [r.path for r in app.routes if getattr(r, "path", "").startswith(shape)]
+    #: ⚠️ 예전에는 `app.routes` 를 직접 훑어 **언제나 빈 목록**이었다 — 즉 이 시험은
+    #:   아무것도 보지 못한 채 초록이었다(거짓 초록).
+    bad = [p for p in app_paths(app) if p.startswith(shape)]
     assert not bad, f"데이터셋 없는 레코드 경로가 다시 생겼다: {bad}"
 
 

@@ -171,6 +171,7 @@ def test_release_body_and_approval_actor_cannot_change_behind_the_fingerprint(st
 
 def test_product_router_exposes_human_approval_and_revocation_paths():
     import main
-    paths = {route.path for route in main.app.routes}
+    from conftest import app_paths
+    paths = app_paths(main.app)
     assert "/api/v1/planning/scenarios/{scenario_id}/approve" in paths
     assert "/api/v1/planning/scenarios/{scenario_id}/revoke" in paths

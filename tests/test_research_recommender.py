@@ -304,7 +304,8 @@ def test_topics_narrow_the_list_and_say_why():
 def test_the_routes_are_registered():
     """★ 코드만 있고 부를 데가 없으면 「있는가」만 증명한 셈이다."""
     import main
-    paths = {getattr(r, "path", "") for r in main.app.routes}
+    from conftest import app_paths
+    paths = app_paths(main.app)
     assert "/api/v1/external/research/sources" in paths
     assert "/api/v1/external/research/recommend" in paths
 

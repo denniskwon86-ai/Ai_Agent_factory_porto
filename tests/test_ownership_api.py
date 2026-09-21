@@ -438,8 +438,11 @@ def test_제품_앱에_소유권_경로가_붙어_있다():
 
     ⚠️ 404 를 받은 사용자는 「기능이 없다」고 결론 내리고 다시 묻지 않는다."""
     import main
-    have = {(m, r.path) for r in main.app.routes
-            for m in (getattr(r, "methods", None) or ())}
+    from conftest import app_endpoints
+#: ⚠️ `app.routes` 를 직접 훑으면 **5 개만 보인다** — FastAPI 0.139 의
+#:   `include_router()` 는 `_IncludedRouter` 를 넣고 실제 경로를 그 안에 둔다.
+#:   `conftest.app_paths`/`app_endpoints` 가 한 겹 펼친다.
+    have = app_endpoints(main.app)
     for method, path in (
             ("POST", "/api/v1/data-preparation/ownership/approve"),
             ("POST", "/api/v1/data-preparation/ownership/{binding_id}/revoke"),

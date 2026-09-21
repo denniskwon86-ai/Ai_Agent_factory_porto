@@ -42,7 +42,11 @@ def test_every_router_is_mounted():
 
     ⚠️ 붙지 않은 라우터의 기능은 «시험에서만» 존재한다. 그 상태는 오류를 내지 않는다 —
       백엔드 시험이 자기 앱을 만들어 붙이기 때문이다."""
-    mounted = {str(getattr(r, "path", "")) for r in app.routes}
+    from conftest import app_paths
+#: ⚠️ `app.routes` 를 직접 훑으면 **5 개만 보인다** — FastAPI 0.139 의
+#:   `include_router()` 는 `_IncludedRouter` 를 넣고 실제 경로를 그 안에 둔다.
+#:   `conftest.app_paths`/`app_endpoints` 가 한 겹 펼친다.
+    mounted = app_paths(app)
     missing = []
     for name, mod in _router_modules():
         if name in EXEMPT:
@@ -65,5 +69,5 @@ def test_the_pilot_paths_are_reachable(prefix):
     """★ 파일럿 동선이 지나는 경로들은 **실제 앱에서** 닿아야 한다.
 
     ⚠️ 위 시험이 「하나라도 붙었으면 통과」이므로, 시연에 필요한 접두어는 따로 못 박는다."""
-    paths = [str(getattr(r, "path", "")) for r in app.routes]
-    assert any(p.startswith(prefix) for p in paths), f"{prefix} 경로가 앱에 없다"
+    from conftest import app_paths
+    assert any(p.startswith(prefix) for p in app_paths(app)), f"{prefix} 경로가 앱에 없다"

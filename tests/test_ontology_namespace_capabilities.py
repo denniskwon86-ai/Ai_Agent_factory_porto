@@ -94,7 +94,8 @@ def test_runtime_status_route_is_mounted_on_the_product_router(tmp_path):
     runtime = ontology_runtime.OntologyRuntime(str(tmp_path / "ontology.db"))
     app = FastAPI()
     app.include_router(ontology_control.create_router(runtime))
-    paths = {route.path for route in app.routes}
+    from conftest import app_paths
+    paths = app_paths(app)
     assert "/api/v1/ontology/runtime/status" in paths
 
 

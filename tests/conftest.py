@@ -643,3 +643,72 @@ def _live_ledger_must_not_move():
     assert files_after == files_before, (
         f"⛔ 이 시험 세션이 운영 원장의 WAL/SHM 파일을 만들었거나 지웠습니다.\n"
         f"   전: {files_before}\n   후: {files_after}")
+
+
+# ── 앱에 붙은 경로 ──────────────────────────────────────────────────────────
+#
+# ⚠️⚠️ **`app.routes` 를 그냥 훑으면 5 개만 보인다** (실제로는 544 개다).
+#
+#   FastAPI 0.139 의 `include_router()` 는 `app.routes` 에 **`_IncludedRouter`
+#   객체**를 넣고 실제 경로는 그 안에 둔다. 그래서 예전 방식
+#
+#       {(m, r.path) for r in app.routes for m in (getattr(r, "methods", None) or ())}
+#
+#   은 **빈 집합**을 만들고, 무엇을 찾든 「없다」가 된다. 시험 10 건이 그렇게
+#   실패하고 있었다(2026-09-21 실측). 라우터는 정상이었다 —
+#   `GET /api/v1/data-preparation/kits` 가 200 을 준다.
+#
+# ★ 이 시험들이 지키려던 것은 **「만들어 놓고 등록하지 않았다」**(2026-08-19 사고)다.
+#   전부 실패해 있으면 그 감시가 꺼진 것과 같다 — 진짜로 빠뜨려도 아무도 모른다.
+
+
+def _walk_routes(app):
+    """앱에 실제로 붙은 라우트. `_IncludedRouter` 를 한 겹 펼친다."""
+    for r in app.routes:
+        if hasattr(r, "methods"):
+            yield r
+            continue
+        cand = getattr(r, "effective_candidates", None)
+        if callable(cand):
+            cand = cand()
+        for sub in (cand or []):
+            yield sub
+
+
+def _endpoints_from_openapi(app):
+    """폴백 — 내부 구현이 바뀌어 펼치기가 실패하면 **공개 스펙**으로 센다.
+
+    ⚠️ `include_in_schema=False` 인 것은 여기 없다(`/docs`·`/openapi.json` 등 4 개).
+      업무 경로는 전부 잡힌다.
+    """
+    spec = app.openapi()
+    return {(m.upper(), path)
+            for path, ops in (spec.get("paths") or {}).items() for m in ops}
+
+
+def app_endpoints(app):
+    """`{(METHOD, path)}`. **경로가 실제로 앱에 붙어 있는가**를 이것으로 묻는다."""
+    out = {(m, r.path)
+           for r in _walk_routes(app)
+           for m in (getattr(r, "methods", None) or ())}
+    #: 펼치기가 통하지 않으면(내부 구현 변경) 공개 스펙으로 떨어진다
+    return out if len(out) > len(app.routes) else _endpoints_from_openapi(app)
+
+
+def app_paths(app):
+    """`{path}` — 메서드를 묻지 않을 때."""
+    return {p for _m, p in app_endpoints(app)}
+
+
+@pytest.fixture(scope="session")
+def mounted_endpoints():
+    """앱에 붙은 `(METHOD, path)` 전부."""
+    import main
+    return app_endpoints(main.app)
+
+
+@pytest.fixture(scope="session")
+def mounted_paths():
+    """앱에 붙은 `path` 전부."""
+    import main
+    return app_paths(main.app)
