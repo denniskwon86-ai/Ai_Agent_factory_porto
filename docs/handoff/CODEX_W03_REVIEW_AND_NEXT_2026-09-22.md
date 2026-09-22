@@ -10,6 +10,13 @@
 - 검토 기준: 원장 acceptance 원문 + `CLAUDE_P03_EXECUTION_RESULT.md` §4-2 지시
 - 결론 먼저: **W03.1 수용 가능(조건 명시)** · **W03.2 조건부 보류 — CR-1 해결 후**
 
+> ✅ **갱신 2026-09-22 — 지시 ①② 수행 완료.** CR-1 은 **차단으로 정정**했고(대상+부모,
+> 시험을 거절 확인으로 뒤집어 skip 없이 실측), `_save_latest_state` 는 **삼킴을 유지하되
+> `last_state_save_error` 와 `STATE_SAVE_FAILED` 로 관측 가능**하게 했다. 결과는
+> `CLAUDE_P03_EXECUTION_RESULT.md` §9~§12. 회귀 **184 passed / exit 0 / skip 0**,
+> probe 둘 다 exit 0. **CR-1 차단 해제 — W03.2 는 이제 §5-2(「잘못된 판본」해석)만
+> 남는다.** 다음은 지시 ③ W03.3.
+
 ---
 
 ## 1. W03.1 — 두 노드 같은 판본 읽기 (45점)

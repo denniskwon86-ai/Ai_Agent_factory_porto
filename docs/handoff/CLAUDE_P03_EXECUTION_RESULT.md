@@ -1915,3 +1915,68 @@ LLM 0 · 외부 전송 0 · 운영 DB 0 · 커밋/푸시 0.
 `protected_assets_unchanged: true` · `blocked_file_writes: []`.
 운영 자료 불변(`library/`·`projects/` 0건). 제품 코드 **추가 변경 없음** — 이 보완은 probe 와
 시험만 바꿨습니다.
+
+---
+
+# W03.2 후속 — CR-1 정정과 저장 실패 관측 / 2026-09-22
+
+브랜치 검토(`CODEX_W03_REVIEW_AND_NEXT_2026-09-22.md`)의 지시 ①②를 수행했습니다.
+
+## 9. CR-1 — 링크 정책을 저장소와 같은 방향으로
+
+**제 근거가 틀렸습니다.** 「공유 저장을 링크로 거는 구성을 지원해야 한다」며 링크를
+**따라가게** 만들었는데, 이 저장소는 읽는 쪽에서 링크를 **아홉 곳에서 거절**합니다
+(`async_orchestrator:295` · `factory_control:2448·2631·2662` · `studio_project_files:53·56` ·
+`studio_pause_state:37` · `studio_revision_requests:81·87` · `studio_contract_reconcile:219·292` ·
+`studio_input_draft_control:106`). P05.1 CR 「junction 차단 누락」과 같은 방향입니다.
+
+⚠️ 따라가면 **`latest_state.json` 이 링크일 때 쓰기는 성공하고 읽기는 503** 이 됩니다 —
+W03 이 없애려던 「한쪽에서만 열리는 자원」을 오히려 만듭니다.
+
+**판단: 차단으로 뒤집었습니다.** 공유 저장을 링크로 지원하려면 **읽기와 쓰기를 함께** 바꿔야
+하고 그건 별도 결정입니다. 쓰기만 먼저 바꾸는 것은 순서가 틀렸습니다.
+
+- `_resolved_target()` → `_checked_target()`. **대상과 그 부모**를 봅니다 —
+  `factory_control.py:2631` 이 `(target_root, meta_path)` 를 보는 것과 같은 수준입니다.
+  더 위로 올라가면 상위 경로를 링크로 건 정상 배포까지 막습니다.
+- 예외는 기존 읽기 쪽과 같은 `ValueError`·같은 어조(「연결된 …」)를 씁니다.
+- ⚠️ `scripts/session_data_snapshot.py:70 regular()` **재사용은 검토했으나 맞지 않았습니다** —
+  `root` 를 받아 경로 탈출까지 보는 함수라 뿌리 개념이 없는 여기서는 쓸 수 없고,
+  `core/` 가 `scripts/` 를 import 하면 의존 방향이 뒤집힙니다. 같은 판정식만 따랐습니다.
+- 시험을 **거절 확인으로 뒤집었습니다**. 이 환경에서는 symlink·junction 둘 다 만들 수 있어
+  **skip 없이 실측**했습니다(`_winapi.CreateJunction` 확인). 링크 대상·**링크 부모** 두 갈래.
+
+## 10. 저장 실패 관측 — 삼킴은 유지, 조용함은 제거
+
+`_save_latest_state` 의 `except Exception: print(...)` 을 **그대로 둡니다.** 예외를 올리면
+상태 저장 하나 때문에 스프린트 실행 전체를 잃고, 그쪽이 더 나쁩니다.
+
+대신 **사후에 물어볼 수 있게** 했습니다.
+
+- `orchestrator.last_state_save_error` 에 `{project_id, at, error}` 를 남깁니다.
+  **성공하면 지웁니다** — 남아 있다는 것이 「마지막 저장이 실패한 상태」라는 뜻입니다.
+- 기존 경로 `factory_broadcaster.broadcast` 로 `STATE_SAVE_FAILED` 를 알립니다. 새 채널을
+  만들지 않았습니다(라우팅은 `project_id` 로 되며 event_type 은 라우팅 키가 아닙니다).
+- **알림이 깨져도 실행은 계속되고 기록은 남습니다** — 알림은 기록의 조건이 아닙니다.
+- ⚠️ **재시도를 늘려 덮지 않았습니다.** 41/180 은 reader 가 3초에 5천 번 여는 극단
+  조건이고, **실제 부하에서의 수치는 아직 모릅니다.** 모르는 것을 모른다고 적습니다.
+
+★ 이 시험(`test_state_save_failure_is_swallowed_but_left_findable`)은 **「원자 저장을 했으니
+저장은 안전하다」의 반례**이기도 합니다. 이 경로는 원자 쓰기를 붙여도 소실이 가능합니다.
+
+## 11. 검증
+
+| 대상 | 결과 |
+|---|---|
+| `tests/test_w03_atomic_save.py` | **17건**(15 → 17, skip 0) |
+| 회귀 8스위트 | **184 passed / exit 0 / skip 0** (이전 176 + 1 skip) |
+| `w03_atomic_write_probe.py compare` | exit 0 · torn **0** / 음성 대조군 **413** |
+| `w03_shared_read_probe.py compare` | exit 0 · 판정 6/6 |
+| 격리 | `sources_unchanged: true` · `protected_assets_unchanged: true` · 차단 쓰기 0 |
+
+## 12. 남은 것 — 검토 지시 ③④
+
+- **W03.3**(40점) — DB·파일 일관성 복구. 다음 착수분.
+- 낮은 순위: 원자 쓰기 구현 4→1 통합(`config_snapshot:160`·`contract_decision:298`),
+  `test_advisor_bootstrap.py` 의 러너 fixture 부채, **lost update 를 별도 단계로 뗄지**.
+- ⚠️ **여전히 단일 PC 증거**이고 두 호스트·공유 마운트가 아닙니다.
