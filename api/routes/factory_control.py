@@ -2878,7 +2878,9 @@ def _candidate_plane(release_id: str):
     from core.program_lifecycle import program_lifecycle
 
     try:
-        st = str(program_lifecycle.get_status(release_id).get("status", ""))
+        #: [W03.3] 정본이 없으면 빈 문자열 — 아래 「모르는 상태면 평면을 고르지 않는다」로
+        #:   그대로 접힌다.
+        st = program_lifecycle.effective_status(release_id)
     except Exception:
         st = ""
     audience = app_preview.audience_for_state(st)

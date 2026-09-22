@@ -234,7 +234,9 @@ def _release_state(release_id: str) -> str:
     try:
         from core.program_lifecycle import program_lifecycle
 
-        return str(program_lifecycle.get_status(str(release_id or "")).get("status", ""))
+        #: [W03.3] 정본이 없으면 빈 문자열 — 위 「판독 실패를 운영으로 접지 않는다」와
+        #:   같은 자리로 접힌다.
+        return program_lifecycle.effective_status(str(release_id or ""))
     except Exception:
         return ""
 

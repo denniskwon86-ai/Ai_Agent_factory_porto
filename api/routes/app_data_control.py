@@ -346,7 +346,9 @@ def _audience_for_release(release_id: str) -> str:
     from core import app_preview
     from core.program_lifecycle import program_lifecycle
 
-    state = str(program_lifecycle.get_status(str(release_id or "")).get("status") or "")
+    #: [W03.3] 정본이 없으면 빈 문자열이 온다 — 위 「모르면 운영으로 접지 않는다」와 같은
+    #:   경로로 접힌다. 사용여부 기록만 남은 릴리스가 운영 청중을 받지 않게 한다.
+    state = program_lifecycle.effective_status(str(release_id or ""))
     return app_preview.audience_for_state(state)
 
 

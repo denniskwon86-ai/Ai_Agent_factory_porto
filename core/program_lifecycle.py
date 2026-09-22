@@ -204,6 +204,25 @@ class ProgramLifecycle:
                      "이 상태로는 소유 문맥을 확인할 수 없습니다.")
         return d
 
+    def effective_status(self, release_id: str) -> str:
+        """지금 **쓸 수 있는가**를 묻는 자리의 상태. 정본이 없으면 **빈 문자열**이다.
+
+        ★ [W03.3 / 격리 표시] 사용여부 기록은 **지우지 않는다**(관리자가 껐다는 결정이
+          사라지면 재게시 때 켜진 채 돌아온다). 대신 정본이 없는 동안 **판정에서 뺀다.**
+          그것이 「행 보존 + 격리 표시」다.
+
+        ⚠️ 새 상태 어휘를 만들지 않고 **빈 문자열**을 쓴다. 이 값을 받는 자리들이 이미
+          「모르면 접지 않는다」로 짜여 있기 때문이다 — `app_preview.audience_for_state("")`
+          는 청중을 못 고르고, 청중이 없으면 평면도 안 고른다. 새 값을 만들면 그 fail-closed
+          경로를 타지 않고 각자 새로 판단하게 된다.
+
+        ⚠️ 상태를 **구분해서 답해야 하는** 자리는 이것을 쓰지 않는다. `calculation_control`
+          은 정본 없음을 「아직 생성되지 않았습니다」(409)로 따로 말하고, 그 구분은 사용자에게
+          쓸모가 있다. 여기로 뭉뚱그리면 그 말이 사라진다.
+        """
+        row = self.get_status(release_id)
+        return str(row.get("status") or "") if row.get("artifact_present") else ""
+
     def history(self, release_id: str) -> List[Dict[str, Any]]:
         conn = self._connect()
         try:

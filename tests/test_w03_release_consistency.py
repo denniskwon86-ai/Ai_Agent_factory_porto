@@ -141,6 +141,79 @@ def test_scan_reads_only(isolated):
     assert sorted(str(p.relative_to(library_root)) for p in library_root.rglob("*")) == before_tree
 
 
+# ── [사용자 결정 2026-09-22] 복구 정책 ② 「행 보존 + 격리 표시」 ────────────────
+#
+# DB 행은 **지우지 않는다** — 「관리자가 껐다」는 결정이 사라지면 재게시 때 켜진 채로
+# 돌아온다. 대신 정본이 없는 동안 **판정에서 뺀다.**
+
+def test_the_record_is_kept_not_deleted(isolated):
+    """★ 정본이 사라져도 **결정 기록은 남는다.** 이것이 ②의 전제다."""
+    lifecycle, library_root = isolated
+    publish(library_root, "rel_gone")
+    lifecycle.set_status("rel_gone", pl.DISABLED, actor="admin@example.invalid",
+                         reason="보안 문제")
+    os.remove(library_root / "rel_gone" / "release.json")
+
+    row = lifecycle.get_status("rel_gone")
+    assert row["recorded"] is True and row["status"] == pl.DISABLED
+    assert row["reason"] == "보안 문제", "누가 왜 껐는지가 사라졌다"
+    assert [r["release_id"] for r in lifecycle.list_statuses()] == ["rel_gone"]
+
+
+def test_the_old_decision_comes_back_with_the_artifact(isolated):
+    """★★ 재게시하면 **껐던 결정이 그대로 살아난다** — ② 를 고른 이유다.
+
+    ①(행 폐기)이었다면 여기서 `active` 로 돌아온다. 껐던 프로그램이 조용히 켜지는 것이
+    행을 지우지 않는 이유다.
+    """
+    lifecycle, library_root = isolated
+    publish(library_root, "rel_back")
+    lifecycle.set_status("rel_back", pl.DISABLED, actor="admin@example.invalid", reason="보류")
+    os.remove(library_root / "rel_back" / "release.json")
+    assert lifecycle.effective_status("rel_back") == "", "격리되지 않았다"
+
+    publish(library_root, "rel_back")          # 다시 게시
+    assert lifecycle.effective_status("rel_back") == pl.DISABLED, \
+        "재게시했더니 껐던 프로그램이 켜진 채로 돌아왔다"
+
+
+def test_isolated_release_is_dropped_from_the_usable_answer(isolated):
+    """격리 표시 — 판정 자리에서는 **빈 문자열**이다. 새 상태 어휘를 만들지 않는다."""
+    lifecycle, library_root = isolated
+    publish(library_root, "rel_live")
+    assert lifecycle.effective_status("rel_live") == pl.ACTIVE
+
+    os.remove(library_root / "rel_live" / "release.json")
+    assert lifecycle.effective_status("rel_live") == ""
+    #: 원 질문(`get_status`)은 여전히 사실을 다 준다 — 격리와 기록 삭제는 다르다.
+    assert lifecycle.get_status("rel_live")["status"] == pl.ACTIVE
+    assert lifecycle.get_status("rel_live")["artifact_present"] is False
+
+
+def test_an_isolated_release_gets_no_audience(isolated, monkeypatch):
+    """★★ 호출자 연결 — 정본 없는 릴리스는 **청중을 못 받는다.**
+
+    소스 문자열 검사가 아니라 제품 함수를 직접 불러서 본다. 청중이 없으면 데이터 평면도
+    고르지 않는다(`app_preview` 계약).
+    """
+    from api.routes import app_data_control, app_data_runtime
+    from core import app_preview, program_lifecycle as plmod
+
+    lifecycle, library_root = isolated
+    monkeypatch.setattr(plmod, "program_lifecycle", lifecycle)
+    publish(library_root, "rel_aud")
+    lifecycle.set_status("rel_aud", pl.ACTIVE, actor="admin@example.invalid", reason="운영")
+
+    assert app_data_control._audience_for_release("rel_aud") == app_preview.AUDIENCE_OPERATIONAL
+    assert app_data_runtime._release_state("rel_aud") == pl.ACTIVE
+
+    os.remove(library_root / "rel_aud" / "release.json")
+    assert app_data_control._audience_for_release("rel_aud") == "", \
+        "정본이 없는데 운영 청중을 내줬다"
+    assert app_data_runtime._release_state("rel_aud") == ""
+    assert app_preview.audience_for_state("") == "", "빈 상태가 청중으로 접히지 않는다"
+
+
 def test_path_shaped_ids_never_reach_the_filesystem(isolated):
     """경로 모양 id 는 `_release_exists` 와 **같은 판정**으로 끊는다."""
     lifecycle, _ = isolated
