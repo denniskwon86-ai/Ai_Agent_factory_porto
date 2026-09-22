@@ -82,6 +82,14 @@ class AsyncFactoryOrchestrator:
         #:   삼키면 아무도 모르므로 **여기에 남겨 사후에 물어볼 수 있게** 한다.
         #:   성공하면 지운다 — 남아 있다는 것은 「마지막 저장이 실패한 상태」라는 뜻이다.
         self.last_state_save_error: Optional[Dict[str, Any]] = None
+        #: ★★ [2026-09-22] **프로젝트마다** 따로 남긴다. 위 단일 필드만 두면 A 가 실패한
+        #:   뒤 B 가 성공하는 순간 A 의 실패가 지워진다 — 물어보면 「없다」고 답하게 된다.
+        #:   단일 필드는 화면 호환을 위해 남기되, 판정은 이 표로 한다.
+        self.state_save_failures: Dict[str, Dict[str, Any]] = {}
+        #: 조건부 저장의 기준 판본(프로젝트별). **이 writer 가 마지막으로 본 값**이다.
+        #: ⚠️ 충돌로 거절되면 지운다 — 다음 저장이 현재 판본을 다시 읽어 이어받는다.
+        #:   낡은 기준을 그대로 들고 재시도하면 영원히 거절된다.
+        self._state_baselines: Dict[str, str] = {}
 
     def _forget_task(self, key, task):
         """이전 실행의 완료 콜백이 같은 ID의 새 실행을 지우지 않는다."""
@@ -103,32 +111,67 @@ class AsyncFactoryOrchestrator:
         # 전체 상태(생성 코드 포함 - 수 MB 가능)의 json 직렬화+쓰기는 동기 작업이라
         # 매 노드마다 이벤트 루프(SSE/전체 API)를 멈추게 하므로 스레드로 내린다
         def _write():
-            os.makedirs(workspace_root, exist_ok=True)
+            #: ★★ [2026-09-22] `makedirs` 도 **링크 경계 안**에서 한다. 검사 밖에 있으면
+            #:   그 자체가 우회로다 — 연결된 상위 아래에 디렉터리를 만들어 놓고 나서
+            #:   「대상은 링크가 아니다」로 통과한다.
+            from core.paths import PROJECTS_DIR
+            atomic_write.ensure_directory(workspace_root, root=PROJECTS_DIR)
             state_path = os.path.join(workspace_root, "latest_state.json")
             data_to_save = jsonable_encoder(state_data)
-            # 매 노드마다 덮어쓴다. 중간에 끊기면 이전 판본이 그대로 남아야 한다.
-            atomic_write.replace_json(state_path, data_to_save, indent=2)
+            #: ★★★ **조건부 저장.** 기준은 「이 writer 가 마지막으로 본 판본」이다 —
+            #:   쓰기 직전에 읽어 기준으로 삼으면 그건 조건이 아니라 형식이고, 늦게 온
+            #:   쓰기가 여전히 이긴다. 다른 노드가 그 사이에 올렸으면 여기서 거절된다.
+            #:
+            #: ⚠️ 기준을 모를 때(프로세스 재시작 뒤 이어받기)는 **현재 판본을 한 번
+            #:   받아들인다.** 그 한 번은 경쟁을 못 잡는다 — 재시작 직후 동시 쓰기는
+            #:   여전히 뒤엣것이 이긴다. 그 한계를 숨기지 않고 적어 둔다.
+            baseline = self._state_baselines.get(project_id)
+            if baseline is None:
+                baseline = atomic_write.digest_of(state_path)
+            self._state_baselines[project_id] = atomic_write.replace_json_if_unchanged(
+                state_path, data_to_save, expected_digest=baseline,
+                root=PROJECTS_DIR, indent=2)
+        project_id = _pid(workspace_root)
         try:
             await finish_before_cancel(asyncio.to_thread(_write))
+            #: ★★ [2026-09-22 보완] **이 프로젝트 것만** 지운다.
+            #:   ⚠️ 예전에는 `last_state_save_error = None` 이라 **A 가 실패한 뒤 B 가
+            #:     성공하면 A 의 실패가 지워졌다.** 실패 하나를 남의 성공이 덮는 구조는
+            #:     「관측을 붙였다」고 말할 수 없다 — 물어보면 없다고 답한다.
+            self.state_save_failures.pop(project_id, None)
             self.last_state_save_error = None       # 성공했으니 지난 실패 표시를 지운다
+            return {"saved": True, "project_id": project_id, "error": ""}
         except Exception as e:
             # ⚠️ **삼키는 것은 그대로 둔다.** 여기서 예외를 올리면 상태 저장 하나 때문에
             #   스프린트 실행 전체를 잃는다 — 그쪽이 더 나쁘다. 대신 «조용히» 삼키지 않는다:
             #   사후에 물어볼 수 있게 남기고(`last_state_save_error`), 화면에도 알린다.
             #   ★ 원자 쓰기를 붙여도 이 경로는 여전히 소실이 가능하다. Windows 가 교체를
             #     거절하면(probe 실측 41/180) 예외가 오고, 그것이 여기서 멈춘다.
-            self.last_state_save_error = {
-                "project_id": _pid(workspace_root),
+            record = {
+                "project_id": project_id,
                 "at": datetime.now().isoformat(timespec="seconds"),
                 "error": f"{type(e).__name__}: {e}",
+                #: ★ 「낡은 판본으로 덮으려다 거절」과 「교체 자체가 실패」는 다르다.
+                #:   앞쪽은 **다시 읽고 다시 만들어야** 하고, 뒤쪽은 재시도로 풀린다.
+                "stale": type(e).__name__ == "StaleWriteError",
             }
+            #: ⚠️ 충돌이면 기준을 버린다. 안 버리면 같은 낡은 기준으로 계속 거절된다.
+            if record["stale"]:
+                self._state_baselines.pop(project_id, None)
+            self.state_save_failures[project_id] = record
+            self.last_state_save_error = record
             print(f" 상태 백업 실패: {e}")
             try:
                 await factory_broadcaster.broadcast(
-                    "STATE_SAVE_FAILED", {"project_id": _pid(workspace_root),
+                    "STATE_SAVE_FAILED", {"project_id": project_id,
                                           "error": type(e).__name__})
             except Exception:
                 pass    # 알림이 실패해도 실행을 멈추지 않는다. 기록은 위에 이미 남았다.
+            #: ★★ 실행은 계속하되 **결과를 돌려준다.** 호출자가 「계산은 됐지만 정본
+            #:   저장은 안 됐다」를 구분해 소비할 수 있어야 한다 — 관측만 남기고 정상
+            #:   반환하면 호출자는 저장이 된 줄 알고 다음으로 간다.
+            return {"saved": False, "project_id": project_id,
+                    "error": f"{type(e).__name__}: {e}", "stale": record["stale"]}
 
     @execution_command("workspace_root")
     async def start_sprint(self, task_id: str, project_state_payload: dict, workspace_root: str) -> bool:
@@ -733,11 +776,20 @@ class AsyncFactoryOrchestrator:
                         or node_name in getattr(langgraph_engine, "interrupt_after_nodes", ()))
                     snapshot = await langgraph_engine.aget_state(config)
                     full_state = snapshot.values
-                    await self._save_latest_state(full_state, workspace_root)
+                    saved = await self._save_latest_state(full_state, workspace_root)
 
-                    await factory_broadcaster.broadcast(
-                        "NODE_COMPLETED", _node_completed_payload(pid, task_id, node_name,
-                                                                 state_data, full_state))
+                    #: ★★ [2026-09-22] **계산 성공과 정본 저장 성공을 구분해 보낸다.**
+                    #:   예전에는 저장이 실패해도 `NODE_COMPLETED` 가 그대로 나갔다 —
+                    #:   화면은 「이 노드 끝남」으로 읽고 새로고침하면 옛 상태가 온다.
+                    #:   실행을 멈추지는 않되(저장 하나로 스프린트를 잃지 않는다)
+                    #:   **완료 통지가 저장 성공을 뜻하지 않게** 한다.
+                    payload = _node_completed_payload(pid, task_id, node_name,
+                                                      state_data, full_state)
+                    payload["state_saved"] = bool(saved.get("saved"))
+                    if not saved.get("saved"):
+                        payload["state_save_error"] = saved.get("error", "")
+                        payload["state_save_stale"] = bool(saved.get("stale"))
+                    await factory_broadcaster.broadcast("NODE_COMPLETED", payload)
 
             asyncio.current_task()._studio_stream_completed = True
             await self._broadcast_stream_end(langgraph_engine, config, task_id, workspace_root)
@@ -884,11 +936,20 @@ class AsyncFactoryOrchestrator:
                         or node_name in getattr(langgraph_engine, "interrupt_after_nodes", ()))
                     snapshot = await langgraph_engine.aget_state(config)
                     full_state = snapshot.values
-                    await self._save_latest_state(full_state, workspace_root)
+                    saved = await self._save_latest_state(full_state, workspace_root)
 
-                    await factory_broadcaster.broadcast(
-                        "NODE_COMPLETED", _node_completed_payload(pid, task_id, node_name,
-                                                                 state_data, full_state))
+                    #: ★★ [2026-09-22] **계산 성공과 정본 저장 성공을 구분해 보낸다.**
+                    #:   예전에는 저장이 실패해도 `NODE_COMPLETED` 가 그대로 나갔다 —
+                    #:   화면은 「이 노드 끝남」으로 읽고 새로고침하면 옛 상태가 온다.
+                    #:   실행을 멈추지는 않되(저장 하나로 스프린트를 잃지 않는다)
+                    #:   **완료 통지가 저장 성공을 뜻하지 않게** 한다.
+                    payload = _node_completed_payload(pid, task_id, node_name,
+                                                      state_data, full_state)
+                    payload["state_saved"] = bool(saved.get("saved"))
+                    if not saved.get("saved"):
+                        payload["state_save_error"] = saved.get("error", "")
+                        payload["state_save_stale"] = bool(saved.get("stale"))
+                    await factory_broadcaster.broadcast("NODE_COMPLETED", payload)
 
             asyncio.current_task()._studio_stream_completed = True
             await self._broadcast_stream_end(langgraph_engine, config, task_id, workspace_root)

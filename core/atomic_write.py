@@ -1,10 +1,18 @@
 """정본 파일의 원자 저장 — 읽는 쪽이 «반쯤 쓰인 파일»을 보지 않게 한다.
 
-⚠️⚠️ **이것은 부분 파일만 막는다.** 동시 writer 가 남이 방금 올린 새 판본을 자기 낡은
-  내용으로 덮어쓰는 것(lost update)은 **다른 문제**이며 여기서 풀지 않는다 —
-  `os.replace` 는 늦게 도착한 쓰기를 이기게 할 뿐이다. 그 방지가 필요하면 판본 조건부
-  쓰기(읽은 판본과 다르면 거절)를 따로 세워야 한다. 이 파일이 있다고 해서
-  「동시 쓰기 안전」이라고 적지 말 것.
+## 두 가지는 **다른 문제**다 (둘 다 여기 있다)
+
+    부분 파일   반쯤 쓰인 파일이 읽힌다        → replace_text / replace_json
+    lost update 남의 새 판본을 낡은 내용으로   → replace_text_if_unchanged /
+                덮어쓴다                          replace_json_if_unchanged
+
+~~⚠️⚠️ 이것은 부분 파일만 막는다.~~ — **2026-09-22 해소.** 처음 판은 부분 파일만 막고
+lost update 는 「다른 문제」라며 남겼는데, 지시의 수용문이 「부분 파일**이나 잘못된
+판본**을 읽지 않도록」이었다. 두 문제가 다르다는 것은 **「한 번에 달성했다고 쓰지 말라」**
+는 뜻이지 **「하나만 해도 된다」가 아니다.** 조건부 저장을 같은 모듈에 세웠다.
+
+⚠️ 그래도 문장은 나눠 쓴다. `replace_text` 는 **여전히 부분 파일만** 막는다 — 늦게 온
+  쓰기가 이긴다. 판본 경쟁이 있는 자리는 `*_if_unchanged` 를 써야 한다.
 
 왜 원자적인가: 임시 파일을 **대상과 같은 디렉터리**에 만들기 때문에 같은 filesystem 이고,
 그래서 `os.replace` 가 원자적 교체가 된다. 다른 디렉터리(예: `%TEMP%`)에 만들면 볼륨이
@@ -17,8 +25,11 @@ from __future__ import annotations
 
 import json
 import os
+from contextlib import contextmanager
+import hashlib
 from pathlib import Path
 import time
+from typing import Optional, Tuple
 import uuid
 
 #: Windows 는 대상 파일이 다른 손에 열려 있으면 교체를 거절한다(공유 위반). 내용이 깨진 게
@@ -29,7 +40,7 @@ import uuid
 _RETRY_DELAYS = (0.005, 0.01, 0.02, 0.04, 0.08)
 
 
-def _checked_target(path) -> Path:
+def _checked_target(path, *, root=None) -> Path:
     """링크·junction 대상에는 **쓰지 않는다.** 읽는 쪽과 같은 방향으로 끊는다.
 
     ★ [CR-1 / 2026-09-22] 처음에는 **따라가도록** 만들었다. 「공유 저장을 링크로 걸어 두는
@@ -51,15 +62,75 @@ def _checked_target(path) -> Path:
       `core/` 가 `scripts/` 를 import 하면 의존 방향이 뒤집힌다. 대신 저장소가 쓰는 같은
       판정식(`is_symlink() or is_junction()`)을 그대로 따른다.
 
-    보는 범위는 **대상과 그 부모**다 — `factory_control.py:2631` 이 `(target_root, meta_path)`
-    를 보는 것과 같은 수준이다. 더 위로 올라가면 배포에서 상위 경로를 링크로 건 정상
-    구성까지 막는다.
+    ★★ [2026-09-22 보완] ~~보는 범위는 대상과 그 부모다.~~ — **뿌리까지 올라간다.**
+      처음엔 `(대상, 부모)` 만 봤고, 그러면 `연결된_상위/일반_하위/latest_state.json`
+      처럼 **한 칸만 더 위에 junction 을 걸면 그대로 통과**한다. 대상과 부모가 멀쩡해도
+      경로가 가리키는 실제 위치는 남의 저장소일 수 있다. 「막았다면 반대편 문을 본다」.
+
+    ⚠️ **정식 mount 는 링크가 아니다.** Windows 의 볼륨 마운트 지점도 reparse point 라
+      `is_junction()` 이 참이지만, 그것은 배포가 «의도한» 저장 구성이다. `os.path.ismount`
+      로 갈라 **볼륨 마운트는 통과**시키고 디렉터리 junction 만 막는다. 이 구분이 없으면
+      공유 저장을 정식 mount 로 붙인 구성에서 제품이 아예 못 쓴다.
+
+    ⚠️ 뿌리를 **모른다고 해서 부모에서 멈추지 않는다.** `root` 가 없으면 파일시스템
+      꼭대기까지 올라간다 — 모르는 것을 안전으로 바꾸지 않는다.
     """
-    target = Path(path)
-    for entry in (target, target.parent):
-        if entry.is_symlink() or (hasattr(entry, "is_junction") and entry.is_junction()):
-            # 읽는 쪽과 같은 예외형·같은 어조. 「연결된 …」은 이 저장소의 기존 문구다.
-            raise ValueError(f"연결된 경로에는 정본을 쓰지 않습니다: {entry}")
+    target = Path(os.path.abspath(path))
+    for entry in _components_to_check(target, root):
+        if not _is_link(entry):
+            continue
+        if _is_formal_mount(entry):
+            continue                      # 볼륨 마운트 지점 — 배포가 의도한 구성이다
+        # 읽는 쪽과 같은 예외형·같은 어조. 「연결된 …」은 이 저장소의 기존 문구다.
+        raise ValueError(f"연결된 경로에는 정본을 쓰지 않습니다: {entry}")
+    return target
+
+
+def _is_link(entry: Path) -> bool:
+    """symlink 또는 junction. ⚠️ `resolve()` 를 쓰지 않는다 — 따라가면 «링크였다» 는
+    사실 자체가 지워져 검사가 성립하지 않는다."""
+    try:
+        return bool(entry.is_symlink()
+                    or (hasattr(entry, "is_junction") and entry.is_junction()))
+    except OSError:
+        #: 판정할 수 없으면 «링크가 아니다» 로 넘기지 않는다 — 부르는 쪽이 막는다.
+        return True
+
+
+def _is_formal_mount(entry: Path) -> bool:
+    try:
+        return os.path.ismount(str(entry))
+    except OSError:
+        return False
+
+
+def _components_to_check(target: Path, root=None):
+    """뿌리→대상 사이의 **모든** 구성요소. 뿌리 자체도 검사 대상이다.
+
+    ⚠️ 뿌리를 믿지 않는다. 뿌리가 링크면 그 아래 전부가 남의 저장소다."""
+    chain = [target] + list(target.parents)
+    if root is None:
+        return chain                      # 모르면 꼭대기까지
+    base = Path(os.path.abspath(root))
+    #: ⚠️ 뿌리 밖이라고 **거절하지 않는다.** 이 모듈은 경로 봉쇄의 권위가 아니다(호출부에
+    #:   각자 `_safe_path` 류가 있다). 뿌리의 쓰임은 「검사를 어디서 멈추는가」 하나다.
+    #:   그래서 뿌리와 무관한 경로면 **더 넓게** 본다 — 모르는 것을 안전으로 바꾸지 않는다.
+    #:   (뿌리 밖을 거절하게 만들었더니 임의 작업공간을 쓰는 정상 호출자가 막혔다.)
+    if base != target and base not in target.parents:
+        return chain
+    #: 뿌리보다 위는 배포의 몫이다 — 뿌리 «포함» 해서 아래만 본다.
+    return [p for p in chain if p == base or base in p.parents]
+
+
+def ensure_directory(path, *, root=None) -> Path:
+    """디렉터리를 만들되 **만들기 전에** 링크 경계를 본다.
+
+    ★ `makedirs` 가 검사 밖에 있으면 그 자체가 우회로다 — 연결된 상위 아래에 디렉터리를
+      만들어 놓고 나서 「대상은 링크가 아니다」로 통과한다. 선행 쓰기도 같은 경계 안에."""
+    target = Path(os.path.abspath(path))
+    _checked_target(target / "_", root=root)      # 존재하지 않아도 조상은 검사된다
+    os.makedirs(target, exist_ok=True)
+    _checked_target(target / "_", root=root)      # 만든 뒤에도 한 번 — 사이에 바뀌었을 수 있다
     return target
 
 
@@ -104,14 +175,9 @@ def _create_temporary(target: Path, encoding: str):
     raise OSError(f"임시 파일 이름을 잡지 못했습니다: {target.parent}")
 
 
-def replace_text(path, text: str, *, encoding: str = "utf-8") -> None:
-    """다 쓰고 나서 한 번에 바꾼다. 중간에 실패하면 대상은 **이전 판본 그대로** 남는다.
-
-    텍스트 모드를 쓰는 이유: 기존 저장들이 `open(..., "w", encoding="utf-8")` 이었고,
-    바이너리로 바꾸면 줄바꿈 변환이 사라져 **같은 값인데 digest 가 달라진다.** 판본 동일성을
-    digest 로 보는 소비자가 있으므로(W03.1) 그 차이를 만들지 않는다.
-    """
-    target = _checked_target(path)
+def _write_and_replace(target: Path, text: str, encoding: str) -> None:
+    """임시로 다 쓰고 한 번에 교체한다. **조건부 저장과 같은 쓰기 구현을 쓴다** —
+    두 벌이 되면 한쪽만 고쳐지는 날이 온다."""
     temporary, stream = _create_temporary(target, encoding)
     try:
         with stream:
@@ -125,11 +191,139 @@ def replace_text(path, text: str, *, encoding: str = "utf-8") -> None:
             temporary.unlink()
 
 
-def replace_json(path, value, **dumps) -> None:
+def replace_text(path, text: str, *, encoding: str = "utf-8", root=None) -> None:
+    """다 쓰고 나서 한 번에 바꾼다. 중간에 실패하면 대상은 **이전 판본 그대로** 남는다.
+
+    ⚠️ **부분 파일만** 막는다. 늦게 온 쓰기가 이긴다 — 판본 경쟁이 있는 자리는
+      `replace_text_if_unchanged` 를 쓴다.
+
+    텍스트 모드를 쓰는 이유: 기존 저장들이 `open(..., "w", encoding="utf-8")` 이었고,
+    바이너리로 바꾸면 줄바꿈 변환이 사라져 **같은 값인데 digest 가 달라진다.** 판본 동일성을
+    digest 로 보는 소비자가 있으므로(W03.1) 그 차이를 만들지 않는다.
+    """
+    _write_and_replace(_checked_target(path, root=root), text, encoding)
+
+
+class StaleWriteError(RuntimeError):
+    """읽은 판본이 이미 바뀌었다. **덮어쓰지 않았다.**
+
+    ⚠️ 호출자는 이것을 「저장 실패」로 다루되 **낡은 payload 를 새 판본 번호로 다시
+      표기해 밀어 넣지 않는다.** 다시 읽고 다시 만들어야 한다."""
+
+    def __init__(self, path, expected: str, actual: str):
+        super().__init__(
+            f"저장하려는 사이에 정본이 바뀌었습니다: {path} — 다시 읽고 다시 만드십시오.")
+        self.path, self.expected, self.actual = str(path), expected, actual
+
+
+class SaveBusyError(RuntimeError):
+    """다른 writer 가 같은 정본을 쓰는 중이다. **아무것도 쓰지 않았다.**"""
+
+
+def digest_of(path) -> str:
+    """정본의 현재 판본 지문. **없으면 빈 문자열**이다.
+
+    ⚠️ 「없음」을 `None` 이 아니라 `""` 로 둔다 — 조건부 저장의 「새로 만드는 경우」가
+      `expected_digest=""` 하나로 표현되고, 호출자가 두 어휘를 안 갈라도 된다.
+    ⚠️ 바이트로 읽는다. 텍스트로 읽으면 줄바꿈 변환이 끼어 같은 파일의 지문이 플랫폼마다
+      달라진다."""
+    try:
+        with open(path, "rb") as stream:
+            return hashlib.sha256(stream.read()).hexdigest()
+    except FileNotFoundError:
+        return ""
+
+
+#: 잠금을 기다리는 시간. 짧게 몇 번 — 오래 잡으면 요청이 쌓이고, 안 기다리면 평범한
+#: 동시 저장이 그냥 실패한다.
+_LOCK_DELAYS = (0.01, 0.02, 0.04, 0.08, 0.16)
+
+
+@contextmanager
+def _target_lock(target: Path):
+    """★★ 잠금 파일을 **정본 옆에** 둔다 — 이것이 잠금 «권위» 의 핵심이다.
+
+    ⚠️⚠️ `studio_project_files.operation_lock` 은 잠금 파일을 `data/studio_bootstrap_locks`
+      즉 **노드 로컬 경로**에 둔다. 그래서 두 노드가 같은 공유 저장에 써도 **서로의 잠금이
+      보이지 않는다** — 프로세스 안 lock 과 다를 바 없어진다. 반면
+      `contract_decision._workspace_lock` 은 잠금 파일을 workspace 안에 둔다. 정본이 공유
+      저장에 있으면 잠금도 그 위에 있어 **같은 권위**가 된다. 여기서는 그쪽을 따른다.
+
+    ⚠️ 잠금 파일 이름은 **짧게** 유지한다(MAX_PATH 결함을 다시 만들지 않는다).
+      대상 이름의 해시 6자라 서로 다른 이름이 드물게 겹칠 수 있는데, 겹치면 **더 직렬화될
+      뿐** 정확성은 깨지지 않는다.
+
+    ⚠️ 이것은 **같은 filesystem 을 공유하는 writer 들** 사이의 잠금이다. 공유 저장이 그
+      잠금을 지원하지 않는 프로토콜이면 성립하지 않는다 — 실제 공유 마운트에서 다시
+      확인해야 한다(이번 증거는 단일 PC 다).
+    """
+    name = "." + hashlib.sha256(target.name.encode("utf-8")).hexdigest()[:6] + ".lck"
+    lock_path = target.with_name(name)
+    descriptor = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o600)
+    acquired = False
+    try:
+        for delay in _LOCK_DELAYS + (None,):
+            try:
+                if os.name == "nt":
+                    import msvcrt
+                    msvcrt.locking(descriptor, msvcrt.LK_NBLCK, 1)
+                else:
+                    import fcntl
+                    fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                acquired = True
+                break
+            except OSError:
+                if delay is None:
+                    raise SaveBusyError(
+                        f"다른 저장이 진행 중입니다: {target} — 다시 시도하십시오.")
+                time.sleep(delay)
+        yield
+    finally:
+        if acquired:
+            try:
+                if os.name == "nt":
+                    import msvcrt
+                    os.lseek(descriptor, 0, os.SEEK_SET)
+                    msvcrt.locking(descriptor, msvcrt.LK_UNLCK, 1)
+                else:
+                    import fcntl
+                    fcntl.flock(descriptor, fcntl.LOCK_UN)
+            except OSError:
+                pass
+        os.close(descriptor)
+
+
+def replace_text_if_unchanged(path, text: str, *, expected_digest: str,
+                              root=None, encoding: str = "utf-8") -> str:
+    """읽은 판본이 그대로일 때만 바꾼다. 바뀌었으면 **쓰지 않고 거절**한다.
+
+    ★★ 비교와 교체가 **같은 상호배제 구간 안**에 있어야 한다. 잠금 밖에서 비교하고
+      안에서 바꾸면(또는 그 반대) 그 사이가 곧 lost update 의 창이다 — 검사가 있는데
+      막지 못하는 모양이 된다.
+
+    돌려주는 것은 **새 판본의 지문**이다. 호출자가 이어서 쓸 때 그대로 기준이 된다.
+    """
+    target = _checked_target(path, root=root)
+    with _target_lock(target):
+        actual = digest_of(target)
+        if actual != expected_digest:
+            raise StaleWriteError(target, expected_digest, actual)
+        _write_and_replace(target, text, encoding)
+        return digest_of(target)
+
+
+def replace_json_if_unchanged(path, value, *, expected_digest: str, root=None,
+                              **dumps) -> str:
+    dumps.setdefault("ensure_ascii", False)
+    return replace_text_if_unchanged(path, json.dumps(value, **dumps),
+                                     expected_digest=expected_digest, root=root)
+
+
+def replace_json(path, value, *, root=None, **dumps) -> None:
     """직렬화 정책은 **호출자가 정한다.**
 
     `sort_keys` 를 여기서 강제하면 기존 파일의 키 순서가 바뀌고, 그러면 내용이 같은데도
     digest 가 달라진다. 호출자마다 쓰던 정책을 그대로 넘기게 둔다.
     """
     dumps.setdefault("ensure_ascii", False)
-    replace_text(path, json.dumps(value, **dumps))
+    replace_text(path, json.dumps(value, **dumps), root=root)

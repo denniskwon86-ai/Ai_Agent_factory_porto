@@ -422,9 +422,12 @@ def publish_release(*, release_id: str, app_id: str, name: str, instance_id: str
             ref["certification_state"] == "DEMO_CERTIFIED" or ref.get("certified_use_kind") == "OPERATIONAL"
             for ref in contract["process_context"]["verified_binding_refs"])
     rel_dir = library_paths.release_dir(release_id)
-    os.makedirs(rel_dir, exist_ok=True)
+    #: ★ [2026-09-22] `makedirs` 도 링크 경계 «안» 에서 한다 — 검사 밖에 있으면 연결된
+    #:   상위 아래에 디렉터리를 만들어 놓고 「대상은 링크가 아니다」로 통과한다.
+    atomic_write.ensure_directory(rel_dir, root=library_paths.library_dir())
     # 정본이다 — 다른 노드가 이걸 읽는다(W03.1). 반쯤 쓰인 상태가 보이면 안 된다.
-    atomic_write.replace_json(os.path.join(rel_dir, "release.json"), release, indent=2)
+    atomic_write.replace_json(os.path.join(rel_dir, "release.json"), release, indent=2,
+                              root=library_paths.library_dir())
 
     if owner_dept:
         try:

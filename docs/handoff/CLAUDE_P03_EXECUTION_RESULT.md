@@ -2235,3 +2235,158 @@ core/host_runtime_provider.py SERVING_PROVIDERS        ← 앱이 «돌 때» �
 
 따라서 이번 산출물은 **「실제 경로의 살아 있는 증거 + 두 지원 표 갈림 차단」**이며,
 R01.1 의 수용 여부는 위 미실측 범위를 함께 보고 Codex 가 판단할 일입니다.
+
+---
+
+# W03.2 보완 — 조건부 저장 · 상위 링크 · 실패 소비 (Claude / 2026-09-22)
+
+Codex 검토(22:32) §6 의 세 지적을 닫는다. **새 단계·추가 배점을 만들지 않았다** —
+기존 W03.2 45점 안에서 마무리한다.
+
+## 1. lost update — 「다른 문제」였지 「안 해도 되는 문제」가 아니었다
+
+앞 판은 부분 파일만 막고 lost update 를 남겼다. 수용문이 「부분 파일**이나 잘못된 판본**」
+이므로 **같은 단계 안에서** 닫는다.
+
+`core/atomic_write.py` 에 조건부 저장을 세웠다.
+
+```
+digest_of(path)                      현재 판본 지문. 없으면 "" (None 을 쓰지 않는다)
+replace_text_if_unchanged(...)       기준이 그대로일 때만 교체. 아니면 StaleWriteError
+replace_json_if_unchanged(...)       같은 것, JSON
+```
+
+★★ **비교와 교체가 같은 상호배제 구간 안**에 있다. 잠금 밖에서 비교하고 안에서 바꾸면
+그 사이가 곧 lost update 의 창이고, 그러면 검사는 있는데 막지 못하는 모양이 된다.
+
+### 잠금 «권위» 를 어디에 둘 것인가 — 이 보완의 핵심
+
+| 기존 | 잠금 파일 위치 | 공유 저장에서 |
+|---|---|---|
+| `studio_project_files.operation_lock` | `data/studio_bootstrap_locks` (**노드 로컬**) | ✗ 서로의 잠금이 안 보인다 |
+| `contract_decision._workspace_lock` | workspace 안 (**자료 옆**) | ✓ 같은 권위 |
+
+후자를 따랐다 — 잠금 파일을 **정본 옆에** 둔다. 정본이 공유 저장에 있으면 잠금도 그 위에
+있다. ⚠️ 다만 이것은 **같은 filesystem 을 공유하는 writer 들** 사이의 잠금이다. 공유
+프로토콜이 파일 잠금을 지원하지 않으면 성립하지 않는다 — 실제 공유 마운트에서 다시
+확인해야 한다(이번 증거는 단일 PC).
+
+⚠️ 잠금 파일 이름도 **짧게** 유지했다. 임시 파일에서 MAX_PATH 결함을 한 번 겪었으므로
+같은 실수를 곁다리로 되풀이하지 않는다(시험으로 고정).
+
+### writer 별 적용·불필요 근거
+
+| writer | 판단 |
+|---|---|
+| `async_orchestrator._save_latest_state` | **적용.** 프로젝트 정본 상태이고 노드가 둘이면 같은 파일을 쓴다 |
+| `factory_control:1176·1190` (mega/sub 생성) | 불필요 — **생성 시점 1회**, 새 디렉터리. 경쟁 writer 없음 |
+| `kit_app_builder:427` · `factory_control:3323·3361` (release.json) | 불필요 — 릴리스 id 마다 새 디렉터리. 같은 id 를 두 노드가 동시에 만들면 그건 상위 발급 문제다 |
+| `studio_project_files:36` | 불필요 — 이미 `operation_lock` 아래다. ⚠️ 단 그 잠금은 **노드 로컬**이라 공유 저장에서는 약하다(별건) |
+| `advisor_control:49` | 불필요 — 상담 플레이북, 정본 상태가 아니다 |
+
+⚠️ 기준 판본은 **「이 writer 가 마지막으로 본 값」**이다. 쓰기 직전에 읽어 기준으로 삼으면
+그건 조건이 아니라 형식이고 늦게 온 쓰기가 여전히 이긴다.
+⚠️ 기준을 모를 때(프로세스 재시작 뒤 이어받기)는 현재 판본을 **한 번 받아들인다.** 그
+한 번은 경쟁을 못 잡는다 — 숨기지 않고 코드에 적었다.
+
+## 2. 상위 링크 — 한 칸만 더 위면 통과했다
+
+`_checked_target` 이 `(대상, 부모)` 만 봤다. 그래서
+`연결된_상위/일반_하위/latest_state.json` 은 **대상도 부모도 링크가 아니라** 그냥 통과한다.
+
+**뿌리까지 올라간다.** 그리고 둘을 더 지킨다.
+
+- **정식 mount 는 링크가 아니다.** Windows 볼륨 마운트 지점도 reparse point 라
+  `is_junction()` 이 참이지만 배포가 의도한 구성이다. `os.path.ismount` 로 가른다.
+  이 구분이 없으면 공유 저장을 정식 mount 로 붙인 구성에서 제품이 **아예 못 쓴다.**
+- **뿌리를 모른다고 부모에서 멈추지 않는다.** `root` 가 없으면 꼭대기까지 본다.
+
+⚠️ 그리고 **뿌리 밖 경로를 거절하지 않는다.** 처음에 거절로 만들었더니 임의 작업공간을
+쓰는 정상 호출자가 막혔다(실측 1건). 이 모듈은 경로 봉쇄의 권위가 아니다 — 뿌리의 쓰임은
+「검사를 어디서 멈추는가」 하나이고, 무관한 경로면 **더 넓게** 본다.
+
+**`mkdir` 도 경계 안으로** 넣었다(`ensure_directory`). 검사 밖에 있으면 그 자체가
+우회로다 — 연결된 상위 아래에 디렉터리를 만들어 놓고 「대상은 링크가 아니다」로 통과한다.
+적용: `_save_latest_state` · `kit_app_builder` · `factory_control`(릴리스).
+
+## 3. 실패 소비 — 관측만으로는 성공이 된다
+
+`_save_latest_state` 가 실패해도 **정상 반환**해서 호출자가 성공 흐름을 이어갔다.
+
+- **결과를 돌려준다**: `{saved, project_id, error, stale}`. 실행은 여전히 안 멈춘다
+  (저장 하나로 스프린트를 잃지 않는다) — 다만 호출자가 **구분해 소비**할 수 있다.
+- **`NODE_COMPLETED` 가 저장 성공을 뜻하지 않게** 했다. `state_saved` 를 함께 보내고,
+  실패면 사유와 `stale` 여부를 싣는다. 예전에는 저장이 실패해도 완료 통지가 그대로 나가
+  화면이 「이 노드 끝남」으로 읽고 새로고침하면 옛 상태가 왔다.
+- **프로젝트별로 남긴다**(`state_save_failures`). 단일 필드 하나면 **A 가 실패한 뒤 B 가
+  성공하는 순간 A 의 실패가 지워진다** — 물어보면 「없다」고 답하게 된다.
+- **`stale` 과 교체 실패를 구분**한다. 앞쪽은 다시 읽고 다시 만들어야 하고, 뒤쪽은
+  재시도로 풀린다. 충돌이면 기준을 버려 다음 저장이 현재 판본을 다시 읽는다 — 안 버리면
+  같은 낡은 기준으로 영원히 거절된다.
+
+## 4. 증거
+
+### probe (격리 러너 밖 — 러너가 `subprocess.Popen` 을 막는다. 끄지 않았다)
+
+```
+w03_atomic_write_probe.py lost-update --writers 3 --rounds 40      exit 0
+  조건부     applied 93 · refused 27 · 남의 판본 덮어쓰기 0
+  대조군     applied 120 · refused 0 · writer 마다 남의 판본 덮어쓰기 1
+```
+
+★ 대조군에서 **아무도 거절당하지 않고** 남의 판본이 조용히 사라진다. 조건부에서 27건이
+거절된다 — 거절이 0 이면 경쟁이 없었던 것이지 통제가 증명된 게 아니다.
+
+⚠️ 이 판정은 **lost update 만** 본다. 부분 파일은 기존 `compare` 갈래가 본다. 두 문제를
+한 칸에 세지 않는다.
+
+### 시험
+
+신규 `tests/test_w03_conditional_save.py` **13건** — 조건부 거절·새 파일·잠금 위치·
+잠금 이름 길이·2단계 위 junction 거절·정상 깊은 경로 양성·정식 mount 통과·
+`ensure_directory` 선검사·뿌리 미지정 시 전체 검사·뿌리 무관 시 확대·실패 반환·
+프로젝트별 보존·`stale` 구분.
+
+## 5. 이번에 내가 겪은 것
+
+1. **뿌리 밖을 거절하게 만들었다가 정상 호출자를 막았다.** 시험 1건이 즉시 잡았다.
+   봉쇄와 「검사 범위」를 섞은 것이 원인이다.
+2. **시험이 낡은 대역을 붙들고 있었다.** 제품이 `replace_json_if_unchanged` 를 부르게
+   바뀌었는데 시험은 `replace_json` 을 대역으로 바꿔서 주입한 실패가 안 났다 — 3건이
+   실패로 알려 줬다. 시험이 변경을 제대로 잡은 경우다.
+3. **죽은 줄을 하나 넣었다**(아무것도 안 하는 `pass` 블록). 지웠다.
+
+## 6. 검증 — 이번 보완 뒤
+
+```
+넓은 묶음 10스위트   collected 194 · 193 passed · 1 skipped · exit 0 (13분 45초)
+                     sources_unchanged: true · protected_assets_unchanged: true
+                     blocked_file_writes: [] · blocked_sqlite_paths: []
+
+probe (러너 밖)      lost-update  exit 0  조건부 거절 27 / 대조군 거절 0·덮어쓰기 3
+                     compare      exit 0  atomic torn 0 / legacy torn 1088
+                     shared-read  exit 0  판정 6/6
+```
+
+대상: `test_w03_conditional_save`(신규 13) · `test_w03_atomic_save` · 
+`test_w03_release_consistency` · `test_w03_shared_release_read` · `test_r01_provider_path` ·
+`test_b3_kit_contract_v2` · `test_program_lifecycle` · `test_release_readiness` ·
+`test_app_delivery_real_release` · `test_kit_app_api`.
+
+★ `test_b3_kit_contract_v2`(MAX_PATH 결함을 잡았던 스위트)를 포함했다 — `ensure_directory`
+를 릴리스 쓰기에 넣으면서 긴 경로가 다시 깨지지 않는지 봐야 했기 때문이다.
+
+⚠️ 1 skipped 는 `test_a_linked_target_is_rejected` 다. **파일 심볼릭 링크를 이 환경에서
+만들 수 없어 미실측**이며(Windows 권한), 부모 junction 케이스 통과가 그 사례를 대신하지
+않는다. 이번 보완으로 **2단계 위 junction 거절**은 실측했다.
+
+⚠️ 111건 계열(`test_app_data_runtime`·`test_provider_dispatch`·`test_advisor_bootstrap`)은
+인계서 지시대로 **넣지 않았다** — 기존 실패라 귀속이 섞인다.
+
+## 7. 남은 것
+
+- **실제 공유 마운트 실측.** 잠금이 정본 옆에 있어도 공유 프로토콜이 파일 잠금을
+  지원해야 성립한다. 이번 증거는 전부 단일 PC 다.
+- **재시작 직후 한 번의 창.** 기준을 모를 때 현재 판본을 받아들이므로 그 한 번은 경쟁을
+  못 잡는다. 코드에 적어 두었고 숨기지 않았다.
+- **파일 심볼릭 링크 거절 미실측**(위 skip).

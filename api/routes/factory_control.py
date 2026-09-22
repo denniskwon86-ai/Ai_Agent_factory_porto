@@ -3319,8 +3319,11 @@ async def create_release(project_id: str,
     p = await asyncio.to_thread(_command_authority, project_id, p, "RELEASE")
     assert_project_writable(p, project_id)
     _execution_effect()
-    os.makedirs(rel_dir, exist_ok=True)
-    atomic_write.replace_json(os.path.join(rel_dir, "release.json"), release, indent=2)
+    #: ★ [2026-09-22] `makedirs` 도 링크 경계 «안» 에서 한다 — 검사 밖에 있으면
+    #:   연결된 상위 아래에 디렉터리를 만들어 놓고 통과하는 우회로가 된다.
+    atomic_write.ensure_directory(rel_dir, root=library_paths.library_dir())
+    atomic_write.replace_json(os.path.join(rel_dir, "release.json"), release, indent=2,
+                              root=library_paths.library_dir())
 
     # ── [Wave F-0] 승인된 계약을 **실제 데이터셋으로** 만든다 ──────────────
     #

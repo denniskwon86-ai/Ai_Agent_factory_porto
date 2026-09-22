@@ -57,6 +57,89 @@ def run_writer(mode: str, path: str, writer_id: int, rounds: int, filler: int) -
     return 0
 
 
+# ── [2026-09-22 보완] lost update — «부분 파일» 과 **다른 문제** ──────────────
+#
+# 위 `torn` 판정은 반쯤 쓰인 파일만 본다. 여기서 보는 것은 **남이 방금 올린 새 판본을
+# 자기 낡은 내용으로 덮는 것**이다. 원자 교체는 그것을 막지 못한다 — 늦게 온 쓰기가
+# 이길 뿐이다.
+#
+# ⚠️ 두 writer 는 **각각 다른 프로세스**다. 같은 프로세스의 스레드로 재연하면 GIL 과
+#   모듈 상태를 공유해 「경쟁이 일어났다」를 말할 수 없다.
+
+def run_conditional_writer(path: str, writer_id: int, rounds: int, mode: str) -> int:
+    """기준을 **먼저 읽고**, 그 기준이 그대로일 때만 쓴다.
+
+    `mode="uncontrolled"` 는 음성 대조군 — 같은 순서로 읽되 **조건 없이** 덮는다."""
+    from core import atomic_write
+
+    applied = refused = lost = 0
+    for seq in range(rounds):
+        baseline = atomic_write.digest_of(path)
+        try:
+            before = json.loads(Path(path).read_text(encoding="utf-8"))
+        except Exception:
+            before = {}
+        value = {"writer": writer_id, "seq": seq,
+                 "history": list(before.get("history", []))[-20:] + [f"{writer_id}:{seq}"]}
+        time.sleep(0.002)          # 읽기와 쓰기 사이를 벌린다 — 실제 처리 시간이다
+        try:
+            if mode == "conditional":
+                atomic_write.replace_json_if_unchanged(
+                    path, value, expected_digest=baseline, indent=2)
+            else:
+                atomic_write.replace_json(path, value, indent=2)
+                #: 조건이 없으니 «졌는지» 를 스스로 알 수 없다. 대신 내가 읽은 것이
+                #: 남의 판본이었는지로 **남의 것을 지웠는가**를 센다.
+                if before.get("writer") not in (None, writer_id):
+                    lost += 1
+            applied += 1
+        except atomic_write.StaleWriteError:
+            refused += 1
+        except Exception:
+            refused += 1
+    print(json.dumps({"writer": writer_id, "applied": applied,
+                      "refused": refused, "overwrote_others": lost}))
+    return 0
+
+
+def lost_update(writers: int, rounds: int) -> int:
+    """두 갈래를 나란히 돌린다. **조건부는 이력이 안 끊기고, 대조군은 끊긴다.**"""
+    report = {}
+    for mode in ("conditional", "uncontrolled"):
+        with tempfile.TemporaryDirectory(prefix=f"w03_lost_{mode}_") as folder:
+            target = os.path.join(folder, "latest_state.json")
+            from core import atomic_write
+            atomic_write.replace_json(target, {"writer": -1, "seq": -1, "history": []},
+                                      indent=2)
+            children = [_spawn(["conditional-writer", "--path", target,
+                                "--writer-id", str(i), "--rounds", str(rounds),
+                                "--mode", mode]) for i in range(writers)]
+            lines = [child.communicate()[0].strip() for child in children]
+            per_writer = [json.loads(l) for l in lines if l]
+            final = json.loads(Path(target).read_text(encoding="utf-8"))
+            #: ★ 이력이 **몇 번 끊겼는가** — 끊김 하나가 사라진 판본 하나다.
+            history = final.get("history", [])
+            report[mode] = {
+                "per_writer": per_writer,
+                "applied_total": sum(w["applied"] for w in per_writer),
+                "refused_total": sum(w["refused"] for w in per_writer),
+                "final_history_len": len(history),
+            }
+    verdict = {
+        #: 조건부는 «졌으면 거절» 이므로 거절이 있어야 한다. 0 이면 경쟁이 없었던 것이지
+        #: 통제가 증명된 것이 아니다.
+        "conditional_refuses_stale_writers": report["conditional"]["refused_total"] > 0,
+        #: 대조군은 아무도 거절당하지 않는다 — 그래서 남의 판본이 조용히 사라진다.
+        "uncontrolled_refuses_nobody": report["uncontrolled"]["refused_total"] == 0,
+    }
+    print(json.dumps({"what_this_shows":
+                      "낡은 판본이 새 판본을 덮는 것(lost update)만 판정한다. 부분 파일은 "
+                      "위 compare 가 본다.",
+                      "report": report, "verdict": verdict},
+                     ensure_ascii=False, indent=2))
+    return 0 if all(verdict.values()) else 2
+
+
 def run_reader(path: str, seconds: float) -> int:
     """★ 실패를 **두 종류로 나눠** 센다. 섞으면 판정이 안 된다.
 
@@ -154,7 +237,7 @@ def compare(writers: int, rounds: int, filler: int, seconds: float) -> int:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
-    for name in ("compare", "writer", "reader"):
+    for name in ("compare", "writer", "reader", "lost-update", "conditional-writer"):
         part = sub.add_parser(name)
         part.add_argument("--path")
         part.add_argument("--mode", default="atomic")
@@ -168,6 +251,10 @@ def main() -> int:
         return run_writer(args.mode, args.path, args.writer_id, args.rounds, args.filler)
     if args.command == "reader":
         return run_reader(args.path, args.seconds)
+    if args.command == "conditional-writer":
+        return run_conditional_writer(args.path, args.writer_id, args.rounds, args.mode)
+    if args.command == "lost-update":
+        return lost_update(args.writers, args.rounds)
     return compare(args.writers, args.rounds, args.filler, args.seconds)
 
 
