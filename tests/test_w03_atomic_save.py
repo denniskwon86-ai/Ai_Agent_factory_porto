@@ -125,6 +125,44 @@ def test_replace_retries_a_locked_target_then_gives_up_loudly(target, monkeypatc
     assert json.loads(target.read_text(encoding="utf-8"))["revision"] == 5
 
 
+def test_the_temporary_name_is_never_longer_than_the_target(tmp_path, monkeypatch):
+    """★★ 임시 이름이 정본보다 길면 **원본은 써지는데 임시만 못 만드는** 경로가 생긴다.
+
+    실측으로 났던 결함이다 — Windows MAX_PATH(260) 근처에서 `FileNotFoundError`,
+    경로 278자. 원자 저장을 넣었더니 원래 되던 게 안 됐다.
+    """
+    seen = {}
+
+    def capture(src, dst):
+        seen["src"], seen["dst"] = Path(src).name, Path(dst).name
+        return _REAL_REPLACE(src, dst)
+
+    monkeypatch.setattr(atomic_write.os, "replace", capture)
+    for name in ("release.json", "latest_state.json", "project_meta.json"):
+        atomic_write.replace_json(tmp_path / name, {"revision": 1}, indent=2)
+        assert len(seen["src"]) <= len(seen["dst"]), \
+            f"임시 이름이 정본보다 길다: {seen['src']}({len(seen['src'])}) > " \
+            f"{seen['dst']}({len(seen['dst'])})"
+
+
+def test_a_path_long_enough_for_the_target_is_long_enough_for_us(tmp_path):
+    """정본이 써지는 길이면 저장도 되어야 한다 — 위 불변식의 실제 재연."""
+    deep = tmp_path
+    while len(str(deep)) < 200:
+        deep = deep / "dd"
+    deep.mkdir(parents=True, exist_ok=True)
+    target = deep / "release.json"
+    try:
+        target.write_text("probe", encoding="utf-8")   # 정본 자체가 써지는가
+        target.unlink()
+    except OSError:
+        pytest.skip(f"이 환경은 정본도 쓸 수 없는 길이다({len(str(target))}자)")
+
+    atomic_write.replace_json(target, {"revision": 1}, indent=2)
+    assert json.loads(target.read_text(encoding="utf-8"))["revision"] == 1
+    assert [p.name for p in deep.iterdir()] == ["release.json"], "임시 파일이 남았다"
+
+
 def test_serialization_policy_stays_with_the_caller(tmp_path):
     """★ `sort_keys` 를 모듈이 강제하면 **내용이 같은데 digest 가 달라진다.**
 

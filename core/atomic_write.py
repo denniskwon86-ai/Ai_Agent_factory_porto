@@ -78,6 +78,32 @@ def _replace_with_retry(temporary: Path, target: Path) -> None:
     os.replace(temporary, target)  # 마지막 시도의 예외는 그대로 호출자에게 간다
 
 
+def _create_temporary(target: Path, encoding: str):
+    """옆자리에 임시 파일을 **짧은 이름**으로 만들고 연다.
+
+    ★★ [실측 결함 2026-09-22] 처음에는 `<원본이름>.<uuid32>.tmp` 였다. 그러면 임시 이름이
+      원본보다 **37자 길어지고**, Windows MAX_PATH(260) 근처에서 **원본은 써지는데 임시만
+      못 만드는** 일이 실제로 났다 — 회귀에서 `FileNotFoundError`, 경로 278자
+      (`…/kitapp_ki_<32자>_APP-03/release.json.<uuid32>.tmp`). 원자 저장을 넣었더니 원래
+      되던 게 안 되는 것이라 그냥 결함이다.
+
+    그래서 **정본 이름보다 길지 않게** 유지한다: `.<hex6>.tmp` = 11자
+    (`release.json` 12자 · `latest_state.json` 17자). 원본을 쓸 수 있는 경로면 임시도 쓸 수
+    있다는 것이 여기서 지키려는 불변식이다. 원본 이름을 버리는 대가로 「누구의 임시인가」를
+    이름으로 알 수 없게 되지만, 같은 디렉터리에 있고 `finally` 에서 바로 지운다.
+
+    `"x"` 는 배타 생성이라 남의 임시 파일을 덮어쓰지 않는다. 짧은 난수라 이름이 겹칠 수
+    있으므로 그때는 다시 고른다 — 겹침은 실패가 아니다.
+    """
+    for _ in range(8):
+        candidate = target.with_name("." + uuid.uuid4().hex[:6] + ".tmp")
+        try:
+            return candidate, candidate.open("x", encoding=encoding)
+        except FileExistsError:
+            continue
+    raise OSError(f"임시 파일 이름을 잡지 못했습니다: {target.parent}")
+
+
 def replace_text(path, text: str, *, encoding: str = "utf-8") -> None:
     """다 쓰고 나서 한 번에 바꾼다. 중간에 실패하면 대상은 **이전 판본 그대로** 남는다.
 
@@ -86,10 +112,9 @@ def replace_text(path, text: str, *, encoding: str = "utf-8") -> None:
     digest 로 보는 소비자가 있으므로(W03.1) 그 차이를 만들지 않는다.
     """
     target = _checked_target(path)
-    temporary = target.with_name(target.name + "." + uuid.uuid4().hex + ".tmp")
+    temporary, stream = _create_temporary(target, encoding)
     try:
-        # "x" = 배타 생성. 남의 임시 파일을 덮어쓰지 않는다.
-        with temporary.open("x", encoding=encoding) as stream:
+        with stream:
             stream.write(text)
             stream.flush()
             os.fsync(stream.fileno())  # 교체 전에 내용이 디스크에 닿게 한다

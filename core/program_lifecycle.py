@@ -176,20 +176,32 @@ class ProgramLifecycle:
                              (release_id,)).fetchone()
         finally:
             conn.close()
+        #: ★ [W03.3] **정본 파일이 있는지 함께 답한다.** 이 DB 는 사용여부만 알고 릴리스가
+        #:   실제로 있는지는 모른다. 파일이 사라져도 행은 남으므로, 그것만 보고 답하면
+        #:   **없는 프로그램을 「사용 가능」이라고 말하게 된다.** 기존 필드는 그대로 두고
+        #:   사실을 하나 더 얹는다 — 호출자를 깨뜨리지 않으면서 숨기지도 않는다.
+        #:   ⚠️ `_read_status` 에는 넣지 않는다. 그쪽은 트랜잭션 안의 순수 DB 읽기이고,
+        #:     쓰기 경로는 `set_status` 가 이미 `_release_exists` 로 막는다.
+        present = self._release_exists(release_id)
         if not r:
             return {"release_id": release_id, "status": ACTIVE, "recorded": False,
                     "reason": "", "replacement_release_id": "", "changed_by": "",
-                    "changed_at": "",
+                    "changed_at": "", "artifact_present": present,
                     "note": ("사용여부가 기록되지 않았습니다 — 사용 가능으로 간주하지만 "
                              "관리자가 승인한 상태는 아닙니다(이 기능 이전에 게시된 "
                              "프로그램입니다).")}
         d = dict(r)
         d["recorded"] = True
+        d["artifact_present"] = present
         try:
             d["dependents_at_change"] = json.loads(d.get("dependents_at_change") or "{}")
         except Exception:
             d["dependents_at_change"] = {}
-        d["note"] = ""
+        #: 파일이 없는데 기록만 남은 상태 — 「같은 질문에 두 답」이 되는 자리다.
+        #: `core/release_consistency.py` 가 이것을 모아서 보고한다.
+        d["note"] = ("" if present else
+                     "정본 파일이 없습니다 — 사용여부 기록만 남아 있습니다. "
+                     "이 상태로는 소유 문맥을 확인할 수 없습니다.")
         return d
 
     def history(self, release_id: str) -> List[Dict[str, Any]]:
