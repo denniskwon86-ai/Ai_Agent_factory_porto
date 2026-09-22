@@ -77,6 +77,11 @@ class AsyncFactoryOrchestrator:
     def __init__(self):
         self.active_tasks: Dict[str, asyncio.Task] = {}
         self.task_projects: Dict[str, str] = {}  # task_id -> project_id (삭제 시 취소·격리용)
+        #: ★ [W03.2] 마지막 상태 저장 실패. `_save_latest_state` 는 실패를 **삼키고 실행을
+        #:   계속한다**(저장 실패로 스프린트 전체를 잃는 것이 더 나쁘다). 그러나 조용히
+        #:   삼키면 아무도 모르므로 **여기에 남겨 사후에 물어볼 수 있게** 한다.
+        #:   성공하면 지운다 — 남아 있다는 것은 「마지막 저장이 실패한 상태」라는 뜻이다.
+        self.last_state_save_error: Optional[Dict[str, Any]] = None
 
     def _forget_task(self, key, task):
         """이전 실행의 완료 콜백이 같은 ID의 새 실행을 지우지 않는다."""
@@ -105,10 +110,25 @@ class AsyncFactoryOrchestrator:
             atomic_write.replace_json(state_path, data_to_save, indent=2)
         try:
             await finish_before_cancel(asyncio.to_thread(_write))
+            self.last_state_save_error = None       # 성공했으니 지난 실패 표시를 지운다
         except Exception as e:
-            # ⚠️ 여기서 삼킨다 — 저장이 실패해도 실행은 계속된다. 원자 쓰기는 «반쯤 쓰인
-            #   파일»을 막을 뿐, 이 삼킴은 별개 문제다(W03.2 범위 밖, 결과 문서에 관측으로 남김).
+            # ⚠️ **삼키는 것은 그대로 둔다.** 여기서 예외를 올리면 상태 저장 하나 때문에
+            #   스프린트 실행 전체를 잃는다 — 그쪽이 더 나쁘다. 대신 «조용히» 삼키지 않는다:
+            #   사후에 물어볼 수 있게 남기고(`last_state_save_error`), 화면에도 알린다.
+            #   ★ 원자 쓰기를 붙여도 이 경로는 여전히 소실이 가능하다. Windows 가 교체를
+            #     거절하면(probe 실측 41/180) 예외가 오고, 그것이 여기서 멈춘다.
+            self.last_state_save_error = {
+                "project_id": _pid(workspace_root),
+                "at": datetime.now().isoformat(timespec="seconds"),
+                "error": f"{type(e).__name__}: {e}",
+            }
             print(f" 상태 백업 실패: {e}")
+            try:
+                await factory_broadcaster.broadcast(
+                    "STATE_SAVE_FAILED", {"project_id": _pid(workspace_root),
+                                          "error": type(e).__name__})
+            except Exception:
+                pass    # 알림이 실패해도 실행을 멈추지 않는다. 기록은 위에 이미 남았다.
 
     @execution_command("workspace_root")
     async def start_sprint(self, task_id: str, project_state_payload: dict, workspace_root: str) -> bool:

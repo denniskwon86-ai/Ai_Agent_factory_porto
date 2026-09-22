@@ -191,14 +191,120 @@ def test_advisor_state_write_is_atomic(tmp_path, monkeypatch):
     assert _strays(path.parent) == []
 
 
-@pytest.mark.skipif(os.name == "nt", reason="Windows 심볼릭 링크 생성은 별도 권한이 필요하다")
-def test_a_linked_target_stays_a_link(tmp_path):
-    """공유 저장을 링크로 걸어 둔 구성에서 링크를 일반 파일로 바꾸지 않는다."""
+def test_state_save_failure_is_swallowed_but_left_findable(tmp_path, monkeypatch):
+    """★ 상태 저장 실패는 **삼키되 조용하지 않다.**
+
+    삼키는 것 자체는 그대로 둔다 — 저장 하나 때문에 스프린트 실행 전체를 잃는 쪽이 더
+    나쁘다. 대신 「마지막 저장이 실패한 상태」를 사후에 물어볼 수 있어야 한다.
+
+    ⚠️ 원자 쓰기를 붙여도 이 경로는 여전히 소실이 가능하다. 그래서 「원자 저장을 했으니
+      저장은 안전하다」로 읽으면 안 된다 — 이 시험이 그 반례다.
+    """
+    import asyncio
+
+    from core import async_orchestrator as ao
+
+    orchestrator = ao.AsyncFactoryOrchestrator()
+    workspace = tmp_path / "proj_w03"
+    sent = []
+    monkeypatch.setattr(ao.factory_broadcaster, "broadcast",
+                        lambda event, payload: _noop_coroutine(sent, event, payload))
+
+    asyncio.run(orchestrator._save_latest_state({"revision": 1}, str(workspace)))
+    assert orchestrator.last_state_save_error is None
+    assert json.loads((workspace / "latest_state.json").read_text(encoding="utf-8"))["revision"] == 1
+
+    monkeypatch.setattr(atomic_write.os, "replace",
+                        lambda *a, **k: (_ for _ in ()).throw(OSError("교체 거절")))
+    #: 예외가 **밖으로 나오지 않는다** — 실행이 멈추지 않는다.
+    asyncio.run(orchestrator._save_latest_state({"revision": 2}, str(workspace)))
+
+    recorded = orchestrator.last_state_save_error
+    assert recorded is not None, "저장이 실패했는데 아무 흔적이 없다 — 조용히 사라졌다"
+    assert recorded["project_id"] == "proj_w03"
+    assert "OSError" in recorded["error"] and recorded["at"]
+    assert sent and sent[0][0] == "STATE_SAVE_FAILED", "화면에도 알리지 않았다"
+    #: 그리고 이전 판본은 그대로다(원자 저장이 한 일).
+    assert json.loads((workspace / "latest_state.json").read_text(encoding="utf-8"))["revision"] == 1
+
+    monkeypatch.undo()
+    monkeypatch.setattr(ao.factory_broadcaster, "broadcast",
+                        lambda event, payload: _noop_coroutine(sent, event, payload))
+    asyncio.run(orchestrator._save_latest_state({"revision": 3}, str(workspace)))
+    assert orchestrator.last_state_save_error is None, "다시 성공했는데 실패 표시가 남았다"
+
+
+async def _noop_coroutine(sink, event, payload):
+    sink.append((event, payload))
+
+
+def test_alerting_failure_does_not_stop_the_run(tmp_path, monkeypatch):
+    """알림이 깨져도 실행은 계속되고, 기록은 남는다 — 알림은 기록의 조건이 아니다."""
+    import asyncio
+
+    from core import async_orchestrator as ao
+
+    orchestrator = ao.AsyncFactoryOrchestrator()
+    workspace = tmp_path / "proj_w03"
+
+    async def broken(event, payload):
+        raise RuntimeError("브로드캐스터 장애")
+
+    monkeypatch.setattr(ao.factory_broadcaster, "broadcast", broken)
+    monkeypatch.setattr(atomic_write.os, "replace",
+                        lambda *a, **k: (_ for _ in ()).throw(OSError("교체 거절")))
+    asyncio.run(orchestrator._save_latest_state({"revision": 1}, str(workspace)))
+    assert orchestrator.last_state_save_error is not None
+
+
+# ── [CR-1 / 2026-09-22] 링크 정책 — 처음에 «따라가도록» 만들었다가 뒤집었다 ───────
+#
+# 근거는 검토에서 무너졌다: 이 저장소는 읽는 쪽에서 링크를 이미 거절한다(아홉 곳).
+# 따라가면 «쓰기는 성공하고 읽기는 503» 이 된다. 아래 두 시험이 그 방향을 고정한다.
+
+def _try_symlink(link, target) -> bool:
+    try:
+        link.symlink_to(target)
+        return True
+    except (OSError, NotImplementedError):
+        return False
+
+
+def _try_junction(link, target) -> bool:
+    """Windows 는 junction 을 별도 권한 없이 만들 수 있다(심볼릭 링크와 다르다)."""
+    try:
+        import _winapi
+
+        _winapi.CreateJunction(str(target), str(link))
+        return True
+    except Exception:
+        return False
+
+
+def test_a_linked_target_is_rejected(tmp_path):
+    """★ 링크 대상에는 쓰지 않는다. 실제 파일도 건드리지 않는다."""
     real = tmp_path / "real.json"
     atomic_write.replace_json(real, {"revision": 1}, indent=2)
     link = tmp_path / "link.json"
-    link.symlink_to(real)
+    if not _try_symlink(link, real):
+        pytest.skip("이 환경에서는 심볼릭 링크를 만들 수 없다 — 링크 거절을 실측하지 못했다")
 
-    atomic_write.replace_json(link, {"revision": 2}, indent=2)
-    assert link.is_symlink(), "링크가 일반 파일로 바뀌었다 — 공유가 끊긴다"
-    assert json.loads(real.read_text(encoding="utf-8"))["revision"] == 2
+    before = _digest(real)
+    with pytest.raises(ValueError):
+        atomic_write.replace_json(link, {"revision": 2}, indent=2)
+    assert _digest(real) == before, "거절했는데 링크가 가리키는 실제 파일이 바뀌었다"
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["link.json", "real.json"], \
+        "거절 뒤 임시 파일이 남았다"
+
+
+def test_a_linked_parent_is_rejected(tmp_path):
+    """부모가 연결돼 있어도 막는다 — 대상만 보면 그 우회가 열린다."""
+    real_dir = tmp_path / "real_dir"
+    real_dir.mkdir()
+    linked_dir = tmp_path / "linked_dir"
+    if not (_try_junction(linked_dir, real_dir) or _try_symlink(linked_dir, real_dir)):
+        pytest.skip("이 환경에서는 junction·심볼릭 링크를 만들 수 없다")
+
+    with pytest.raises(ValueError):
+        atomic_write.replace_json(linked_dir / "state.json", {"revision": 1}, indent=2)
+    assert list(real_dir.iterdir()) == [], "거절했는데 실제 디렉터리에 파일이 생겼다"

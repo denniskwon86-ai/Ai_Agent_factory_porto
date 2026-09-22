@@ -29,15 +29,37 @@ import uuid
 _RETRY_DELAYS = (0.005, 0.01, 0.02, 0.04, 0.08)
 
 
-def _resolved_target(path) -> Path:
-    """대상이 링크면 **따라간다** — 링크를 일반 파일로 바꾸지 않는다.
+def _checked_target(path) -> Path:
+    """링크·junction 대상에는 **쓰지 않는다.** 읽는 쪽과 같은 방향으로 끊는다.
 
-    공유 저장을 심볼릭 링크·junction 으로 걸어 두는 구성이 있다(W03 이 노리는 바로 그
-    구성이다). 링크 자체를 `os.replace` 로 갈아치우면 그 공유가 조용히 끊긴다.
+    ★ [CR-1 / 2026-09-22] 처음에는 **따라가도록** 만들었다. 「공유 저장을 링크로 걸어 두는
+      구성이 있으니 링크를 보존해야 한다」는 근거였는데, **그 근거가 틀렸다.** 이 저장소는
+      읽는 쪽에서 이미 링크를 거절한다:
+
+          core/async_orchestrator.py:295            project_meta.json  → ValueError
+          api/routes/factory_control.py:2448        latest_state.json  → 503
+          api/routes/factory_control.py:2631·2662 · core/studio_project_files.py:53·56
+          core/studio_pause_state.py:37 · core/studio_revision_requests.py:81·87
+          core/studio_contract_reconcile.py:219·292 · api/routes/studio_input_draft_control.py:106
+
+      따라가면 **쓰기는 성공하는데 읽기는 503** 이 된다 — W03 이 없애려던 「한쪽에서만
+      열리는 자원」을 오히려 만든다. 공유 저장을 링크로 지원하려면 **읽기와 쓰기를 함께**
+      바꿔야 하고, 그건 별도 결정이다. 쓰기만 먼저 바꾸는 것은 순서가 틀렸다.
+
+    ⚠️ `scripts/session_data_snapshot.py:70 regular()` 를 재사용하려 했으나 맞지 않았다 —
+      `root` 를 받아 경로 탈출까지 보는 함수라 뿌리 개념이 없는 여기서는 쓸 수 없고,
+      `core/` 가 `scripts/` 를 import 하면 의존 방향이 뒤집힌다. 대신 저장소가 쓰는 같은
+      판정식(`is_symlink() or is_junction()`)을 그대로 따른다.
+
+    보는 범위는 **대상과 그 부모**다 — `factory_control.py:2631` 이 `(target_root, meta_path)`
+    를 보는 것과 같은 수준이다. 더 위로 올라가면 배포에서 상위 경로를 링크로 건 정상
+    구성까지 막는다.
     """
     target = Path(path)
-    if target.is_symlink() or (hasattr(target, "is_junction") and target.is_junction()):
-        return Path(os.path.realpath(target))
+    for entry in (target, target.parent):
+        if entry.is_symlink() or (hasattr(entry, "is_junction") and entry.is_junction()):
+            # 읽는 쪽과 같은 예외형·같은 어조. 「연결된 …」은 이 저장소의 기존 문구다.
+            raise ValueError(f"연결된 경로에는 정본을 쓰지 않습니다: {entry}")
     return target
 
 
@@ -63,7 +85,7 @@ def replace_text(path, text: str, *, encoding: str = "utf-8") -> None:
     바이너리로 바꾸면 줄바꿈 변환이 사라져 **같은 값인데 digest 가 달라진다.** 판본 동일성을
     digest 로 보는 소비자가 있으므로(W03.1) 그 차이를 만들지 않는다.
     """
-    target = _resolved_target(path)
+    target = _checked_target(path)
     temporary = target.with_name(target.name + "." + uuid.uuid4().hex + ".tmp")
     try:
         # "x" = 배타 생성. 남의 임시 파일을 덮어쓰지 않는다.
