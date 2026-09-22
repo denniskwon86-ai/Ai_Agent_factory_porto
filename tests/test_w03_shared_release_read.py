@@ -97,3 +97,79 @@ def test_the_two_process_probe_exists_and_declares_its_evidence_scope():
     body = open(_PROBE, encoding="utf-8").read()
     assert "두 호스트" in body and "공유 마운트" in body, \
         "probe 가 증거 범위의 한계를 적고 있지 않다"
+
+
+# ── [W03.1 보완 / 2026-09-22] 프로젝트 갈래와 접근권한 ────────────────────────
+#
+# 첫 제출은 릴리스 한 갈래였다. 출구는 「두 노드가 같은 **프로젝트/릴리스** 판본을 읽고
+# **접근권한을 확인한다**」이므로 아래 둘이 비어 있었다.
+
+def test_workspace_root_is_anchored_to_the_repository_not_the_cwd(tmp_path, monkeypatch):
+    """프로젝트 작업공간도 저장소 기준이어야 한다 — 릴리스와 같은 조건이다.
+
+    ⚠️ **살아 있는 `PROJECTS_DIR` 와 `PROJECT_ROOT/projects` 를 견주지 않는다.** 격리 러너가
+      이 상수도 자기 실행 뿌리로 갈아끼우기 때문이다(`_LIBRARY_DIR` 과 같다). 처음에 그렇게
+      썼다가 걸렸고, 그 실패가 러너의 격리 지점을 다시 확인해 줬다. 새 프로세스가 볼 값은
+      `runpy` 로 — 살아 있는 모듈은 건드리지 않는다.
+    """
+    import runpy
+
+    from core import paths
+
+    live = paths.PROJECTS_DIR
+    assert os.path.isabs(live), f"작업공간 뿌리가 상대경로다: {live!r}"
+    assert os.path.abspath(live).startswith(os.path.abspath(PROJECT_ROOT))
+
+    monkeypatch.chdir(tmp_path)
+    fresh = runpy.run_path(paths.__file__)["PROJECTS_DIR"]
+    assert os.path.isabs(fresh), f"다른 cwd 에서 새로 읽으니 상대경로다: {fresh!r}"
+    assert fresh == os.path.join(PROJECT_ROOT, "projects"), fresh
+    assert paths.PROJECTS_DIR == live, "시험이 살아 있는 모듈을 바꿨다"
+
+
+def test_changing_the_working_directory_does_not_move_the_workspace(tmp_path, monkeypatch):
+    from core.paths import workspace_path
+
+    before = workspace_path("p1")
+    monkeypatch.chdir(tmp_path)
+    assert workspace_path("p1") == before, "cwd 를 바꾸자 작업공간이 따라 움직였다"
+
+
+def test_access_is_decided_per_subject_not_per_node(tmp_path):
+    """★ 접근권한 — 같은 자원인데 **주체에 따라 갈린다.**
+
+    셋 다 통과하면 판정이 죽은 것이다. `AccessScope.unrestricted` 기본값이 `True` 라
+    명시하지 않으면 실제로 전부 통과한다 — 그 함정을 시험이 밟아 보고 적는다.
+    """
+    from core import atomic_write
+    from core.org_directory import AccessScope
+    from core.project_visibility import ownership_visible, read_project_ownership
+
+    workspace = tmp_path / "W03SYNTHPROJ"
+    workspace.mkdir()
+    atomic_write.replace_json(workspace / "project_meta.json", {
+        "project_id": "W03SYNTHPROJ", "tenant_id": "t_w03", "entity_mode": "REAL",
+        "enterprise_scope_id": "n_w03_scope", "owner_dept_id": "dept_w03",
+        "owner_user_id": "owner@example.invalid", "visibility": "dept",
+    }, indent=2)
+    own = read_project_ownership(str(workspace))
+    assert own.get("binding_state") == "BOUND", own
+
+    def visible(dept, unrestricted=False, uid="reader@example.invalid"):
+        scope = AccessScope(user_id=uid, unrestricted=unrestricted,
+                            readable_dept_ids=frozenset([dept] if dept else []))
+        return ownership_visible(scope, uid, own)
+
+    assert visible("dept_w03") is True, "소유 부서가 못 본다"
+    assert visible("dept_other") is False, "★ 다른 부서가 보인다 — 접근 판정이 죽었다"
+    assert visible(None, unrestricted=True) is True, "조직 미도입 계약(unrestricted)이 깨졌다"
+    #: 소유자 본인은 부서와 무관하게 본다.
+    assert visible("dept_other", uid="owner@example.invalid") is True
+
+
+def test_the_probe_covers_the_project_branch_and_access(tmp_path):
+    """probe 가 프로젝트 갈래와 접근 판정을 **실제로 들고 있다**(첫 제출에는 없었다)."""
+    body = open(_PROBE, encoding="utf-8").read()
+    for token in ("read-project", "compare_projects", "ownership_visible",
+                  "project_access_denies_the_outsider"):
+        assert token in body, f"probe 에 {token} 이 없다 — 보완이 빠졌다"
