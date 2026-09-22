@@ -2429,3 +2429,69 @@ export_snapshot(합성루트) → file_count 1 · database_count 1
 >   원복했습니다. 해시 일치 확인: `core/db/__init__.py` `6ab379c0…d756e5`,
 >   `ops_control/db_target.py` `f5a4ccb9…4758`, `ops_control/deploy_ledger.py` `5c11688f…bc0c`.
 >   **지금 소스는 안정 상태이며 검토 실행이 가능합니다.**
+
+---
+
+# 수신 — W03.2 원자 저장·경쟁 실패 / 다른 PC Claude Code / 2026-09-22 KST
+
+- 지시: `CLAUDE_CURRENT_WORK_ORDER.md` 최상단(2026-09-22) + `CLAUDE_SESSION_HANDOFF_2026-09-22.md` §4.
+  출구 원문은 `CLAUDE_P03_EXECUTION_RESULT.md` §4-2. 배점 **45**, 선행 W03.1(제출·미수용), timebox **1~3시간**.
+- 수신 HEAD **`9c27a9ed9`** · 브랜치 `codex/l2-unified-studio-20260912` · 작업트리 clean.
+- **환경**: 이 PC 는 Python **3.12.10**(원래 PC 3.14.3 아님), Docker/PG **없음**, `library/`·`projects/` **0건**
+  (원래 PC 29/73 아님). W03.2 지시 원문에 DB·PG 언급이 없어 **PG 없이 진행**한다.
+  재현 확인: 계산기 self-test **1855/5300=35.0%**, `w03_shared_read_probe.py compare` **exit 0**
+  (정상 `both_found: true`, 음성 대조군 `false`), 검증 묶음 3스위트 **50 passed**·`sources_unchanged: true`.
+
+## As-Is 대조 — 인계서 기록보다 쓰는 곳이 많다
+
+★ **원자 쓰기 구현이 이미 저장소에 있다** — `core/studio_project_files.py:30 write_json`
+  (같은 폴더 임시파일 → `"x"` 배타생성 → `flush`+`fsync` → `os.replace`, `finally` 정리).
+  **그런데 정본을 쓰는 아래 7곳이 전부 이것을 쓰지 않는다.** 생산자는 있고 소비자가 안 붙은
+  **배선 누락**이며, 이 저장소의 반복 결함 유형이다.
+
+| 파일 | 위치 | 대상 | 현재 |
+|---|---|---|---|
+| `core/kit_app_builder.py` | 425 | release.json | `open(w)`+`json.dump` |
+| `api/routes/factory_control.py` | 3321 · 3360 | release.json | 같은 요청에서 **두 번** 쓴다 |
+| `core/async_orchestrator.py` | 101 | latest_state.json | 같은 방식 + **예외를 `print` 로 삼킨다** |
+| `api/routes/factory_control.py` | 1175 · 1189 | latest_state.json | 메가 자식·마스터 |
+| `api/routes/advisor_control.py` | 47(`_write_json`) → 494 | latest_state.json | 같은 방식 |
+
+- ⚠️ 인계서 §4 의 「프로젝트 상태(다른 경로) `factory_control.py:749`」는 **읽는 곳**이다
+  (`_restore_accumulated_from_disk`). 쓰는 곳은 위 표가 정본이다.
+- 직렬화 정책이 갈린다 — `studio_project_files` 는 `sort_keys=True`, 나머지는 아니다.
+  **키 순서를 바꾸면 digest 가 바뀌어** W03.1 의 판본 동일성 증거와 충돌한다. 그래서 공용
+  헬퍼는 바이트를 받는 저수준 + 직렬화는 호출자가 정하는 형태로 간다.
+
+## 이번 범위와 선점 파일
+
+1. 공용 원자 쓰기 모듈 **신규**, `studio_project_files.write_json` 이 그것을 재사용(동작·정책 불변).
+2. 위 7곳을 그 헬퍼로 전환. release.json 이 1순위다 — **W03.1 이 실제로 읽은 경로**다.
+3. 집중 시험 + probe: 정상(쓰기→두 소비자 재조회) · 중간 실패(부분 파일 0·기존 판본 보존) ·
+   독립 writer 경쟁.
+
+⚠️ **낡은 revision 덮어쓰기 방지는 이번에 해결하지 않는다.** 지시가 「부분파일 방지와 동시
+writer 의 낡은 revision 덮어쓰기는 다른 문제, rename 만으로 둘 다 달성했다고 쓰지 말 것」이라
+못박았다. 관측되는 대로 분리해 적는다.
+
+선점: `core/kit_app_builder.py` · `core/async_orchestrator.py` · `core/studio_project_files.py` ·
+`api/routes/factory_control.py`(**공용 — 함수 단위 최소 변경**) · `api/routes/advisor_control.py` ·
+신규 공용 모듈 · 신규 시험 · 신규 probe. `main.py`·`run.py`·`frontend/`·`ops_control/`·CI 무접촉.
+
+> ✅ **변이 구간 종료** 2026-09-22 — `core/atomic_write.py` 원복, 해시
+>   `56171e41fa60b055404f7ec916477c1cc8aa501a8818f4194ff1b3862e442655` **일치 확인**.
+>   결과: 원자성을 빼자 **14건 중 7건 실패**. 음성 대조군(`test_legacy_way_does_tear_the_file`)과
+>   배선 확인은 그대로 통과 — 원자성과 무관한 것을 보는 시험이라 맞다.
+>   **지금 소스는 안정 상태이며 검토 실행이 가능합니다.**
+
+## 상태 — W03.2 **READY_FOR_REVIEW** (2026-09-22)
+
+- 결과 정본: `CLAUDE_P03_EXECUTION_RESULT.md` 의 **「W03.2 원자 저장·경쟁 실패」** 절.
+- 증거: probe **부분파일 0 / 음성 대조군 374** · 집중 시험 **14건**(13 passed·1 skipped) ·
+  변이 검증 **7건 실패 후 원복 해시 일치** · 관련 8스위트 **176 passed / exit 0** ·
+  `sources_unchanged: true`·`protected_assets_unchanged: true`·`blocked_file_writes: []`.
+- ⚠️ **하지 않은 것**: lost update 방지(지시상 다른 문제), W03.1 부족분(프로젝트측·접근거절·
+  공유실체), 두 호스트·공유 마운트 증거. 「동시 쓰기 안전」으로 읽지 말 것.
+- ⚠️ **Codex 판단 둘**: ① `_save_latest_state` 의 예외 삼킴 — 원자 쓰기를 붙여도 그 경로만
+  소실이 조용하다 ② W03.1 부족분을 W03.2 에 묶을지 별도 단계로 뗄지(묶으면 timebox 초과).
+- 커밋·푸시 0. 진척 **1855/5300=35.0% 유지** — W03.2 +45 는 Codex 수용 후 가산.

@@ -1,5 +1,25 @@
 # AI Factory Studio 팀 현황판
 
+## [W03.2 READY_FOR_REVIEW] 원자 저장 — 다른 PC Claude Code / 2026-09-22 KST
+
+- 사용자 변화: 릴리스·프로젝트 **정본을 다른 노드가 읽는 도중에 덮어써도 「반쯤 쓰인 파일」이 보이지 않는다.** 종전에는 실제로 보였다(음성 대조군 374건).
+- ★ 핵심: **원자 쓰기는 이미 있었다**(`core/studio_project_files.py:30`). 정본 쓰는 **7곳이 그걸 안 쓰고 있었다** — 배선 누락. 구현을 `core/atomic_write.py` 한 곳에 두고 7곳 전환. 인계서가 적은 3곳보다 많고 `factory_control.py:749`는 읽는 곳이었다(정정).
+- 증거: probe(러너 밖, 독립 3프로세스) **부분파일 0 / 음성대조군 374** · 시험 **14건**(13P·1skip) · **변이로 7건 실패 후 원복해시 일치** · 8스위트 **176 passed/exit0**·`sources_unchanged:true`.
+- ⚠️ 계측 실수 1: 처음에 부분파일(파싱실패)과 Windows 공유위반(열기실패)을 한 칸에 세어 **원자 모드가 실패한 것처럼 보였다.** 나눠 세니 0. 제 계측 잘못을 제품 결함으로 보고할 뻔했다.
+- ⚠️ 묶음 실수 1: `test_advisor_bootstrap.py`를 회귀에 넣어 19errors. 전부 `fixture 'seeded_org' not found`(`tests/conftest.py:539`) — **격리 러너는 conftest를 안 읽으므로 러너 대상이 아니다.** 단독에서도 동일, 제 변경 파일에 그 이름 없음. 제품 결함 아님.
+- ⚠️ **하지 않은 것**: lost update 방지(지시상 다른 문제·명시적으로 안 함), **W03.1 부족분(프로젝트측·접근거절·공유실체)**, 두 호스트·공유마운트 증거. 「동시 쓰기 안전」으로 읽지 말 것.
+- ⚠️ **Codex 판단 둘**: ① `_save_latest_state`의 `except: print` 삼킴 — Windows 교체거절이 예외로 오는데 거기서만 소실이 조용하다(재시도로 162→41/180까지 줄였으나 0 아님) ② W03.1 부족분을 W03.2에 묶을지 별도로 뗄지(묶으면 timebox 초과).
+- 정본 `CLAUDE_P03_EXECUTION_RESULT.md` 의 W03.2 절. 커밋·푸시 0. **1855/5300=35.0% 유지**, +45는 수용 후.
+
+## [W03.2 수신·착수] 다른 PC Claude Code — 2026-09-22 KST
+
+- 수신: `CLAUDE_CURRENT_WORK_ORDER.md` 최상단 + 인계서 §4. HEAD `9c27a9ed9`, clean, 배점45, timebox1~3h.
+- 환경실측: Python **3.12.10**(원PC3.14.3아님), Docker/PG **없음**, `library/`·`projects/` **0건**(원PC29/73아님). W03.2 지시원문에 DB·PG 언급없어 PG없이 진행. 재현확인 — 계산기 self-test **1855/5300=35.0%**, probe compare **exit0**(정상true/음성false), 검증묶음 **50passed**·`sources_unchanged:true`.
+- ★ As-Is: **원자 쓰기 구현이 이미 있다**(`core/studio_project_files.py:30 write_json` — 임시파일→fsync→`os.replace`). **그런데 정본 쓰는 7곳이 전부 안 쓴다** — 배선 누락. 인계서가 적은 3곳보다 많고, 인계서의 `factory_control.py:749`는 **읽는 곳**이다(`_restore_accumulated_from_disk`). 정본 목록은 내 상태파일에 표로.
+- 선점: `core/kit_app_builder.py`·`core/async_orchestrator.py`·`core/studio_project_files.py`·`api/routes/factory_control.py`(**공용, 함수단위 최소변경**)·`api/routes/advisor_control.py`·신규 공용모듈/시험/probe. `main.py`·`run.py`·`frontend/`·`ops_control/`·CI 무접촉.
+- ⚠️ 낡은revision 덮어쓰기 방지는 이번 범위 아님(지시 명시: 부분파일방지와 다른 문제). 직렬화 `sort_keys` 차이로 digest가 바뀌면 W03.1 판본증거와 충돌하므로 공용헬퍼는 바이트 저수준+정책은 호출자.
+- 진척:1855/5300=35.0% 유지. W03.2 +45는 Codex 수용 후 가산, 착수만으로 가산0. 커밋·푸시 없음.
+
 ## [다른 PC 인계·동기화] 2026-09-22 / Codex
 
 - 기록자/사유: Codex, 사용자 「다른PC에서 이어가도록 인수인계·미커밋 커밋푸시」 요청.

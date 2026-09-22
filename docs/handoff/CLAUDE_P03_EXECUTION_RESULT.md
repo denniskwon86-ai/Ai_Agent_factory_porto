@@ -1730,3 +1730,124 @@ LLM 0 · 외부 전송 0 · 운영 DB 0 · 커밋/푸시 0.
 낡은 revision 덮어쓰기 방지는 **다른 문제**이며, rename 하나로 둘 다 달성했다고 쓰지
 않겠습니다. 쓰는 지점은 `core/kit_app_builder.py` 의 release.json 기록과
 `core/async_orchestrator.py` 의 `latest_state.json` 기록입니다.
+
+---
+
+# W03.2 원자 저장·경쟁 실패 — Claude (다른 PC) / 2026-09-22
+
+출구: *「동시쓰기/중간실패에도 부분 파일이나 잘못된 판본을 읽지 않도록 저장 경로를
+구현·검증한다」* (원장 W03.2, 45점). 환경은 Python **3.12.10**, Docker/PG 없음,
+`library/`·`projects/` **0건** — W03.2 지시 원문에 DB·PG 언급이 없어 그대로 진행했습니다.
+
+## 1. 발견 — 원자 쓰기는 **이미 있었고**, 정본을 쓰는 7곳이 그것을 안 썼다
+
+`core/studio_project_files.py:30 write_json` 이 임시파일 → `fsync` → `os.replace` 를 하고
+있었습니다. B3 승격 저장만 쓰고 있었고, **정본 파일을 쓰는 나머지가 전부 `open(...,"w")`
+직접 쓰기**였습니다. 만든 쪽은 있는데 쓰는 쪽이 안 붙은 **배선 누락**입니다.
+
+| 파일 | 위치 | 대상 |
+|---|---|---|
+| `core/kit_app_builder.py` | 425 | release.json |
+| `api/routes/factory_control.py` | 3321 · 3360 | release.json (한 요청에서 두 번) |
+| `core/async_orchestrator.py` | 101 | latest_state.json |
+| `api/routes/factory_control.py` | 1175 · 1189 | latest_state.json (메가 자식·마스터) |
+| `api/routes/advisor_control.py` | 47 `_write_json` | latest_state.json |
+
+⚠️ **인계서 §4 의 시작 지점 표를 정정합니다.** 쓰는 곳이 3곳이 아니라 7곳이고,
+「프로젝트 상태(다른 경로) `factory_control.py:749`」는 **읽는 곳**입니다
+(`_restore_accumulated_from_disk`).
+
+## 2. 무엇을 했나
+
+`core/atomic_write.py` **신규** — 구현을 한 곳에 둡니다. `studio_project_files.write_json` 도
+이것을 호출하도록 바꿨고(직렬화 정책 `sort_keys=True` 는 그 저장의 것이라 남겼습니다),
+위 7곳을 전부 전환했습니다.
+
+★ **직렬화 정책을 모듈이 강제하지 않습니다.** `sort_keys` 를 공통으로 걸면 내용이 같은데도
+키 순서가 바뀌어 **digest 가 달라지고**, W03.1 이 판본 동일성을 digest 로 보므로 그 증거와
+충돌합니다. 그래서 바이트를 만드는 정책은 호출자에게 남겼습니다. 같은 이유로 텍스트 모드를
+유지했습니다 — 바이너리로 바꾸면 줄바꿈 변환이 사라져 같은 값의 digest 가 달라집니다.
+
+★ **대상이 링크면 따라갑니다.** 공유 저장을 심볼릭 링크·junction 으로 거는 구성이 있고
+(W03 이 노리는 바로 그 구성), 링크 자체를 `os.replace` 로 갈면 공유가 조용히 끊깁니다.
+
+## 3. 증거 — 독립 프로세스 경쟁, 음성 대조군과 함께
+
+`scripts/w03_atomic_write_probe.py compare` (러너 밖. 격리 러너가 `subprocess.Popen` 을
+막으므로 pytest 안에서는 만들 수 없습니다). writer 3 프로세스가 같은 경로를 반복해서
+덮어쓰는 동안 reader 가 계속 읽습니다.
+
+| 모드 | read_ok | **torn**(부분 파일) | locked | 쓰기 OSError | 임시파일 잔여 |
+|---|---|---|---|---|---|
+| **atomic**(제품) | 5,365 | **0** | 435 | 41 | 없음 |
+| legacy(**음성 대조군**) | 4,952 | **374** | 0 | 0 | 없음 |
+
+★★ 음성 대조군이 실제로 깨집니다(374건). 대조군까지 0 이었다면 제 probe 가 경쟁을 재연하지
+못한 것이지 제품이 증명된 게 아닙니다 — W03.1 에서 얻은 교훈을 그대로 적용했습니다.
+
+⚠️ **처음에는 원자 모드도 실패한 것처럼 보였습니다**(unreadable 252). 제가 **부분 파일
+(파싱 실패)과 Windows 공유 위반(열기 실패)을 한 칸에 세고** 있었습니다. 둘은 다른 현상이라
+나눠 세니 부분 파일은 0 이었습니다. 계측 잘못을 제품 결함으로 보고할 뻔했습니다.
+
+집중 시험 `tests/test_w03_atomic_save.py` **14건**(13 passed · 1 skipped — Windows 심볼릭
+링크 생성 권한). 정상 쓰기 / 직렬화 실패 시 무접촉 / 교체 실패 시 이전 판본 보존 / 임시파일이
+같은 디렉터리 / 재시도 계약 / 직렬화 정책 분리 / B3 저장 바이트 회귀 / 제품 쓰기 함수 직접
+호출 / 배선 / 음성 대조군.
+
+**줄 단위 변이 검증**: `core/atomic_write.py` 에서 원자성을 빼자 **14건 중 7건 실패**.
+음성 대조군과 배선 확인은 그대로 통과했습니다(원자성과 무관한 것을 보는 시험이라 맞습니다).
+원복 해시 `56171e41…e442655` 일치 확인.
+
+## 4. Windows 관측 — 교체가 거절될 수 있다
+
+`os.replace` 는 대상이 다른 손에 열려 있으면 거절됩니다(공유 위반). **내용 손상이 아니라
+「지금은 안 된다」**입니다. 짧은 재시도(5·10·20·40·80ms)를 넣어 실측 **162/180 → 41/180**
+으로 줄였고, 그래도 안 되면 **예외를 올립니다.** 0 이 되지는 않습니다.
+
+⚠️ 그래서 **호출자가 예외를 삼키면 거기서 저장이 사라집니다.**
+`core/async_orchestrator.py:_save_latest_state` 가 `except Exception: print(...)` 로 삼킵니다.
+원자 쓰기와 **별개 문제**이고 동작을 바꾸면 실행 중단 여부가 달라지므로 이번에 고치지
+않았습니다. 코드에 주석으로 표시해 두었습니다 — **판단이 필요합니다(§7)**.
+
+## 5. ⚠️ 하지 않은 것 — 이것으로 「동시 쓰기 안전」이라고 읽지 마십시오
+
+- **낡은 revision 덮어쓰기(lost update) 방지는 하지 않았습니다.** 지시가 「다른 문제, rename
+  만으로 둘 다 달성했다고 쓰지 말 것」이라 못박은 그대로입니다. `os.replace` 는 늦게 온
+  쓰기를 이기게 할 뿐입니다. 필요하면 판본 조건부 쓰기를 따로 세워야 합니다.
+- **W03.1 부족분(프로젝트측·접근거절·공유실체)은 아직 보완하지 않았습니다.** 인계서 §10.4 가
+  「같은 소비 과정에서 보완」을 요구했는데, 원자 저장 본체가 원장 timebox(1~3시간)를 채워
+  여기서 끊었습니다. **W03.1 은 여전히 릴리스 한 갈래 증거입니다.**
+- 두 호스트·공유 마운트 증거가 아닙니다. 단일 PC 의 독립 프로세스입니다.
+
+## 6. 회귀와 격리
+
+관련 8스위트: **176 passed / 1 skipped / exit 0**, `sources_unchanged: true`,
+`protected_assets_unchanged: true`, `blocked_file_writes: []`, `repository_conftest_loaded: false`.
+
+⚠️ 처음 묶음에 `tests/test_advisor_bootstrap.py` 를 넣었다가 **19 errors** 를 봤습니다.
+전부 `fixture 'seeded_org' not found` 이며 그 fixture 는 `tests/conftest.py:539` 에 있습니다 —
+**격리 러너는 저장소 conftest 를 읽지 않으므로 이 스위트는 러너 대상이 아닙니다.** 단독
+실행에서도 같은 19건이고, 제 변경 파일 어디에도 그 이름이 없습니다. 제가 묶음을 잘못
+고른 것이며 제품 결함이 아닙니다. (advisor 쪽 전환은 `test_advisor_state_write_is_atomic`
+이 제품 함수를 직접 불러 확인합니다.)
+
+운영 자료: 이 PC 의 `library/`·`projects/` 는 **원래 0건**이고 작업 전후 불변입니다.
+LLM 0 · 외부 전송 0 · 운영 DB 0 · 커밋/푸시 0.
+
+## 7. 바뀐 파일과 남은 판단
+
+| 파일 | 내용 |
+|---|---|
+| `core/atomic_write.py` | **신규** — 원자 저장 한 곳 |
+| `core/studio_project_files.py` | 구현을 공용으로. 직렬화 정책·바이트 불변 |
+| `core/kit_app_builder.py` · `core/async_orchestrator.py` | 정본 쓰기 전환 |
+| `api/routes/factory_control.py` · `api/routes/advisor_control.py` | 정본 쓰기 전환(함수 단위) |
+| `scripts/w03_atomic_write_probe.py` | **신규** — 경쟁 증거 + 음성 대조군 |
+| `tests/test_w03_atomic_save.py` | **신규 14건** |
+
+**Codex 판단이 필요한 것 둘**
+
+1. `_save_latest_state` 의 예외 삼킴을 고칠 것인가. 고치면 저장 실패가 실행을 멈출 수
+   있어 동작이 바뀝니다. 지금은 원자 쓰기가 붙어도 **그 경로만 소실이 조용합니다.**
+2. W03.1 부족분을 W03.2 와 묶어 볼 것인가, 별도 단계로 뗄 것인가. 묶으면 timebox 를
+   넘깁니다(원장 정책상 착수 전 재분할 제안 대상).
