@@ -1,5 +1,16 @@
 # AI Factory Studio 팀 현황판
 
+## [W03.1 보완 READY_FOR_REVIEW] 프로젝트 갈래·접근권한 — 다른 PC Claude Code / 2026-09-22 KST
+
+- 사용자 지시로 W03.2 에 이어 W03.1 부족분을 채웠다. 첫 제출은 **릴리스 한 갈래**였고 출구는 「두 노드가 같은 **프로젝트/릴리스** 판본을 읽고 **접근권한을 확인**」이다.
+- 새 도구를 만들지 않고 기존 `w03_shared_read_probe.py` 에 `read-project`·`compare_projects` 를 더했다. 격리 지점은 `core.paths.PROJECTS_DIR` 하나(`workspace_path()` 가 호출 시점에 읽는다).
+- ★ **권한 판정도 자식 프로세스 안에서** 한다. 부모가 대신 계산하면 「그 노드가 그렇게 판정한다」가 아니라 「내가 계산했다」가 된다. 그래서 **두 노드 판정 일치**까지 증거에 넣었다 — 판본이 같아도 판정이 갈리면 한쪽에서만 열린다.
+- 결과 `compare` **exit 0**, 판정 6/6 true: release_shared·release_control_splits·**project_shared**·**project_control_splits**(음성대조군)·**project_access_agrees_across_nodes**·**project_access_denies_the_outsider**. 접근: 소유부서 보임 / **타부서 거절** / unrestricted 보임(A·B 동일, binding BOUND).
+- ⚠️ `AccessScope.unrestricted` 기본값이 **True** 다. 명시 안 하면 전원 통과해 「거절 확인」이 거짓이 된다.
+- ⚠️ **인계서 지뢰 #3 을 그대로 밟았다**: 살아 있는 `PROJECTS_DIR` 를 `PROJECT_ROOT/projects` 와 견주었다가 실패 — 러너가 `_LIBRARY_DIR` 처럼 **이 상수도** 갈아끼운다. W03.1 작성자가 릴리스 쪽에서 적어 둔 것을 프로젝트 쪽에서 반복했다. `runpy` 방식으로 고쳤다.
+- 시험 4→8건, 묶음 **21 passed·1 skipped·exit 0**·`sources_unchanged:true`. 제품 코드 **추가 변경 없음**(probe·시험만). 여전히 단일 PC 증거이며 두 호스트·공유마운트 아님. 권한은 읽기 가시성만(쓰기·문맥전환 거절은 별도).
+- 정본 `CLAUDE_P03_EXECUTION_RESULT.md` §8. **1855/5300=35.0% 유지**, W03.1 +45·W03.2 +45 는 수용 후.
+
 ## [W03.2 READY_FOR_REVIEW] 원자 저장 — 다른 PC Claude Code / 2026-09-22 KST
 
 - 사용자 변화: 릴리스·프로젝트 **정본을 다른 노드가 읽는 도중에 덮어써도 「반쯤 쓰인 파일」이 보이지 않는다.** 종전에는 실제로 보였다(음성 대조군 374건).

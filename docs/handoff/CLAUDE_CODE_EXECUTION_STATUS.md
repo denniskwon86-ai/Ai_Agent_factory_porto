@@ -2490,8 +2490,22 @@ writer 의 낡은 revision 덮어쓰기는 다른 문제, rename 만으로 둘 �
 - 증거: probe **부분파일 0 / 음성 대조군 374** · 집중 시험 **14건**(13 passed·1 skipped) ·
   변이 검증 **7건 실패 후 원복 해시 일치** · 관련 8스위트 **176 passed / exit 0** ·
   `sources_unchanged: true`·`protected_assets_unchanged: true`·`blocked_file_writes: []`.
-- ⚠️ **하지 않은 것**: lost update 방지(지시상 다른 문제), W03.1 부족분(프로젝트측·접근거절·
-  공유실체), 두 호스트·공유 마운트 증거. 「동시 쓰기 안전」으로 읽지 말 것.
-- ⚠️ **Codex 판단 둘**: ① `_save_latest_state` 의 예외 삼킴 — 원자 쓰기를 붙여도 그 경로만
-  소실이 조용하다 ② W03.1 부족분을 W03.2 에 묶을지 별도 단계로 뗄지(묶으면 timebox 초과).
+- ⚠️ **하지 않은 것**: lost update 방지(지시상 다른 문제), 두 호스트·공유 마운트 증거.
+  「동시 쓰기 안전」으로 읽지 말 것.
+- ⚠️ **Codex 판단 하나 남음**: `_save_latest_state` 의 예외 삼킴 — 원자 쓰기를 붙여도
+  그 경로만 소실이 조용하다. 고치면 저장 실패가 실행을 멈출 수 있어 동작이 바뀐다.
+
+## 상태 — W03.1 보완 **READY_FOR_REVIEW** (같은 세션 이어서)
+
+사용자 지시로 W03.1 부족분을 이어서 채웠습니다. 결과는 같은 문서 §8.
+
+- **프로젝트 갈래**와 **접근권한 판정**을 기존 probe 에 더했습니다(새 도구 안 만듦).
+  격리 지점은 `core.paths.PROJECTS_DIR` 하나.
+- probe `compare` **exit 0**, 판정 6개 전부 true — `project_shared`,
+  `project_control_splits`(음성 대조군), `project_access_agrees_across_nodes`,
+  `project_access_denies_the_outsider`. 접근: 소유부서 보임 / **타부서 거절** / unrestricted 보임.
+- 시험 `test_w03_shared_release_read.py` **4→8건**. 묶음 **21 passed·1 skipped·exit 0**.
+- ⚠️ **지뢰 #3 을 그대로 밟았습니다** — 살아 있는 `PROJECTS_DIR` 를 `PROJECT_ROOT/projects`
+  와 견주었다가 실패. 러너가 이 상수도 갈아끼웁니다. `runpy` 방식으로 고쳤습니다.
+- 제품 코드 **추가 변경 없음**(probe·시험만). 여전히 단일 PC 증거이고 두 호스트가 아닙니다.
 - 커밋·푸시 0. 진척 **1855/5300=35.0% 유지** — W03.2 +45 는 Codex 수용 후 가산.
