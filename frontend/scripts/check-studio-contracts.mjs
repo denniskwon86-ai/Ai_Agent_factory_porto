@@ -2723,6 +2723,30 @@ for (const resumable of [true, false]) await test(
 );
 const executionChecks = results.length - preExecutionChecks;
 const addedChecks = results.length - originalFunctionalChecks;
+await test('W03 저장 실패 후 옛 정본 GET 성공은 저장 회복이 아니다', async () => {
+  const savedState = factory.useFactoryStore.getState();
+  const savedReply = reply;
+  try {
+    const failure = { node: 'review_node', error: '합성 저장 실패', stale: false };
+    factory.useFactoryStore.setState({ currentProjectId: 'W03_REVIEW',
+      state: { value: 'old-canonical' }, lastStateSaveError: failure });
+    reply = async url => {
+      if (String(url).endsWith('/state/latest')) return {
+        ok: true, json: async () => ({ status: 'success', data: { value: 'old-canonical' } }),
+      };
+      if (String(url).includes('/templates/')) return { ok: false };
+      throw new Error('허용하지 않은 합성 요청: ' + url);
+    };
+    await factory.useFactoryStore.getState().fetchLatestState();
+    assert.equal(factory.useFactoryStore.getState().state.value, 'old-canonical');
+    assert.deepEqual(factory.useFactoryStore.getState().lastStateSaveError, failure,
+      '옛 정본을 읽었을 뿐인데 미저장 안내를 해제했다');
+  } finally {
+    reply = savedReply;
+    factory.useFactoryStore.setState(savedState);
+  }
+});
+
 const after = hashes();
 await test('검사 중 제품 소스 불변', () => assert.deepEqual(after, before));
 const report = { passed: results.filter(x => x.result === 'PASS').length, failed: results.filter(x => x.result === 'FAIL').length,

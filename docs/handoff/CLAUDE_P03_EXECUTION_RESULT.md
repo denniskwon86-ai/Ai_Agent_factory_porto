@@ -2390,3 +2390,197 @@ probe (러너 밖)      lost-update  exit 0  조건부 거절 27 / 대조군 거
 - **재시작 직후 한 번의 창.** 기준을 모를 때 현재 판본을 받아들이므로 그 한 번은 경쟁을
   못 잡는다. 코드에 적어 두었고 숨기지 않았다.
 - **파일 심볼릭 링크 거절 미실측**(위 skip).
+
+---
+
+## 9. Claude 보완 회신 — CR-2A/2B/2C · 판단 ②③ (2026-09-22)
+
+**반례 셋을 재현해 주셔서 세 가지가 잡혔습니다. 특히 2A 는 제 진단 자체가 틀렸습니다** —
+제가 「재시작 직후 한 번의 창」이라 적은 것이 실제로는 **충돌마다 재개방**되는 구멍이었고,
+원인은 제가 「충돌이면 기준을 버린다」고 써 둔 바로 그 줄이었습니다. 거절을 **지연된
+덮어쓰기**로 바꿔 놓았습니다.
+
+### 9.1 CR-W03-2A — 기준 판본을 데이터에 결속
+
+- **`digest` 만 새로 읽어 재시도하는 경로를 없앴습니다.** 충돌이어도 **기준을 버리지
+  않습니다** — 같은 payload 는 몇 번을 보내도 거절됩니다.
+- **기준이 없는데 파일이 있으면 쓰지 않습니다**(`StateNotClaimedError`). 새 파일 생성과
+  기존 판본 인수를 갈랐습니다. 새 인스턴스의 첫 저장도 같은 경계를 지납니다.
+- 인수는 `claim_project_state()` 로 **명시**해야 하고, 실행 권한이 확인된
+  `_run_sprint_loop` 진입에서만 부릅니다.
+
+### 9.2 CR-W03-2B — 뿌리 위를 잘라내던 것을 없앰
+
+`root` 가 조상이면 그 위를 잘라내던 코드를 지웠습니다. **링크 검사는 언제나 전체 조상**을
+봅니다. `root` 는 이제 **담김 확인**에만 씁니다. 「뿌리보다 위는 배포의 몫」이라고 제가
+단 주석이 곧 구멍이었습니다 — **주석으로 생략한 검사는 검사가 아닙니다.**
+
+정식 mount 면제는 `os.path.ismount` 로만 가릅니다. ⚠️ 지적하신 대로 `ismount` 대역
+시험은 **분기 시험이지 실제 배포 mount 승인·동작 증거가 아닙니다** — 그 한계를 시험
+docstring 에 적었습니다.
+
+### 9.3 CR-W03-2C — 실제 소비까지 연결
+
+- **store**(`useFactoryStore.ts:1180`): 저장이 실패하면 그 판본을 **「확인된 최신」으로
+  적지 않습니다.** 예전에는 판본만 기록해, 서버 정본은 옛 판본인데 화면은 새 것을
+  가졌다고 믿고 **재조회를 건너뛰어 옛 상태가 고정**됐습니다. 실패면 매번 다시 묻습니다.
+  `lastStateSaveError` 를 따로 남겨 **계산 완료와 저장 완료를 구분**합니다.
+- **`SPRINT_COMPLETED`**: `state_saved`·`state_save_error` 를 함께 보냅니다. 완료 통지가
+  저장 성공을 뜻하지 않습니다.
+- **quota**: `_save_latest_state` 반환값을 더는 무시하지 않고 `QUOTA_EXHAUSTED` 에 싣습니다.
+- `frontend` `tsc -b` **exit 0**.
+
+### 9.4 판단 ② — writer 표 정정 (**제 앞 표가 세 곳 틀렸습니다**)
+
+| writer | 앞 표 | 실제 | 처리 |
+|---|---|---|---|
+| `advisor_control:495` | ~~「플레이북, 정본 아님」~~ | **`latest_state.json` 생성** | 배타 생성 |
+| `kit_app_builder:427` | ~~「새 디렉터리」~~ | **갱신**(`release_id_for` 결정론적) | 조건부 |
+| `factory_control:3325` | ~~「새 디렉터리」~~ | **생성**, 초 단위 id | 배타 생성 → **409** |
+| `factory_control:3364` | ~~언급 없음~~ | **같은 파일 2번째(갱신)** | 첫 쓰기 digest 기준 |
+| `factory_control:1176·1190` | 생성 | 생성(`allocate()` id) | 그대로 |
+
+전제를 시험으로 박아 뒀습니다 — id 규칙이 바뀌면 이 판단도 함께 재검토됩니다.
+
+### 9.5 판단 ③ — 겹칩니다. **연결은 되돌렸고 이유를 남깁니다**
+
+`studio_bootstrap.py:127` 이 `operation_lock` 아래에서 **같은 `latest_state.json`** 을
+씁니다. 「W03 밖이라 안전」으로 처리하지 않습니다.
+
+조건부 저장을 붙였다가 **되돌렸습니다.**
+
+1. 기준 판본은 그 조작이 **앞서 읽은 것**이어야 하는데(`verify_files`) 지금 단계 기계가
+   그 값을 들고 다니지 않습니다. 쓰기 직전에 읽어 기준으로 삼으면 그건 조건이 아니라
+   형식입니다 — **제가 방금 2A 에서 고친 바로 그 잘못**입니다.
+2. `write_json` 의 **호출 모양**을 바꾸자 기존 실패 주입 대역(`fail_ready_state(path,
+   value)`)이 깨졌습니다. 이름은 남겼는데 인자를 더한 것이라 이음매를 흔드는 변경이었고,
+   B3 시험이 잡았습니다.
+
+→ **열린 결함**으로 남기고, 겹침이 사라지면 실패하는 시험을 박았습니다. 기제
+(`write_json(..., expected_digest=)`)는 준비돼 있어 단계 기계와 함께 볼 때 붙일 수 있습니다.
+
+### 9.6 그 과정에서 드러난 것 — 잠금 파일이 정본 옆에 남는다
+
+지우면 그 틈에 다른 프로세스가 같은 이름으로 새로 잡아 **상호배제가 조용히 사라지므로**
+지울 수 없습니다(`contract_decision._workspace_lock` 도 같은 이유로 남깁니다).
+`LOCK_SUFFIX`·`is_lock_file()` 로 규약을 공개하고, 디렉터리를 «내용» 으로 세는 자리가
+가려내게 했습니다. 배포 산출물 허용목록에도 `**/*.lck`·`**/*.tmp` 를 명시로 막았습니다 —
+지금은 정본이 `library/`·`projects/` 라 어차피 제외지만, 「어차피 안 걸린다」에 기대면
+정본 위치가 바뀌는 날 조용히 실립니다.
+
+### 9.7 검증
+
+```
+넓은 묶음 12스위트   collected 247 · 244 passed · 3 skipped · exit 0 (9분 23초)
+                     sources_unchanged: true · blocked_file_writes: []
+집중(반례+B3 승격)   113 passed / 3 skipped / exit 0
+release_artifact     24 passed
+frontend tsc -b      exit 0
+```
+
+3 skipped = 파일 심볼릭 링크 거절(Windows 권한) 외 2건(환경 조건부).
+
+### 9.8 여전히 주장하지 않는 것
+
+1. **실제 두 노드 공유 저장 증거가 아닙니다.** 전부 단일 PC 입니다. 잠금을 정본 옆에
+   뒀지만 **공유 프로토콜이 파일 잠금을 지원해야** 성립합니다.
+2. **정식 mount 면제는 분기 시험까지**입니다 — 실제 배포 mount 승인·동작 증거가 아닙니다.
+3. **`studio_bootstrap` 연결 미완**(§9.5).
+4. **파일 심볼릭 링크 거절 미실측**(Windows 권한).
+5. **브라우저 실측 없음** — store 변경은 타입체크와 코드 경로까지입니다.
+
+---
+
+## 11. Claude 보완 회신 — §10.2 A/B/C (2026-09-23)
+
+**반례 2건 재현 감사합니다.** 특히 A 는 제 「인수」가 이름뿐이었다는 지적이 정확했습니다.
+
+### 11.1 A — claim 이 **내용을 안 읽었다**
+
+`claim_project_state` 는 **digest 만** 저장했습니다. 그래서 「인수」라는 이름만 붙었을 뿐
+실제로는 **현재 파일이 무엇이든 덮을 권한**을 준 것이었습니다. 실행 권한을 확인한
+자리에서 불렀다는 사실은 **데이터 판본의 최신성 증명이 아니다** — 지적 그대로입니다.
+
+```
+claim_project_state(workspace, *, execution_key, started_from=_UNSET)
+    같은 바이트에서 내용과 digest 를 함께 얻는다
+    시작  started_from 있음 → 파일이 그것과 다르면 «인수하지 않는다»(이후 저장 거절)
+    재개  started_from 없음 → 엔진 checkpoint 에서 이어받으므로 현재 판본을 기준으로
+```
+
+- **기준을 실행 단위로** 잡았습니다(`_skey(pid, task_id)`). 프로젝트 전역 하나면 별도
+  실행의 낡은 결과가 남의 기준을 빌려 승인됩니다.
+- `_resume_stream` 에 인수를 넣어 **정상 저장이 막히던 것**을 풀었습니다.
+- 충돌로 표시된 실행은 저장이 계속 거절됩니다 — 같은 payload 로는 몇 번을 보내도.
+
+### 11.2 B — bootstrap · kit 을 같은 계약에
+
+⚠️ **「대역이 안 맞는 것은 제품을 되돌릴 이유가 아니다」** 를 받아들입니다. 제가 앞서
+철수한 판단이 틀렸습니다. 되돌린 것을 다시 붙이고 대역을 함께 고쳤습니다.
+
+- `read_json_with_digest()` — **같은 바이트에서** 내용과 지문. 따로 읽으면 그 사이가
+  창이고, 「내가 읽은 것」이 남이 바꾼 뒤의 지문이 됩니다.
+- bootstrap **초기 기록**(`:139`)과 **READY 갱신**(`:157`) 둘 다 그 읽기의 지문을 넘깁니다.
+- 실패 주입 대역 둘(`fail_state`·`fail_ready_state`)은 **인자를 전달**하도록 고치고
+  **실패 지점·의미는 그대로** 뒀습니다. 원래 실패·복구 단언 유지.
+- kit(`publish_release`)은 기준을 **쓰기 직전이 아니라 진입 시점**으로 옮겼습니다 —
+  계약을 읽고 payload 를 만드는 동안이 바로 창이었습니다. 지적하신 「앞서 금지한 형태」가
+  제 코드에 그대로 있었습니다.
+
+### 11.3 C — store 필드가 아니라 **사용자에게 보이는 처리**
+
+- `SPRINT_COMPLETED`·`QUOTA_EXHAUSTED` 분기가 `state_saved` 를 **소비**합니다. 완료인데
+  저장이 미확정이면 `_lastStateVersion` 빗장을 풀고 **다시 물어봅니다**.
+- **기존 `ControlPanel` 상태 줄**에 연결했습니다(새 화면 없음):
+  「계산은 끝났지만 **저장이 확인되지 않았습니다** — 화면이 최신이 아닐 수 있습니다」.
+- **재조회 성공 시 해제**(`fetchLatestState`), **프로젝트 전환 시 해제**. 걸기만 하고
+  내리지 않으면 그 안내는 곧 소음이 됩니다.
+- `tsc -b --force` exit 0.
+
+### 11.4 제 시험 하나가 의도대로 울렸습니다
+
+「결함이 닫히면 실패하라」고 써 둔 `test_the_bootstrap_canonical_write_is_a_known_open_gap`
+이 **닫히자 실패**했습니다. 지우지 않고 **새 계약을 단언하는 시험**으로 바꿨습니다
+(`read_json_with_digest` 사용 + 두 쓰기 모두 기준 전달).
+
+### 11.5 여전히 주장하지 않는 것
+
+1. **실제 두 노드 공유 저장 증거가 아닙니다.** 전부 단일 PC.
+2. **브라우저 실측 없음** — store/UI 변경은 타입체크와 코드 경로까지입니다.
+3. **정식 mount 면제는 분기 시험까지**(실제 배포 mount 동작 증거 아님).
+4. **파일 심볼릭 링크 거절 미실측**(Windows 권한).
+5. kit 의 「진입 시점 기준」은 **동시 게시 창을 좁힌 것**이지, 제품 권위(누가 교체할 수
+   있는가)를 검증한 것은 아닙니다.
+
+### 11.6 검증
+
+```
+넓은 묶음 13스위트   collected 274 · 271 passed · 3 skipped · exit 0 (10분 11초)
+                     sources_unchanged: true · protected_assets_unchanged: true
+                     blocked_file_writes: [] · blocked_sqlite_paths: []
+집중(반례5+B3승격)   116 passed / 3 skipped / exit 0
+frontend             tsc -b --force  exit 0
+```
+
+대상: `test_w03_review_counterexamples`(반례 5건) · `test_w03_conditional_save` ·
+`test_w03_atomic_save` · `test_b3_studio_bootstrap` · `test_w03_release_consistency` ·
+`test_w03_shared_release_read` · `test_r01_provider_path` · `test_b3_kit_contract_v2` ·
+`test_program_lifecycle` · `test_release_readiness` · `test_app_delivery_real_release` ·
+`test_kit_app_api` · `test_release_artifact`.
+
+#### skip 3건 — nodeid·사유 (요청하신 대로 특정합니다)
+
+```
+tests/test_w03_atomic_save::test_a_linked_target_is_rejected
+  이 환경에서는 심볼릭 링크를 만들 수 없다 — 링크 거절을 실측하지 못했다
+tests/test_b3_studio_bootstrap::test_real_factory_untrusted_marker_tmp_is_preserved_and_blocked[symlink]
+tests/test_b3_studio_bootstrap::test_real_factory_untrusted_marker_tmp_is_preserved_and_blocked[dangling-symlink]
+  실제 symlink 생성 권한/파일시스템 미지원: main audit에서 별도 확인 필요
+```
+
+★ **셋 다 원인이 하나입니다** — Windows 의 심볼릭 링크 생성 권한. junction 은 권한 없이
+만들 수 있어 상위 링크 반례는 실측했지만, **파일 심볼릭 링크 거절은 이 PC 에서 미실측**
+입니다. 개발자 모드·관리자 권한은 변경하지 않았습니다(지시).
+
+⚠️ 111건 계열(`test_app_data_runtime`·`test_provider_dispatch`·`test_advisor_bootstrap`)은
+이번에도 넣지 않았습니다 — 기존 실패라 귀속이 섞입니다.

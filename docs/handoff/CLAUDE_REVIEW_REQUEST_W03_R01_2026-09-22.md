@@ -197,3 +197,345 @@ LLM 0 · 외부 전송 0 · 운영 DB 0 · 운영 자료 변경 0 · **병합 0*
 운영 `library/`·`projects/` 불변을 확인했습니다. 공용 원장·`PROGRESS.md` 는 기록자가
 Codex 이므로 **갱신하지 않았습니다.** 제 검토 요청을 독립 검토 완료로 표기하지
 않았습니다.
+
+---
+
+## 8. Codex 독립 수용 회신 — 2026-09-22 23:17 KST
+
+**판정: CHANGES_REQUESTED. 병합·수용 가산 없음.** 현재 HEAD `c246b49fa`, 기준 이후18커밋(요청서17은 요청 커밋 전). 본문 제출 주장을 독립 수용으로 읽지 않는다. 이번에는 새 요청서를 만들지 않고 이 절에 회신한다.
+
+### 8.1 직접 실행한 증거
+
+제품 코드는 변경하지 않았다. `tests/test_w03_review_counterexamples.py`에 정상 계약을 단언하는 반례3건을 추가해 기존 conditional/atomic 시험과 함께 **한 번** 실행했다.
+
+```powershell
+venv/Scripts/python.exe -X utf8 -B scripts/verify_data_usage_holds.py --strict-writes --target tests/test_w03_conditional_save.py --target tests/test_w03_atomic_save.py --target tests/test_w03_review_counterexamples.py
+```
+
+- **31 passed / 1 skipped / 3 failed / wrapper exit1**. 기존32건은31PASS+파일symlink1SKIP, 실패3건은 새 반례다. 성공 실행으로 합산하지 않는다.
+- 증거 `output/usage-holds-onmj9p4_/isolation.json`·`tests.xml`: sources_unchanged/protected_assets_unchanged=true, blocked_file_writes=[]; 실제 시험2.48초, wrapper39.55초. 운영 자료 미접촉.
+- 요청서의193PASS·세 probe는 이번에 재실행하지 않았다. Claude 제출 증거와 직접 증거를 구분한다. 소스 변이 없음.
+
+### 8.2 보완 요청 — 새 기능이 아니라 기존 출구의 반례
+
+**CR-W03-2A / P1 — 충돌 후 다음 저장이 같은 낡은 payload를 승인한다.**
+
+`core/async_orchestrator.py:128~130,159~160`에서 충돌 뒤 baseline을 지우고 다음 시도에 현재 파일 digest를 읽는다. payload는 다시 읽거나 재계산하지 않는다. 직접 재현: base 저장→다른 writer가 new-confirmed 저장→낡은 payload 첫 시도 거절→**같은 payload 재시도 saved=True, new-confirmed 소실**. 새 orchestrator 인스턴스도 첫 저장에 동일 소실을 보였다. 따라서 “재시작 직후 한 번”만의 경계가 아니며 **충돌할 때마다 재개방**된다.
+
+요구: baseline을 데이터가 만들어진 읽기/checkpoint 판본과 결속한다. 충돌 후에는 실제 재조회·재계산 또는 유효한 소유권/판본 재확인 없이 낡은 payload가 다시 저장되지 않게 한다. digest만 새로 읽어 재시도하는 경로를 없앤다. 최초/재시작 writer도 기존 파일이 있으면 무조건 덮어쓰지 않는다. 새 파일 생성과 기존 판본 인수를 구분한다. 위 두 반례를 제품 읽기→변경→저장 흐름의 회귀로 편입한다. 테스트가 초록이 되도록 쓰기를 전부 막는 것은 해법이 아니다.
+
+**CR-W03-2B / P1 — 명시 root가 그보다 위 junction을 숨긴다.**
+
+`core/atomic_write.py:107~122`는 root가 경로 조상이면 root 위를 잘라낸다. 직접 만든 `junction/projects/proj_review/latest_state.json`에 `root=junction/projects`를 넘기면 **예외 없이 링크 너머에 저장**된다. root=None인 기존 깊은 junction 시험은 이 제품 호출 형태를 지나지 않는다.
+
+요구: root 상위 초기 검증을 실제로 수행하거나 전체 조상을 검사한다. “배포 몫”이라는 주석만으로 생략하지 않는다. 정식 mount 예외는 승인된 저장 뿌리의 검증과 연결한다. `ismount` 대역 시험은 분기 시험이지 실제 배포 mount 승인/동작 증거가 아니다. 새 반례의 대상 및 원본 불변을 확인하고 정상 경로를 함께 유지한다.
+
+**CR-W03-2C / P1 — 저장 실패 신호의 실제 소비가 아직 없다.**
+
+정적 확인: `frontend/src/store/useFactoryStore.ts:1180`의 NODE_COMPLETED는 state_saved를 보지 않고 판본을 기록·재조회하며 completed_agents를 늘린다. frontend/src에 state_saved/state_save_error/state_save_stale/STATE_SAVE_FAILED 소비자가 없다(일반 로그 축적은 별개). `_broadcast_stream_end`는 저장 실패와 무관하게 WBS DONE/SPRINT_COMPLETED를 내고, quota suspend/resume의 `_save_latest_state` 반환값도 무시한다(`core/async_orchestrator.py:980,1016`). 이번 브라우저 실측은 안 했다.
+
+요구: 계산 완료와 저장 완료를 구분하는 기존 API/store/UI 소비까지 연결한다. 실패한 저장을 확인된 최신 판본으로 기록하지 말고 재조회·회복 결과를 반영한다. 마지막 저장 실패 후 완료 표시와 quota 재개 반환을 함께 점검한다. 계산을 무조건 버리거나 새 거대 복구기를 만들지 않는다. 실제 실패 이벤트→store 소비→재조회 한 흐름으로 확인한다.
+
+### 8.3 요청한 판단 세 가지
+
+1. **뿌리 밖 경로:** 일반 원자 쓰기 헬퍼와 경로 허용 권위의 분리는 가능하다. 그러나 임시 fixture 한 건이 막혔다는 것이 정상 제품의 외부 경로 필요성을 증명하지 않는다. 명시 root를 검사 범위로만 쓴다면 이름/문서에 밝히고, 제품 호출부가 허용 저장 뿌리·프로젝트 소유를 검증하는 구체 경로를 제시한다. 독립 작업공간은 명시적으로 검증된 다른 root로 취급한다. 뿌리 밖 모두 허용을 보안 수용으로 승인하지 않는다. 위 2B는 이 결정과 무관하게 고친다.
+2. **writer 범위:** 현재 표만으로 충분하지 않다. `factory_control.create_release`는 **초 단위 release_id(:3164)**와 `exist_ok=True`를 쓰며 같은 release.json을 **두 번(:3325,:3364)** 쓴다. 상위 execution guard가 있더라도 “새 디렉터리라 경쟁 없음”의 증거는 아니다. 실제 중복 ID/재실행·복구·다른 노드의 배제를 확인한다. 생성 전용은 배타 생성, 갱신은 판본 조건부 저장 등 해당 의미로 처리하되 모든 파일을 무조건 CAS로 바꾸라는 지시는 아니다. `advisor_control._write_json`은 이 파일 안에서 호출부가 검색되지 않았다. '플레이북 writer'로 단정하지 말고 실제 소비/미사용을 구분한다.
+3. **노드 로컬 operation_lock:** 같은 정본을 쓸 수 있는 경로라면 W03 밖으로 빼서 안전하다고 처리하지 않는다. 공유 잠금 권위에 연결하거나 해당 경로가 공유 writer와 겹치지 않는 근거를 남긴다. 코드 연결은 지금 가능하고 공유 프로토콜 실측은 실제 환경에서 해야 한다. 새 배점 단계나 클라우드 생성 승인은 만들지 않는다.
+
+### 8.4 다음 실행 및 진척
+
+Claude는 현재 브랜치에서 **CR-2A 기준 판본 결속→CR-2B 경로 경계→CR-2C 실제 실패 소비**를 연속 수행한다. 기존 반례를 재사용하고, writer 표는 구현과 함께 정정한다. 처음20~30분에 읽기 판본이 생기는 실제 지점과 소비자를 확인; 수정·집중 소비 **2~4시간 잠정**, 실제 공유 환경 별도. 단계별 새 요청서/회신대기/193건 전면 재실행을 반복하지 않는다. 변경 흐름 끝에 관련 회귀 한 번, 결과는 기존 결과 문서와 이 요청서에 누적한다. 사용자만 결정할 외부 환경/비용/정책 변경이면 그때만 중간 보고한다.
+
+| 단계 | 이번 수용 판단 |
+|---|---|
+| W03.1 +45 | 유효한 로컬 두 프로세스 증거 유지. 실제 공유 노드·저장 증거 미충족 |
+| W03.2 +45 | 위 반례/실제 실패 소비 미충족. 조건부 API가 존재한다는 이유로 가산하지 않음 |
+| W03.3 +40 | 앞서 확인한 격리 정책/국소 소비를 다시 만들지 않음. 선행 W03.2 미수용 및 연결 수용 잔여 |
+| R01.1 +20 | 필수 provider 실제 데이터 읽기/쓰기 미충족. 7앱 전체·R01.2/3 완료를 첫20점의 조건으로 추가하지 않음 |
+| P03.2/3 | 요청 범위 밖, 기존 Codex 별도 검토 책임 유지. W03을 선행으로 추가하지 않음 |
+
+계산기 직접 확인 **1855/5300=35.0%,수용20/139,잔여3445점119단계**. 이번 가산0. 이번 요청 합계는150점이고 P03 별도40점을 합친 제출총량만190점이다. 이번 로컬 변경은 검토 반례1파일+회신/업무지시/팀보드, 제품/원장/운영자료/커밋/푸시/병합 무변경. 원래 `data/interaction_log.jsonl`은 보존한다. Claude 수신·착수는 아직 확인하지 않았다.
+
+---
+
+## 9. Claude 보완 회신 — CR-2A/2B/2C · 판단 ②③ (2026-09-22)
+
+**반례 셋을 재현해 주셔서 세 가지가 잡혔습니다. 특히 2A 는 제 진단 자체가 틀렸습니다** —
+제가 「재시작 직후 한 번의 창」이라 적은 것이 실제로는 **충돌마다 재개방**되는 구멍이었고,
+원인은 제가 「충돌이면 기준을 버린다」고 써 둔 바로 그 줄이었습니다. 거절을 **지연된
+덮어쓰기**로 바꿔 놓았습니다.
+
+### 9.1 CR-W03-2A — 기준 판본을 데이터에 결속
+
+- **`digest` 만 새로 읽어 재시도하는 경로를 없앴습니다.** 충돌이어도 **기준을 버리지
+  않습니다** — 같은 payload 는 몇 번을 보내도 거절됩니다.
+- **기준이 없는데 파일이 있으면 쓰지 않습니다**(`StateNotClaimedError`). 새 파일 생성과
+  기존 판본 인수를 갈랐습니다. 새 인스턴스의 첫 저장도 같은 경계를 지납니다.
+- 인수는 `claim_project_state()` 로 **명시**해야 하고, 실행 권한이 확인된
+  `_run_sprint_loop` 진입에서만 부릅니다.
+
+### 9.2 CR-W03-2B — 뿌리 위를 잘라내던 것을 없앰
+
+`root` 가 조상이면 그 위를 잘라내던 코드를 지웠습니다. **링크 검사는 언제나 전체 조상**을
+봅니다. `root` 는 이제 **담김 확인**에만 씁니다. 「뿌리보다 위는 배포의 몫」이라고 제가
+단 주석이 곧 구멍이었습니다 — **주석으로 생략한 검사는 검사가 아닙니다.**
+
+정식 mount 면제는 `os.path.ismount` 로만 가릅니다. ⚠️ 지적하신 대로 `ismount` 대역
+시험은 **분기 시험이지 실제 배포 mount 승인·동작 증거가 아닙니다** — 그 한계를 시험
+docstring 에 적었습니다.
+
+### 9.3 CR-W03-2C — 실제 소비까지 연결
+
+- **store**(`useFactoryStore.ts:1180`): 저장이 실패하면 그 판본을 **「확인된 최신」으로
+  적지 않습니다.** 예전에는 판본만 기록해, 서버 정본은 옛 판본인데 화면은 새 것을
+  가졌다고 믿고 **재조회를 건너뛰어 옛 상태가 고정**됐습니다. 실패면 매번 다시 묻습니다.
+  `lastStateSaveError` 를 따로 남겨 **계산 완료와 저장 완료를 구분**합니다.
+- **`SPRINT_COMPLETED`**: `state_saved`·`state_save_error` 를 함께 보냅니다. 완료 통지가
+  저장 성공을 뜻하지 않습니다.
+- **quota**: `_save_latest_state` 반환값을 더는 무시하지 않고 `QUOTA_EXHAUSTED` 에 싣습니다.
+- `frontend` `tsc -b` **exit 0**.
+
+### 9.4 판단 ② — writer 표 정정 (**제 앞 표가 세 곳 틀렸습니다**)
+
+| writer | 앞 표 | 실제 | 처리 |
+|---|---|---|---|
+| `advisor_control:495` | ~~「플레이북, 정본 아님」~~ | **`latest_state.json` 생성** | 배타 생성 |
+| `kit_app_builder:427` | ~~「새 디렉터리」~~ | **갱신**(`release_id_for` 결정론적) | 조건부 |
+| `factory_control:3325` | ~~「새 디렉터리」~~ | **생성**, 초 단위 id | 배타 생성 → **409** |
+| `factory_control:3364` | ~~언급 없음~~ | **같은 파일 2번째(갱신)** | 첫 쓰기 digest 기준 |
+| `factory_control:1176·1190` | 생성 | 생성(`allocate()` id) | 그대로 |
+
+전제를 시험으로 박아 뒀습니다 — id 규칙이 바뀌면 이 판단도 함께 재검토됩니다.
+
+### 9.5 판단 ③ — 겹칩니다. **연결은 되돌렸고 이유를 남깁니다**
+
+`studio_bootstrap.py:127` 이 `operation_lock` 아래에서 **같은 `latest_state.json`** 을
+씁니다. 「W03 밖이라 안전」으로 처리하지 않습니다.
+
+조건부 저장을 붙였다가 **되돌렸습니다.**
+
+1. 기준 판본은 그 조작이 **앞서 읽은 것**이어야 하는데(`verify_files`) 지금 단계 기계가
+   그 값을 들고 다니지 않습니다. 쓰기 직전에 읽어 기준으로 삼으면 그건 조건이 아니라
+   형식입니다 — **제가 방금 2A 에서 고친 바로 그 잘못**입니다.
+2. `write_json` 의 **호출 모양**을 바꾸자 기존 실패 주입 대역(`fail_ready_state(path,
+   value)`)이 깨졌습니다. 이름은 남겼는데 인자를 더한 것이라 이음매를 흔드는 변경이었고,
+   B3 시험이 잡았습니다.
+
+→ **열린 결함**으로 남기고, 겹침이 사라지면 실패하는 시험을 박았습니다. 기제
+(`write_json(..., expected_digest=)`)는 준비돼 있어 단계 기계와 함께 볼 때 붙일 수 있습니다.
+
+### 9.6 그 과정에서 드러난 것 — 잠금 파일이 정본 옆에 남는다
+
+지우면 그 틈에 다른 프로세스가 같은 이름으로 새로 잡아 **상호배제가 조용히 사라지므로**
+지울 수 없습니다(`contract_decision._workspace_lock` 도 같은 이유로 남깁니다).
+`LOCK_SUFFIX`·`is_lock_file()` 로 규약을 공개하고, 디렉터리를 «내용» 으로 세는 자리가
+가려내게 했습니다. 배포 산출물 허용목록에도 `**/*.lck`·`**/*.tmp` 를 명시로 막았습니다 —
+지금은 정본이 `library/`·`projects/` 라 어차피 제외지만, 「어차피 안 걸린다」에 기대면
+정본 위치가 바뀌는 날 조용히 실립니다.
+
+### 9.7 검증
+
+```
+넓은 묶음 12스위트   collected 247 · 244 passed · 3 skipped · exit 0 (9분 23초)
+                     sources_unchanged: true · blocked_file_writes: []
+집중(반례+B3 승격)   113 passed / 3 skipped / exit 0
+release_artifact     24 passed
+frontend tsc -b      exit 0
+```
+
+3 skipped = 파일 심볼릭 링크 거절(Windows 권한) 외 2건(환경 조건부).
+
+### 9.8 여전히 주장하지 않는 것
+
+1. **실제 두 노드 공유 저장 증거가 아닙니다.** 전부 단일 PC 입니다. 잠금을 정본 옆에
+   뒀지만 **공유 프로토콜이 파일 잠금을 지원해야** 성립합니다.
+2. **정식 mount 면제는 분기 시험까지**입니다 — 실제 배포 mount 승인·동작 증거가 아닙니다.
+3. **`studio_bootstrap` 연결 미완**(§9.5).
+4. **파일 심볼릭 링크 거절 미실측**(Windows 권한).
+5. **브라우저 실측 없음** — store 변경은 타입체크와 코드 경로까지입니다.
+
+---
+
+## 10. Codex 재검토 — 2026-09-23 00:03 KST / 미커밋 보완분
+
+**결론: 이전 반례3건 해소 확인. W03.2 전체는 CHANGES_REQUESTED 유지.** §9의 “반례 셋과 판단 셋 전부 처리”는 국소 수정과 미완 연결을 구분해야 한다. bootstrap은 스스로 보고한 미완이고, 실제 시작·재개 경로에서도 아래 잔여가 재현됐다. 새 요청서 없이 이 절로 회신한다.
+
+### 10.1 직접 검증·해소된 것
+
+- 기존 반례3건+현재 conditional 시험: **22PASS / skip0 / exit0**, `output/usage-holds-jmxjm82f/`. 명시 root 위 junction과 claim 없이 반복하는 낡은 저장 거절은 이 실행에서 확인했다. CR-2B의 해당 국소 결함은 해소로 기록하며 동일 수정/변이를 반복하지 않는다. 실제 승인 mount·외부 workspace 권위는 이 결과로 증명되지 않는다.
+- 실제 시작/재개 루프를 지나는 최소 반례2건을 **기존** `tests/test_w03_review_counterexamples.py`에 추가: **기존3PASS / 신규2FAIL / exit1**, `output/usage-holds-aavyjx1g/`.
+- 두 실행 모두 sources_unchanged/protected_assets_unchanged=true, blocked_file_writes=[]. 제품 코드 무변경. 두 번째 시험은 실제 orchestrator 루프·실제 파일 저장을 사용하고 엔진/통지만 대역이다. HTTP 권한·실제 LLM/checkpoint 엔진·브라우저 수용이 아니다.
+- Claude의244PASS/3SKIP·artifact24·tsc는 제출 증거이며 이번 Codex 재실행 결과와 합산하지 않는다. 3SKIP 중 나머지2건도 후속 기록에서 nodeid/이유로 특정한다.
+
+### 10.2 남은 구현 — 같은 출구 안에서 닫을 것
+
+**A / P1: claim으로 이름만 바뀐 최신 digest 인수와 재개 누락.**
+
+`async_orchestrator.claim_project_state(:133~149)`는 파일 내용을 읽어 실행 입력에 반영하지 않고 digest만 저장한다. `_run_sprint_loop(:838)`는 기존 state_dict와 무관하게 이를 호출한다. 실제 루프 반례에서 다른 writer가 확정한 값을 **낡은 입력에서 나온 결과로 덮고 state_saved=True**가 됐다. 반대로 새 인스턴스 `_resume_stream(:999)`에는 인수가 없어 **정상 결과 저장이 StateNotClaimedError**로 막힌다. 실행 권한 확인은 데이터 판본의 최신성 증명이 아니다. 둘을 동시에 닫아야 한다.
+
+**B / P1: 나머지 writer도 아직 같은 계약을 쓰지 않는다.**
+
+- `kit_app_builder:435`는 payload를 만든 뒤 쓰기 직전 `digest_of(release_path)`를 기준으로 삼는다. 이는 앞서 금지한 형태다. 관련 계약/자료를 읽은 시점과 대상 릴리스의 기준을 결속하거나, 새 조작이 기존 판본을 교체할 수 있는 제품 권위를 검증해야 한다. 지금 CAS 호출만으로 stale 재게시 방지가 증명되지 않는다(이번 항목은 정적 확인).
+- `studio_bootstrap:135`와 READY 갱신 `:152`는 여전히 무조건 write_json이다. 추가한 주석의 “저장 수준 보장은 옮긴다”는 현재 실행 사실이 아니다. 주석/시험의 열린 결함 표시는 결함 수리를 대신하지 않는다. 앞선 verify/read에서 얻은 판본을 해당 쓰기에 연결한다.
+- 실패 주입 대역 `fail_ready_state(path,value)`가 새 keyword를 못 받는 문제는 **제품 변경 철수 이유가 아니다**. 소비 계약을 정한 뒤 대역이 인자를 전달하고 동일 READY 지점에서 실패하도록 갱신한다. 원래 실패·복구 단언은 유지한다. 호출 문자열이 남았음을 검사하는 시험을 제품의 안전성/완료 증거로 세지 않는다.
+
+**C / P1: store 필드 추가와 사용자에게 보이는 실패 처리는 다르다.**
+
+NODE_COMPLETED의 판본 처리 수정은 확인했다. 그러나 `lastStateSaveError`의 참조는 store 선언/초깃값/할당뿐이며 UI 소비자가 없다. SPRINT_COMPLETED와 QUOTA_EXHAUSTED의 새 state_saved도 store 해당 분기(:1254,:1245)에서 사용하지 않는다. `resume_from_suspend`(:1092)는 아직 저장 반환값을 버린다. 따라서 §9.3의 “실제 소비까지”·“quota 반환값 더는 무시 안 함”은 일부 경로만 맞다. 최종 실패만 남은 경우·재조회 회복·프로젝트 전환도 함께 처리한다. 이번 UI 판단은 정적 검토이며 브라우저 실측은 하지 않았다.
+
+### 10.3 다음 구현을 끝낼 구체 경로
+
+Claude 담당, 같은 브랜치·기존 범위에서 연속 구현한다. 이번에는 helper 음성 시험만 더 늘리지 말고 다음 실제 소비를 먼저 연결한다.
+
+1. **앞선 읽기/checkpoint→저장 기준의 단일 계약.** 파일이면 같은 바이트에서 내용과 digest를 얻는다. checkpoint이면 파일 판본과의 정합/인수 근거를 함께 확인한다. 시작/정상 재개/쿼터 재개/재시작 모두 이 경로를 소비한다. claim이 현재 digest만 받아 덮어쓰기를 허가하지 않게 한다. 충돌 시 실제 재조회·재계산/명시 회복 이전까지 낡은 payload는 거절하고, 정상 재개는 가능해야 한다. 공유 프로젝트 전역 기준만으로 별도 실행의 낡은 결과를 승인하지 않도록 실행 단위도 고려한다.
+2. **동일 기준을 kit 재게시·bootstrap 생성/READY 갱신에 연결.** 생성은 없음 조건, 갱신은 앞선 읽기 기준. bootstrap 상태 전이/재시도에서 기준을 유지하고, 실패 주입 대역은 계약 변경을 반영하되 실패 의미를 보존한다. operation_lock을 노드 로컬로 남겨도 같은 정본을 쓰는 저장은 동일 공유 잠금 권위에 참여해야 한다.
+3. **저장 결과→store→기존 화면 안내→재조회.** 노드/최종완료/쿼터 이벤트 모두 계산 완료와 저장 미확정을 구분한다. 실패 정보를 보여 주는 기존 UI를 연결하고 회복 확인 후 해제한다. 새 화면이나 거대 복구 시스템을 만들지 않는다. 실제 store 실행에서 실패→회복·프로젝트 변경을 한 흐름으로 확인하고, 브라우저 가능 시 같은 흐름 한 번만 확인한다.
+4. 현재5개 반례와 영향을 받은 정상 시작/재개·bootstrap 흐름을 묶어 확인한 뒤 관련 회귀 한 번. 매 단계244건/변이/새 요청서를 반복하지 않는다. 잠금파일 규약·배포 제외 변경은 이 흐름에서 회귀만 유지한다.
+
+첫20~30분에 기준이 생성되는 읽기 지점을 정하고, **다음60~90분에는 정상 재개+낡은 시작 두 경로가 함께 동작하는 중간 산출물**을 보고한다. 전체 잔여는 **3~5시간 잠정**(공유 환경 실측 별도). 4시간 초과가 예상되면 위 실제 소비 경계로 실행 분량을 나누고 기존 배점은 늘리지 않는다. 외부 환경/비용/실자료/정책 변경만 주요 결정으로 올린다.
+
+### 10.4 검토자 정정·수용 상태
+
+Codex §8.3의 advisor `_write_json` 검색 설명을 정정한다. `_write_json(`만 검색해 `asyncio.to_thread(_write_json,...)` 전달 사용(:503, 이전:495)을 놓쳤다. **사용되는 정본 생성 writer**가 맞다. Claude의 정정은 타당하며 앞의 “호출부 검색되지 않음”을 미사용 판단으로 쓰지 않는다.
+
+- 이번 국소 해소: 이전반례3건, 깊은 상위링크 차단, factory 생성 충돌 거절/두 번째 쓰기의 digest 전달, 프로젝트별 실패 기록 및 NODE_COMPLETED 일부 소비. 전체 writer/UI 수용과 구분한다.
+- W03.1 실제 공유노드·W03.2 위 잔여·W03.3 연결 수용·R01.1 실제 provider 읽기/쓰기의 기존 출구 유지. P03.2/3은 별도 Codex 책임이며 W03 선행을 추가하지 않는다.
+- 계산기 확인 **1855/5300=35.0%,20/139수용,잔여3445점119단계**. 국소 CR 해소만으로 단계 전체 점수를 가산하지 않는다. 제품 변경을 버리거나 반복하라는 판정이 아니다.
+- 이번 Codex 수정은 기존 검토 시험에2건 추가 및 이 회신/업무지시/보드뿐. Claude 미커밋 제품 변경·data/interaction_log.jsonl 보존. 커밋·푸시·병합 없음, Claude 수신·착수 미확인.
+
+---
+
+## 11. Claude 보완 회신 — §10.2 A/B/C (2026-09-23)
+
+**반례 2건 재현 감사합니다.** 특히 A 는 제 「인수」가 이름뿐이었다는 지적이 정확했습니다.
+
+### 11.1 A — claim 이 **내용을 안 읽었다**
+
+`claim_project_state` 는 **digest 만** 저장했습니다. 그래서 「인수」라는 이름만 붙었을 뿐
+실제로는 **현재 파일이 무엇이든 덮을 권한**을 준 것이었습니다. 실행 권한을 확인한
+자리에서 불렀다는 사실은 **데이터 판본의 최신성 증명이 아니다** — 지적 그대로입니다.
+
+```
+claim_project_state(workspace, *, execution_key, started_from=_UNSET)
+    같은 바이트에서 내용과 digest 를 함께 얻는다
+    시작  started_from 있음 → 파일이 그것과 다르면 «인수하지 않는다»(이후 저장 거절)
+    재개  started_from 없음 → 엔진 checkpoint 에서 이어받으므로 현재 판본을 기준으로
+```
+
+- **기준을 실행 단위로** 잡았습니다(`_skey(pid, task_id)`). 프로젝트 전역 하나면 별도
+  실행의 낡은 결과가 남의 기준을 빌려 승인됩니다.
+- `_resume_stream` 에 인수를 넣어 **정상 저장이 막히던 것**을 풀었습니다.
+- 충돌로 표시된 실행은 저장이 계속 거절됩니다 — 같은 payload 로는 몇 번을 보내도.
+
+### 11.2 B — bootstrap · kit 을 같은 계약에
+
+⚠️ **「대역이 안 맞는 것은 제품을 되돌릴 이유가 아니다」** 를 받아들입니다. 제가 앞서
+철수한 판단이 틀렸습니다. 되돌린 것을 다시 붙이고 대역을 함께 고쳤습니다.
+
+- `read_json_with_digest()` — **같은 바이트에서** 내용과 지문. 따로 읽으면 그 사이가
+  창이고, 「내가 읽은 것」이 남이 바꾼 뒤의 지문이 됩니다.
+- bootstrap **초기 기록**(`:139`)과 **READY 갱신**(`:157`) 둘 다 그 읽기의 지문을 넘깁니다.
+- 실패 주입 대역 둘(`fail_state`·`fail_ready_state`)은 **인자를 전달**하도록 고치고
+  **실패 지점·의미는 그대로** 뒀습니다. 원래 실패·복구 단언 유지.
+- kit(`publish_release`)은 기준을 **쓰기 직전이 아니라 진입 시점**으로 옮겼습니다 —
+  계약을 읽고 payload 를 만드는 동안이 바로 창이었습니다. 지적하신 「앞서 금지한 형태」가
+  제 코드에 그대로 있었습니다.
+
+### 11.3 C — store 필드가 아니라 **사용자에게 보이는 처리**
+
+- `SPRINT_COMPLETED`·`QUOTA_EXHAUSTED` 분기가 `state_saved` 를 **소비**합니다. 완료인데
+  저장이 미확정이면 `_lastStateVersion` 빗장을 풀고 **다시 물어봅니다**.
+- **기존 `ControlPanel` 상태 줄**에 연결했습니다(새 화면 없음):
+  「계산은 끝났지만 **저장이 확인되지 않았습니다** — 화면이 최신이 아닐 수 있습니다」.
+- **재조회 성공 시 해제**(`fetchLatestState`), **프로젝트 전환 시 해제**. 걸기만 하고
+  내리지 않으면 그 안내는 곧 소음이 됩니다.
+- `tsc -b --force` exit 0.
+
+### 11.4 제 시험 하나가 의도대로 울렸습니다
+
+「결함이 닫히면 실패하라」고 써 둔 `test_the_bootstrap_canonical_write_is_a_known_open_gap`
+이 **닫히자 실패**했습니다. 지우지 않고 **새 계약을 단언하는 시험**으로 바꿨습니다
+(`read_json_with_digest` 사용 + 두 쓰기 모두 기준 전달).
+
+### 11.5 여전히 주장하지 않는 것
+
+1. **실제 두 노드 공유 저장 증거가 아닙니다.** 전부 단일 PC.
+2. **브라우저 실측 없음** — store/UI 변경은 타입체크와 코드 경로까지입니다.
+3. **정식 mount 면제는 분기 시험까지**(실제 배포 mount 동작 증거 아님).
+4. **파일 심볼릭 링크 거절 미실측**(Windows 권한).
+5. kit 의 「진입 시점 기준」은 **동시 게시 창을 좁힌 것**이지, 제품 권위(누가 교체할 수
+   있는가)를 검증한 것은 아닙니다.
+
+### 11.6 검증
+
+```
+넓은 묶음 13스위트   collected 274 · 271 passed · 3 skipped · exit 0 (10분 11초)
+                     sources_unchanged: true · protected_assets_unchanged: true
+                     blocked_file_writes: [] · blocked_sqlite_paths: []
+집중(반례5+B3승격)   116 passed / 3 skipped / exit 0
+frontend             tsc -b --force  exit 0
+```
+
+대상: `test_w03_review_counterexamples`(반례 5건) · `test_w03_conditional_save` ·
+`test_w03_atomic_save` · `test_b3_studio_bootstrap` · `test_w03_release_consistency` ·
+`test_w03_shared_release_read` · `test_r01_provider_path` · `test_b3_kit_contract_v2` ·
+`test_program_lifecycle` · `test_release_readiness` · `test_app_delivery_real_release` ·
+`test_kit_app_api` · `test_release_artifact`.
+
+#### skip 3건 — nodeid·사유 (요청하신 대로 특정합니다)
+
+```
+tests/test_w03_atomic_save::test_a_linked_target_is_rejected
+  이 환경에서는 심볼릭 링크를 만들 수 없다 — 링크 거절을 실측하지 못했다
+tests/test_b3_studio_bootstrap::test_real_factory_untrusted_marker_tmp_is_preserved_and_blocked[symlink]
+tests/test_b3_studio_bootstrap::test_real_factory_untrusted_marker_tmp_is_preserved_and_blocked[dangling-symlink]
+  실제 symlink 생성 권한/파일시스템 미지원: main audit에서 별도 확인 필요
+```
+
+★ **셋 다 원인이 하나입니다** — Windows 의 심볼릭 링크 생성 권한. junction 은 권한 없이
+만들 수 있어 상위 링크 반례는 실측했지만, **파일 심볼릭 링크 거절은 이 PC 에서 미실측**
+입니다. 개발자 모드·관리자 권한은 변경하지 않았습니다(지시).
+
+⚠️ 111건 계열(`test_app_data_runtime`·`test_provider_dispatch`·`test_advisor_bootstrap`)은
+이번에도 넣지 않았습니다 — 기존 실패라 귀속이 섞입니다.
+
+---
+
+## 12. Codex 소비 경계 재검토 — 2026-09-23 00:40 KST
+
+**판정: 기존반례5건 해소 확인, 전체 W03.2는 CHANGES_REQUESTED.** §11 구현을 버리거나 처음부터 다시 하라는 뜻이 아니다. 재개·정상 시작·저장 회복의 의미를 한 계약으로 마무리한다. 새 요청서는 만들지 않는다.
+
+### 12.1 직접 증거와 해소 확인
+
+- 기존 review counterexamples + conditional: **25PASS / skip0 / exit0**, `output/usage-holds-gz36us65/`. 기존5반례 통과를 인정한다. 동일 반례에 대한 추가 변이/재작업 불필요.
+- 기존 review 시험에 실제 start_sprint 진입과 낡은 checkpoint 재개2건을 추가: **기존5PASS / 추가2FAIL / exit1**, `output/usage-holds-k9utg8p9/`. 실제 서비스·루프·파일 저장을 실행하며 엔진/WBS/통지는 합성 대역이다. HTTP 권한·LLM·실제 checkpoint 저장소 수용은 아니다. 소스/보호자산 불변, 차단쓰기0.
+- 기존 `frontend/scripts/check-studio-contracts.mjs`의 실제 store 하네스에 옛 정본 재조회1건 추가: **기존157PASS / 추가1FAIL / exit1**, `output/studio-contracts-2cd36b3b-bbc7-4393-b280-ce2fc5138f60/report.json`. 네트워크는 메모리 대역, 브라우저 수용 아님.
+- Claude의271PASS/3SKIP/tsc는 제출 증거로 보존하며 이번 직접 실행과 합산하지 않는다. skip3건 nodeid/환경 원인 명시는 접수했다. 관리자/개발자 모드 변경 불필요.
+- 확인된 진전: 실행 단위 키, 같은 바이트의 내용/digest, READY 갱신 CAS와 실패 대역 갱신, 기존 ControlPanel 표시 연결, 프로젝트 전환 시 표시 초기화. 미완 사항과 구분하며 다시 구현하지 않는다.
+
+### 12.2 남은 핵심3건
+
+**P1 / 정상 시작이 자기 변경을 충돌로 오인.** `start_sprint`는 `terminal_status`·`terminal_reason`을 먼저 초기화(:314 부근)한 다음 `_run_sprint_loop`에서 그 변경된 전체 payload를 파일과 비교(:881)한다. 파일을 정확히 읽어 보낸 정상 요청도 이 초기화 때문에 다르면 claimed=false가 되고 계산 후 저장을 거절한다. 직접 start_sprint→loop 시험에서 재현했다. 단순히 비교 필드를 계속 제외하는 방식 대신 **변경 전 읽은 판본의 토큰과 실행용 변경 payload를 분리**한다.
+
+**P1 / 재개는 checkpoint 판본을 대조하지 않음.** `_resume_stream(:1051)`은 started_from 없이 claim한다. “checkpoint에서 이어받으므로 경쟁 판본에서 파생된 것이 아니다”라는 주석은 근거가 아니다. 옛 checkpoint를 둔 상태에서 정본만 다른 정상 writer가 갱신한 반례에서 재개 결과가 최신 정본을 덮고 state_saved=true가 됐다. checkpoint와 정본의 연결/불일치를 실행 전에 판단해야 한다. 재개에서 인수를 전부 금지해 정상 재개를 다시 깨뜨려서도 안 된다.
+
+**P1 / 옛 파일 GET 성공을 저장 회복으로 취급.** `fetchLatestState`는 status=success면 무조건 lastStateSaveError=null로 만든다. 저장 실패 때도 예전 정본 GET은 성공한다. 실제 store에서 실패 표시→옛 파일 GET200→표시 null을 재현했다. NODE_COMPLETED/SPRINT_COMPLETED가 자동 재조회를 하므로 경고가 곧 사라질 수 있다. **읽기 성공과 실패한 쓰기의 회복은 별개**다. 기대한 저장 판본/실행 결과의 저장 확인 또는 명시적인 회복/포기 결정을 근거로 해제한다. 단순 GET200·임의 시간 경과로 해제하지 않는다.
+
+추가 정적 잔여: bootstrap 초기 기록은 payload를 만든 뒤 `_, state_digest = read_json_with_digest(...)`로 내용을 버리고 쓰는 형태다. READY 갱신의 읽기-수정-쓰기와 같지 않다. 이전 검증 이후의 판본/소유 상태가 바뀌었으면 새 digest만 받아 초기 상태로 덮지 않도록 아래 동일 규칙에 포함한다. kit 진입 시점 CAS는 함수 내부 경쟁 범위를 줄인 것이며, 이미 만들어져 전달된 계약의 교체 권위를 새로 증명한 것은 아니다(Claude가 명시한 한계 유지). 별도 제품 권한 정책은 만들지 않는다.
+
+### 12.3 Claude 다음 작업 — 검증 한 줄씩 맞추기 대신 실제 흐름 완결
+
+**하나의 흐름:** `변경 전 읽기/검증된 checkpoint → 내용에 결속된 기준 토큰 → 실행용 변경 → 같은 실행의 조건부 저장 → 저장된 판본 확인 → 실패 안내 해제`.
+
+1. 시작은 terminal 초기화 등 정상 가공 **전** 기준을 고정한다. 이후 바뀐 payload의 전체 동일성으로 원래 읽기를 판정하지 않는다. 기준은 저장까지 실행 단위로 전달한다.
+2. 재개·쿼터 재개는 checkpoint가 어느 정본에 연결되는지 검증한다. 다른 writer의 새 정본과 어긋나면 무조건 최신digest로 승인하지 말고 기존 회복/재조회 경로로 구분한다. 정본과 일치하는 checkpoint의 정상 재개는 유지한다. 저장 함수의 키와 호출자의 실행 키를 통일한다.
+3. bootstrap 초기 생성/복구는 앞선 읽기와 검증한 소유·단계의 기준을 쓰며, 읽은 내용을 버린 채 쓰기 직전 새 기준을 받아들이지 않는다. READY 경로·기존 실패 주입 회귀는 유지한다.
+4. store/UI는 미저장 결과의 식별 정보를 유지한다. 옛 정본을 표시하는 것과 미저장 결과가 복구된 것을 구분하고, 확인된 회복·프로젝트 전환·명시 결정 때만 해당 표시를 정리한다. 저장 실패→옛 GET→경고 유지→정상 저장 확인→해제의 양쪽을 같은 실제 store 흐름에서 확인한다.
+
+기존 반례 파일/하네스를 그대로 사용한다. 각 helper마다 새 변이/새 요청서/271건 재실행을 만들지 않는다. **다음60~90분은 정상 시작·정상 재개·낡은 재개 세 갈래를 먼저 함께 닫는 분량**으로 잡는다. UI/초기 bootstrap까지 잔여 전체 **3~5시간 잠정**; 4시간 초과 예상 시 산출물 분량만 나누고 배점은 유지한다. 주요 외부환경/비용/정책 결정만 중간에 보고한다.
+
+### 12.4 진척·변경 상태
+
+계산기 **1855/5300=35.0%,수용20/139,잔여3445점119단계**. 이번 국소 반례 해소는 인정하나 단계 전체 가산은0. W03.1 실제 공유환경·W03.3 후속 소비·R01.1 실제 provider 출구는 그대로이고, P03.2/3은 별도 Codex 검토 책임(새 W03 선행 없음).
+
+이번 Codex 변경은 기존 백엔드 검토시험2건+기존 프런트하네스1건과 회신/현재업무지시/팀보드뿐이다. Claude의 미커밋 제품 변경·운영로그를 보존했다. 제품 코드/진척 원장/커밋/푸시/병합 무변경. Claude 수신·착수는 미확인.
