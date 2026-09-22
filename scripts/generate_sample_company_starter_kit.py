@@ -98,7 +98,7 @@ def company_name() -> str:
 #: **판본은 `--version` 으로 받는다** (P2). 예전에는 여기에 "1.0.0" 이 박혀 있어서,
 #: 1.1.0 을 내려면 이 줄을 고쳐야 했고 고치는 순간 1.0.0 을 재현할 수 없게 됐다.
 #: `main()`/`build()` 이 아래 셋을 판본에 맞게 다시 세운다.
-KIT_VERSION = "1.4.0"
+KIT_VERSION = "1.5.0"
 KIT_ROOT = ROOT / "starter_kits" / KIT_ID / KIT_VERSION
 OVERLAY: kit_defs.KitOverlay = kit_defs.KitOverlay()
 
@@ -622,11 +622,19 @@ def latest_indicator(rows: Sequence[Mapping[str, Any]], code_field: str) -> Dict
 def generate_contracts(profile: Profile, suppliers: Sequence[Mapping[str, Any]], materials: Sequence[Mapping[str, Any]],
                        ext2: Sequence[Mapping[str, Any]], rng: random.Random) -> List[Dict[str, Any]]:
     raw = [m for m in materials if m["material_type"] in {"RAW", "CONSUMABLE"} and m["active"]]
+    #: ★ **사는 장면이 보여야 한다**(1.5.0). 위 `_PRC_CYCLE` 설명을 보라.
+    _known_raw = {m["code"] for m in business_defs.materials_of(BUSINESSES)}
+    _major_raw = [m for m in raw if m["material_id"] in _known_raw]
+    _other_raw = [m for m in raw if m["material_id"] not in _known_raw]
     prices = latest_indicator(ext2, "commodity_code")
     rows = []
     for i in range(profile.contracts):
         supplier = suppliers[i % len(suppliers)]
-        mat = raw[i % len(raw)]
+        #: 주기 4 중 1 을 주력 원료에. 나머지는 부자재·소모품이 돈다
+        if _major_raw and (i % _PRC_CYCLE) < _PRC_MAJOR:
+            mat = _major_raw[(i // _PRC_CYCLE) % len(_major_raw)]
+        else:
+            mat = (_other_raw or raw)[i % len(_other_raw or raw)]
         benchmark = mat.get("benchmark_code") or "NICKEL"
         if benchmark not in prices:
             benchmark = "NICKEL"
@@ -653,7 +661,9 @@ def generate_purchase_and_logistics(profile: Profile, contracts: List[Dict[str, 
         order_date = start + timedelta(days=(i * 17 + i//7) % span)
         lead = int(supplier_by_id[c["supplier_id"]]["lead_time_days"])
         due_date = order_date + timedelta(days=lead)
-        quantity = round(15 + (i % 11) * 4.5, 3)
+        #: ★ 원료마다 거래 단위가 다르다(1.5.0) — 정광은 선적 단위, 소석회는 조금씩
+        quantity = round((15 + (i % 11) * 4.5)
+                         * business_defs.purchase_qty_scale_of(BUSINESSES, c["material_id"]), 3)
         remaining = float(c["contract_quantity"]) - contract_ordered[c["contract_id"]]
         if remaining < quantity:
             quantity = max(1.0, remaining)
@@ -747,9 +757,33 @@ def generate_purchase_and_logistics(profile: Profile, contracts: List[Dict[str, 
 _MAJOR_REPEAT = 30
 _FILLER_PRICE = 1200.0
 
-#: 생산 쪽 가중 — **판매보다 작다.** 총 배치 수가 고정이라 여기를 크게 주면 주력
-#: 재고가 터무니없이 쌓인다. `generate_plans_batches_events` 의 설명을 보라.
-_MAJOR_REPEAT_MFG = 3
+#: 생산 쪽 가중. **주력은 자주, 작은 배치로** 만든다 — 총 배치 수가 고정이라
+#: 가중만 올리면 주력 재고가 터무니없이 쌓이므로 배치 크기를 함께 줄인다.
+#: `generate_plans_batches_events` 의 설명을 보라.
+#: ⚠️ **판매 가중과 맞춰야 한다.** 완제품이 2 종이면 배치가 나뉘어 종당 생산이
+#:   줄어드는데 판매는 종당 그대로라, 가중이 작으면 **만든 것보다 많이 파는** 쪽으로
+#:   기운다 — 전지소재가 실제로 그랬다(생산 12,412 < 판매 17,187).
+_MAJOR_REPEAT_MFG = 30
+_MAJOR_BATCH_SCALE = 0.45
+
+#: ⚠️ 0.45 는 **quick 프로파일이 정한 값**이다. quick 은 배치 650 · 판매 300 이라
+#:   배치 대비 판매가 full(8,000 · 2,500)보다 크고, 배치를 너무 작게 잡으면 거기서만
+#:   「만든 것보다 많이 판다」가 난다. 두 프로파일 모두 통과하는 자리를 골랐다.
+
+#: ★★★ **구매 쪽 가중** (1.5.0).
+#:
+#: 1.4.0 까지 구매가 품목을 균등하게 돌았다. 구매 대상이 144 종(원료 72 · 소모품 72)
+#: 인데 사업이 아는 원료는 1~5 종이라, **정광 구매가 발주의 1%** 였다. 그런데 이
+#: 키트의 용도는 「원료 구매·도입계획에서 경영 영향과 실행 결정까지」다 —
+#: **사는 장면이 데이터에 없으면 그 용도가 성립하지 않는다.**
+#:
+#: ⚠️ 더 나쁜 것은 수급이었다. 동정광을 **20,176 톤 쓰면서 612 톤만 샀다.**
+#:   기초재고 23,202 톤이 받쳐 재고 음수는 나지 않았지만, 그것은 「사는 회사」가
+#:   아니라 **「쌓아둔 것을 쓰는 회사」**다.
+#: ⚠️ **반복 목록으로 하면 안 된다.** 계약은 100 건인데 가중한 목록이 그보다 길면
+#:   앞부분만 잘려 **전부 주력**이 된다 — 전지소재(원료 4 종 × 25 = 100)가 실제로
+#:   발주 100% 가 나왔다. 그래서 **주기**로 정한다: 개수와 무관하게 비율이 지켜진다.
+_PRC_CYCLE, _PRC_MAJOR = 4, 1
 
 
 def generate_sales(profile: Profile, customers: Sequence[Mapping[str, Any]], products: Sequence[str],
@@ -819,7 +853,9 @@ def generate_plans_batches_events(profile: Profile, bom: Sequence[Mapping[str, A
     for i in range(profile.production_plans):
         product = products[i % len(products)]
         d = start + timedelta(days=(i*5 + i//11) % span)
-        qty = round(10 + (i%19)*2.1, 3)
+        #: ★ 주력은 **작은 배치로 자주** 만든다(1.5.0) — 가중만 올리면 총량이
+        #:   판매를 크게 웃돌아 재고가 쌓인다
+        qty = round((10 + (i%19)*2.1) * (_MAJOR_BATCH_SCALE if product in _known_mfg else 1.0), 3)
         requirement = round(sum(float(x["quantity_per_output"]) for x in bom_by_product[product]) * qty, 3)
         scope = scope_of(product)
         plans.append({"plan_line_id": f"MPS-{i+1:07d}", "plan_date": iso(d), "site_id": scope,
@@ -863,7 +899,16 @@ def generate_movements_and_snapshots(profile: Profile, logistics: Sequence[Mappi
                                      purchase_orders: Sequence[Mapping[str, Any]], batches: Sequence[Mapping[str, Any]],
                                      sales: Sequence[Mapping[str, Any]], materials: Sequence[Mapping[str, Any]],
                                      locations: Sequence[Mapping[str, Any]], start: date, end: date,
-                                     rng: random.Random) -> tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+                                     rng: random.Random,
+                                     bom: Sequence[Mapping[str, Any]] = ()) -> tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+    #: ★★★ **배합대로 원료를 내보내려면 BOM 이 있어야 한다** (1.5.0).
+    #:   `MFG-02` 는 업무키가 `batch_id` 하나라 배치당 **한 행**이고, 그래서
+    #:   `input_material_id` 도 하나뿐이다 — 주원료만 담긴다. 부재료는 여기, 재고
+    #:   이동으로 내보낸다. 실제 ERP 도 배치 헤더와 자재 출고를 나눠 쓴다.
+    _bom_in: Dict[str, List[Mapping[str, Any]]] = defaultdict(list)
+    for _b in bom:
+        if str(_b.get("component_role") or "") == "INPUT":
+            _bom_in[str(_b["output_material_id"])].append(_b)
     po_by_line = {p["po_line_id"]: p for p in purchase_orders}
     shp_by_id = {s["shipment_id"]: s for s in shipments}
     movements: List[Dict[str, Any]] = []
@@ -877,6 +922,12 @@ def generate_movements_and_snapshots(profile: Profile, logistics: Sequence[Mappi
     _issue_need: Dict[str, float] = defaultdict(float)
     for _b in batches:
         _issue_need[str(_b["input_material_id"])] += abs(float(_b["input_quantity"]))
+        #: ★ **부재료도 센다**(1.5.0). 배치가 BOM 전체를 출고하게 되었으므로, 여기서
+        #:   주원료만 세면 부재료 기초재고가 모자라 **초기 몇 달이 음수**가 된다 —
+        #:   총량은 구매가 대는데 **시점**이 안 맞는 것이다. 실제로 황산이 그랬다.
+        for _line in _bom_in.get(str(_b["output_material_id"]), ())[1:]:
+            _issue_need[str(_line["input_material_id"])] += abs(
+                float(_b["output_quantity"]) * float(_line["quantity_per_output"]))
     for _s in sales:
         _issue_need[str(_s["product_id"])] += abs(float(_s["shipped_quantity"]))
     for idx, m in enumerate(materials):
@@ -895,6 +946,19 @@ def generate_movements_and_snapshots(profile: Profile, logistics: Sequence[Mappi
         #:   원료는 기초재고가 모자라 **재고가 마이너스로 갔다**(1.1.0 에서 1,082 행,
         #:   가장 깊은 곳 −5,276). 없는 것을 투입해 만든 데이터는 분석에 쓸 수 없다.
         _base = 2000.0 if m["material_type"] == "RAW" else 800.0 if m["material_type"] == "FINISHED" else 100.0
+        #: ⚠️⚠️ **1.15 배는 36 개월치다 — 살 이유를 없앤다.**
+        #:
+        #: 1.4.0 에서 동정광을 20,176 톤 쓰면서 612 톤만 산 것이 그래서였다. 재고
+        #: 음수가 나지 않으니 검사도 통과했다. 현실의 원료 재고는 **몇 달치**다.
+        #:
+        #: ⚠️ 1.5.0 에서 0.20 으로 내려 봤다가 되돌렸다. 이 값은 **모든 품목**에
+        #:   걸리는데 더미 소모품은 구매가 따라오지 않아 **음수 842 행**이 터졌다
+        #:   (주력 원료만 낮추려 해도 조합 키트에서는 원료 5 종이 발주를 나눠 가져
+        #:   종당 구매가 소비를 못 댄다).
+        #:
+        #: ★ 제대로 고치려면 **발주량을 소비 예상에서 역산**해야 한다 — 지금은 구매가
+        #:   생산보다 먼저 생성되므로 순서를 바꾸거나 BOM 으로 예측해야 한다.
+        #:   1.6.0 의 과제다.
         qty = round(max(_base, _issue_need[m["material_id"]] * 1.15), 3)
         balances[(m["material_id"], loc)] += qty
         movements.append({"movement_id": f"MOV-OPEN-{idx+1:05d}", "movement_date": iso(start),
@@ -923,6 +987,23 @@ def generate_movements_and_snapshots(profile: Profile, logistics: Sequence[Mappi
                           "lot_id": b["input_lot_id"], "from_location_id": raw_loc, "to_location_id": "PRODUCTION",
                           "quantity": -float(b["input_quantity"]), "quantity_uom": b["quantity_uom"],
                           "reference_type": "BATCH", "reference_id": b["batch_id"], "_scope": b["site_id"]})
+        #: ★★★ **부재료도 나간다** (1.5.0). 1.4.0 까지는 BOM 첫 줄만 출고했다 —
+        #:   「수산화리튬 = Black Mass 5.2 + 황산 0.12 + 소석회 0.05」인데 Black Mass
+        #:   만 나갔고, **황산·소석회는 사 놓고 쓰지 않는** 데이터였다(조합 키트에서
+        #:   황산 706 톤 구매 · 0 톤 소비).
+        #:
+        #: 주원료(`recipe[0]`)는 위에서 **수율을 반영해** 이미 나갔으므로 건너뛴다.
+        for _k, _line in enumerate(_bom_in.get(str(b["output_material_id"]), ())[1:], 2):
+            _mid = str(_line["input_material_id"])
+            movements.append({"movement_id": f"MOV-ISS-{b['batch_id']}-{_k}",
+                              "movement_date": b["production_date"],
+                              "movement_type": "PRODUCTION_ISSUE", "material_id": _mid,
+                              "lot_id": f"LOT-RM-{_mid}-{b['batch_id']}",
+                              "from_location_id": raw_loc, "to_location_id": "PRODUCTION",
+                              "quantity": -round(float(b["output_quantity"]) * float(_line["quantity_per_output"]), 3),
+                              "quantity_uom": business_defs.uom_of(BUSINESSES, _mid),
+                              "reference_type": "BATCH", "reference_id": b["batch_id"],
+                              "_scope": b["site_id"]})
         movements.append({"movement_id": f"MOV-RCP-{b['batch_id']}", "movement_date": b["production_date"],
                           "movement_type": "PRODUCTION_RECEIPT", "material_id": b["output_material_id"],
                           "lot_id": b["output_lot_id"], "from_location_id": "PRODUCTION", "to_location_id": fg_loc,
@@ -1201,7 +1282,8 @@ def generate_profile(profile: Profile) -> Dict[str, List[Dict[str, Any]]]:
         profile, datasets["MDM-05"], datasets["MDM-06"], datasets["SLS-01"], start, end, rng)
     datasets["INV-02"], datasets["INV-01"] = generate_movements_and_snapshots(
         profile, datasets["LOG-05"], datasets["LOG-02"], datasets["PRC-02"], datasets["MFG-02"],
-        datasets["SLS-01"], datasets["MDM-01"], datasets["MDM-04"], start, end, rng)
+        datasets["SLS-01"], datasets["MDM-01"], datasets["MDM-04"], start, end, rng,
+        datasets["MDM-05"])
     datasets["QLT-01"] = generate_quality(profile, datasets["LOG-02"], datasets["MFG-02"], rng)
     datasets["FIN-01"], datasets["FIN-02"], datasets["FIN-03"] = generate_finance(
         profile, datasets["PRC-01"], datasets["PRC-02"], datasets["LOG-02"], datasets["SLS-01"],

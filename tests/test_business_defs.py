@@ -18,7 +18,7 @@ import business_defs as B  # noqa: E402
 
 SMELT = "smelting_nonferrous"
 BATTERY = "battery_materials"
-KIT = os.path.join(REPO, "starter_kits", "KIT-MFG-NONFERROUS-PROCUREMENT", "1.4.0")
+KIT = os.path.join(REPO, "starter_kits", "KIT-MFG-NONFERROUS-PROCUREMENT", "1.5.0")
 
 
 # ── 로더
@@ -99,10 +99,10 @@ def _generate(tmp_path, businesses):
     out = tmp_path / ("-".join(businesses) or "none")
     before = gen.KIT_ROOT
     try:
-        gen.use_version("1.4.0", out)
+        gen.use_version("1.5.0", out)
         gen.build(clean=True, businesses=businesses)
     finally:
-        gen.use_version("1.4.0", before)
+        gen.use_version("1.5.0", before)
     return str(out)
 
 
@@ -310,7 +310,7 @@ def test_사업_하나면_그_키트가_나온다(tmp_path):
 
 def _sales_share(kit_id: str, codes):
     """매출을 **주력과 더미로** 가른다. 주력 = 사업 정의가 아는 품목."""
-    path = os.path.join(REPO, "starter_kits", kit_id, "1.4.0", "samples", "full", "SLS-01.csv")
+    path = os.path.join(REPO, "starter_kits", kit_id, "1.5.0", "samples", "full", "SLS-01.csv")
     known = {m["code"] for m in B.materials_of(B.load(list(codes)))}
     major = rest = 0.0
     with io.open(path, encoding="utf-8-sig") as f:
@@ -386,7 +386,7 @@ def test_주력_단가가_더미보다_비싸다():
 
 def _made_and_sold(kit_id: str):
     """품목별 **산출**과 **판매**. 부산물은 배치가 아니라 부산물 입고로 들어온다."""
-    root = os.path.join(REPO, "starter_kits", kit_id, "1.4.0", "samples", "full")
+    root = os.path.join(REPO, "starter_kits", kit_id, "1.5.0", "samples", "full")
     made, sold = {}, {}
     with io.open(os.path.join(root, "MFG-02.csv"), encoding="utf-8-sig") as f:
         for r in csv.DictReader(f):
@@ -439,3 +439,85 @@ def test_부산물도_만든_만큼만_판다():
     for bp in ("BP-GOLD", "BP-H2SO4"):
         assert made.get(bp, 0) > 0, f"{bp} 산출이 0 이다 — 부산물 입고를 못 읽었다"
         assert sold.get(bp, 0) <= made[bp], f"{bp}: 산출 {made[bp]:,.1f} < 판매 {sold[bp]:,.1f}"
+
+
+# ── 생산·구매에도 산업이 보이는가 (1.5.0)
+
+def _counts(kit_id: str, dataset: str, col: str, codes):
+    root = os.path.join(REPO, "starter_kits", kit_id, "1.5.0", "samples", "full")
+    known = {m["code"] for m in B.materials_of(B.load(list(codes)))}
+    major = total = 0
+    with io.open(os.path.join(root, dataset + ".csv"), encoding="utf-8-sig") as f:
+        for r in csv.DictReader(f):
+            total += 1
+            if (r.get(col) or "") in known:
+                major += 1
+    return major / total if total else 0.0
+
+
+@pytest.mark.parametrize("kit_id,codes", [
+    ("KIT-MFG-SMELTING-NONFERROUS", [SMELT]),
+    ("KIT-MFG-BATTERY-MATERIALS", [BATTERY]),
+    ("KIT-MFG-NONFERROUS-PROCUREMENT", [SMELT, BATTERY]),
+])
+def test_사는_장면과_만드는_장면이_보인다(kit_id, codes):
+    """★ 1.4.0 까지 **생산 9% · 발주 1%** 였다. 이 키트의 용도는 「원료 구매·도입
+    계획에서 경영 영향과 실행 결정까지」인데, **사는 장면이 데이터에 없으면** 그
+    용도가 성립하지 않는다.
+
+    하한만 본다 — 구매 대상이 144 종(원료 72 · 소모품 72)이라 주력이 전부를
+    차지할 수는 없다.
+    """
+    assert _counts(kit_id, "MFG-02", "output_material_id", codes) >= 0.30
+    assert _counts(kit_id, "PRC-02", "material_id", codes) >= 0.15
+
+
+@pytest.mark.parametrize("kit_id,codes", [
+    ("KIT-MFG-SMELTING-NONFERROUS", [SMELT]),
+    ("KIT-MFG-BATTERY-MATERIALS", [BATTERY]),
+    ("KIT-MFG-NONFERROUS-PROCUREMENT", [SMELT, BATTERY]),
+])
+def test_배합대로_원료가_나간다(kit_id, codes):
+    """★★★ 1.4.0 까지 배치가 **BOM 첫 줄만** 출고했다.
+
+    「수산화리튬 = Black Mass 5.20 + 황산 0.12 + 소석회 0.05」인데 Black Mass 만
+    나갔고, 부재료는 **사 놓고 쓰지 않았다** — 조합 키트에서 황산 706 톤 구매 ·
+    **0 톤 소비**. 1.3.0 에서 배합비를 현업에 물으면서 정작 그 배합대로 만들지
+    않고 있었다.
+    """
+    root = os.path.join(REPO, "starter_kits", kit_id, "1.5.0", "samples", "full")
+    known = {m["code"] for m in B.materials_of(B.load(list(codes)))}
+    with io.open(os.path.join(root, "MDM-05.csv"), encoding="utf-8-sig") as f:
+        need = {r["input_material_id"] for r in csv.DictReader(f)
+                if r["component_role"] == "INPUT" and r["input_material_id"] in known}
+    with io.open(os.path.join(root, "INV-02.csv"), encoding="utf-8-sig") as f:
+        issued = {r["material_id"] for r in csv.DictReader(f)
+                  if r["movement_id"].startswith("MOV-ISS-")}
+    assert need, "BOM 에 주력 원료가 없다 — 잴 것이 없다"
+    assert not (need - issued), f"BOM 에 있는데 출고가 없다: {sorted(need - issued)}"
+
+
+@pytest.mark.parametrize("kit_id,codes", [
+    ("KIT-MFG-SMELTING-NONFERROUS", [SMELT]),
+    ("KIT-MFG-BATTERY-MATERIALS", [BATTERY]),
+    ("KIT-MFG-NONFERROUS-PROCUREMENT", [SMELT, BATTERY]),
+])
+def test_산_것보다_많이_쓰지_않는다(kit_id, codes):
+    """⚠️ 이것도 재고 음수 검사가 못 잡았다 — 기초재고가 크고 조정 이벤트가 받쳐서
+    잔고가 양수로 남는다. 1.4.0 에서 **동정광을 20,176 톤 쓰면서 612 톤만 샀다.**"""
+    root = os.path.join(REPO, "starter_kits", kit_id, "1.5.0", "samples", "full")
+    known = {m["code"] for m in B.materials_of(B.load(list(codes)))}
+    got, spent = {}, {}
+    with io.open(os.path.join(root, "INV-02.csv"), encoding="utf-8-sig") as f:
+        for r in csv.DictReader(f):
+            q = float(r["quantity"] or 0)
+            if r["movement_id"].startswith("MOV-ISS-"):
+                spent[r["material_id"]] = spent.get(r["material_id"], 0.0) - q
+            elif r["movement_id"].startswith(("MOV-OPEN", "MOV-IN")):
+                got[r["material_id"]] = got.get(r["material_id"], 0.0) + q
+    with io.open(os.path.join(root, "PRC-02.csv"), encoding="utf-8-sig") as f:
+        for r in csv.DictReader(f):
+            got[r["material_id"]] = got.get(r["material_id"], 0.0) + float(r["order_quantity"] or 0)
+    short = [f"{m}: 조달 {got.get(m, 0):,.0f} < 소비 {q:,.0f}"
+             for m, q in spent.items() if m in known and q > got.get(m, 0.0)]
+    assert not short, "; ".join(short)

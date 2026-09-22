@@ -35,8 +35,8 @@ def _overlay(**kw):
 # ── 판본 로더
 
 def test_현재_판본을_불러온다():
-    o = kit_defs.load("1.4.0")
-    assert o.version == "1.4.0"
+    o = kit_defs.load("1.5.0")
+    assert o.version == "1.5.0"
     assert o.kit_id == "KIT-MFG-NONFERROUS-PROCUREMENT"
 
 
@@ -49,7 +49,7 @@ def test_1_0_0_은_재생성을_거부한다():
     msg = str(e.value)
     assert "동결된 판본" in msg
     # 무엇을 해야 하는지 알려 줘야 한다 — 막기만 하면 파일을 고쳐서 뚫는다
-    assert "1.4.0" in msg and "fingerprint" not in msg.lower() or "verify" in msg
+    assert "1.5.0" in msg and "fingerprint" not in msg.lower() or "verify" in msg
 
 
 def test_없는_판본은_거부한다():
@@ -85,7 +85,7 @@ def test_OVERLAY_가_없는_정의를_거부한다(monkeypatch):
 def test_현재_판본_오버레이는_비어있다():
     """★ 이것이 「생성기의 기본 정의 = 현재 판본」을 보증한다. 여기에 무엇을 더하면
     생성기와 판본 정의가 두 곳으로 갈라진다."""
-    o = kit_defs.load("1.4.0")
+    o = kit_defs.load("1.5.0")
     assert list(o.extra_drivers) == []
     assert list(o.extra_scenarios) == []
     assert o.company_profile_patches == {}
@@ -93,7 +93,7 @@ def test_현재_판본_오버레이는_비어있다():
 
 
 def test_빈_오버레이는_기본을_그대로_돌려준다():
-    o = kit_defs.load("1.4.0")
+    o = kit_defs.load("1.5.0")
     base_d = [("DRV-FX", "a", "b", "c", 0, "KRW")]
     base_s = [("SCN-01", "n", "DRV-FX", 0.1, "%", "X")]
     base_p = [{"company_profile_id": "P1", "industry_code": "C2412"}]
@@ -144,18 +144,18 @@ def test_use_version_이_경로와_정의를_함께_바꾼다(tmp_path):
     gen = importlib.import_module("generate_sample_company_starter_kit")
     before = gen.KIT_ROOT
     try:
-        gen.use_version("1.4.0", tmp_path / "여기")
-        assert gen.KIT_VERSION == "1.4.0"
+        gen.use_version("1.5.0", tmp_path / "여기")
+        assert gen.KIT_VERSION == "1.5.0"
         assert gen.KIT_ROOT == tmp_path / "여기"
-        assert gen.OVERLAY.version == "1.4.0"
+        assert gen.OVERLAY.version == "1.5.0"
     finally:
-        gen.use_version("1.4.0", before)
+        gen.use_version("1.5.0", before)
 
 
 def test_available_이_판본을_나열한다():
     """1.0.0 은 만들 수 없어도 **목록에는 있어야 한다** — 판본이 존재한다는 사실과
     그것을 다시 만들 수 있다는 것은 다른 문제다."""
-    assert {"1.0.0", "1.1.0", "1.2.0", "1.3.0", "1.4.0"} <= set(kit_defs.available())
+    assert {"1.0.0", "1.1.0", "1.2.0", "1.3.0", "1.4.0", "1.5.0"} <= set(kit_defs.available())
 
 
 # ── 현재 판본은 되풀이해 만들어도 같은가
@@ -175,14 +175,14 @@ def test_현재_판본은_다시_만들어도_같다(tmp_path):
     from core.data_preparation import kit_freeze as kf
 
     gen = importlib.import_module("generate_sample_company_starter_kit")
-    orig = os.path.join(REPO, "starter_kits", "KIT-MFG-NONFERROUS-PROCUREMENT", "1.4.0")
+    orig = os.path.join(REPO, "starter_kits", "KIT-MFG-NONFERROUS-PROCUREMENT", "1.5.0")
     out = tmp_path / "rebuild"
     before = gen.KIT_ROOT
     try:
-        gen.use_version("1.4.0", out)
+        gen.use_version("1.5.0", out)
         gen.build(clean=True)
     finally:
-        gen.use_version("1.4.0", before)
+        gen.use_version("1.5.0", before)
 
     a, b = kf.fingerprint_dir(orig), kf.fingerprint_dir(str(out))
     skip = lambda p: (p.startswith("templates/excel/") or p.startswith("validations/")

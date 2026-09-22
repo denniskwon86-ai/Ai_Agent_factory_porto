@@ -27,7 +27,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from core.data_preparation import kit_freeze  # noqa: E402
 KIT_ID = "KIT-MFG-NONFERROUS-PROCUREMENT"
-KIT_VERSION = "1.4.0"
+KIT_VERSION = "1.5.0"
 KIT_ROOT = ROOT / "starter_kits" / KIT_ID / KIT_VERSION
 COMMON = {"record_id", "tenant_id", "scope_node_id", "data_class", "business_data_kind",
           "data_origin", "quality_status", "certification_status", "as_of_date", "lineage_id"}
@@ -167,6 +167,50 @@ def validate_profile(profile: str, dataset_ids: Sequence[str], v: Validation) ->
                 for m, q in _sold.items()
                 if m in _known and m not in _bp and q > _made.get(m, 0.0)]
         v.check(f"{profile}:만든_것보다_많이_팔지_않는다", not over, "; ".join(over[:3]))
+
+        #: ★★★ **산 것보다 많이 쓰지 않는가** (1.5.0).
+        #:
+        #: ⚠️ 이것도 재고 음수 검사가 못 잡았다 — 기초재고가 크고 조정 이벤트가
+        #:   받쳐서 잔고가 양수로 남는다. 1.4.0 에서 **동정광을 20,176 톤 쓰면서
+        #:   612 톤만 샀다.** 「사는 회사」가 아니라 「쌓아둔 것을 쓰는 회사」였다.
+        #:
+        #: 기초재고를 넣어서 본다 — 첫 달에는 그것으로 쓰는 것이 맞다.
+        _in = defaultdict(float)
+        _out = defaultdict(float)
+        for r in (data.get("INV-02") or []):
+            mid = r.get("material_id")
+            try:
+                q = float(r.get("quantity") or 0)
+            except (TypeError, ValueError):
+                continue
+            mv = str(r.get("movement_id") or "")
+            if mv.startswith("MOV-ISS-"):
+                _out[mid] += -q
+            elif mv.startswith(("MOV-OPEN", "MOV-IN")):
+                _in[mid] += q
+        for r in (data.get("PRC-02") or []):
+            try:
+                _in[r.get("material_id")] += float(r.get("order_quantity") or 0)
+            except (TypeError, ValueError):
+                pass
+        short = [f"{m}: 조달 {_in.get(m, 0):,.0f} < 소비 {q:,.0f}"
+                 for m, q in _out.items() if m in _known and q > _in.get(m, 0.0)]
+        v.check(f"{profile}:산_것보다_많이_쓰지_않는다", not short, "; ".join(short[:3]))
+
+        #: ★★★ **배합대로 원료가 나가는가** (1.5.0).
+        #:
+        #: ⚠️ 1.4.0 까지 배치가 **BOM 첫 줄만** 출고했다. 「수산화리튬 = Black Mass
+        #:   5.20 + 황산 0.12 + 소석회 0.05」인데 Black Mass 만 나갔고, 부재료는
+        #:   **사 놓고 쓰지 않았다**(조합 키트에서 황산 706 톤 구매 · 0 톤 소비).
+        #:   1.3.0 에서 배합비를 현업에 물으면서 정작 그 배합대로 만들지 않고 있었다.
+        _issued = {r.get("material_id") for r in (data.get("INV-02") or [])
+                   if str(r.get("movement_id") or "").startswith("MOV-ISS-")}
+        _need = {str(b.get("input_material_id")) for b in (data.get("MDM-05") or [])
+                 if str(b.get("component_role") or "") == "INPUT"
+                 and str(b.get("input_material_id")) in _known}
+        missing = sorted(_need - _issued)
+        v.check(f"{profile}:배합대로_원료가_나간다", not missing,
+                f"BOM 에 있는데 출고가 없다: {missing[:5]}")
 
     org = data["FND-01"]
     org_ids = {r["node_id"] for r in org}
