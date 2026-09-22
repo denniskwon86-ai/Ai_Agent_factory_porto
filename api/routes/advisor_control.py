@@ -23,6 +23,7 @@ from api.deps import (Principal, assert_identified, assert_project_writable,
                       current_principal, enterprise_context)
 from core.route_authority import guard as _route_authority_guard
 from api.routes.factory_control import _safe_id
+from core import atomic_write
 from core.advisor_blueprint import assemble_blueprint
 from core.advisor_playbook import (load_playbook, list_playbooks, score_readiness,
                                    active_requirement_keys)
@@ -45,8 +46,7 @@ WHAT = "상담 플레이북"
 
 
 def _write_json(path: str, data: dict) -> None:
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
+    atomic_write.replace_json(path, data, indent=2)
 
 
 # ── 권한 헬퍼 ─────────────────────────────────────────────────────────────

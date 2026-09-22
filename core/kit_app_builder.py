@@ -34,6 +34,7 @@ from typing import Any, Dict, List, Mapping, Optional, Sequence
 
 from core import app_manifest
 from core import app_runtime_contract as arc
+from core import atomic_write
 from core import contract_materializer as cm
 from core.data_preparation import readiness
 
@@ -422,8 +423,8 @@ def publish_release(*, release_id: str, app_id: str, name: str, instance_id: str
             for ref in contract["process_context"]["verified_binding_refs"])
     rel_dir = library_paths.release_dir(release_id)
     os.makedirs(rel_dir, exist_ok=True)
-    with open(os.path.join(rel_dir, "release.json"), "w", encoding="utf-8") as fh:
-        json.dump(release, fh, ensure_ascii=False, indent=2)
+    # 정본이다 — 다른 노드가 이걸 읽는다(W03.1). 반쯤 쓰인 상태가 보이면 안 된다.
+    atomic_write.replace_json(os.path.join(rel_dir, "release.json"), release, indent=2)
 
     if owner_dept:
         try:

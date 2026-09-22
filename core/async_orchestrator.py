@@ -6,6 +6,7 @@ from datetime import datetime
 from fastapi.encoders import jsonable_encoder
 from typing import Optional, Dict, Any
 
+from core import atomic_write
 from core.agent_graph import get_runtime_app
 from core.broadcaster import factory_broadcaster
 from core.studio_execution_guard import execution_command, finish_before_cancel
@@ -100,11 +101,13 @@ class AsyncFactoryOrchestrator:
             os.makedirs(workspace_root, exist_ok=True)
             state_path = os.path.join(workspace_root, "latest_state.json")
             data_to_save = jsonable_encoder(state_data)
-            with open(state_path, "w", encoding="utf-8") as f:
-                json.dump(data_to_save, f, ensure_ascii=False, indent=2)
+            # 매 노드마다 덮어쓴다. 중간에 끊기면 이전 판본이 그대로 남아야 한다.
+            atomic_write.replace_json(state_path, data_to_save, indent=2)
         try:
             await finish_before_cancel(asyncio.to_thread(_write))
         except Exception as e:
+            # ⚠️ 여기서 삼킨다 — 저장이 실패해도 실행은 계속된다. 원자 쓰기는 «반쯤 쓰인
+            #   파일»을 막을 뿐, 이 삼킴은 별개 문제다(W03.2 범위 밖, 결과 문서에 관측으로 남김).
             print(f" 상태 백업 실패: {e}")
 
     @execution_command("workspace_root")

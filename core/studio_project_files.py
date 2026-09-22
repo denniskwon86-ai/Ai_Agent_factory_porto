@@ -3,8 +3,8 @@ from contextlib import contextmanager
 import json
 import os
 from pathlib import Path
-import uuid
 
+from core import atomic_write
 from core.advisor_revision_store import RevisionStoreError
 from core.enterprise_context.process_schema import fingerprint
 
@@ -28,18 +28,12 @@ def read_json(path):
 
 
 def write_json(path, value):
-    """같은 폴더 임시 파일 → 교체. 오류를 성공으로 삼키지 않는다."""
-    target = Path(path)
-    temporary = target.with_name(target.name + "." + uuid.uuid4().hex + ".tmp")
-    try:
-        with temporary.open("x", encoding="utf-8") as stream:
-            json.dump(value, stream, ensure_ascii=False, sort_keys=True, indent=2, allow_nan=False)
-            stream.flush()
-            os.fsync(stream.fileno())
-        os.replace(temporary, target)
-    finally:
-        if temporary.exists():
-            temporary.unlink()
+    """같은 폴더 임시 파일 → 교체. 오류를 성공으로 삼키지 않는다.
+
+    구현은 `core/atomic_write.py` 한 곳에 있다(여기서 먼저 쓰던 것을 그리로 옮겼다).
+    직렬화 정책 — `sort_keys`·`allow_nan=False` — 은 이 저장의 것이므로 여기 남는다.
+    """
+    atomic_write.replace_json(path, value, sort_keys=True, indent=2, allow_nan=False)
 
 
 def projection(value):

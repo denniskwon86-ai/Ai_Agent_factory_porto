@@ -57,6 +57,7 @@ from core.async_orchestrator import orchestrator
 # 배포된 최종 결과물 보관소의 경로는 **단일 지점**에서 온다(`core/library_paths.py`).
 #   여기서 `LIBRARY_DIR = "library"` 로 다시 선언하면 게시는 이 경로에 쓰고 사용여부 제어는
 #   다른 경로를 보는 상태가 되어, 실제 프로그램이 "존재하지 않는 프로그램"으로 거부된다.
+from core import atomic_write
 from core import library_paths
 from core import project_visibility as _pv
 from core.paths import workspace_path
@@ -1172,9 +1173,9 @@ async def create_mega_project(req: MegaProjectCreateRequest, p: Principal = Depe
             "template_id": sub_tid,
             "domain_agents": domain_agents
         }
-        with open(os.path.join(sub_path, "latest_state.json"), "w", encoding="utf-8") as f:
-            json.dump(sub_state, f, ensure_ascii=False, indent=2)
-            
+        atomic_write.replace_json(os.path.join(sub_path, "latest_state.json"), sub_state, indent=2)
+
+
         sub_projects_map[domain] = sub_id
         
     # 3. 마스터 프로젝트 상태 초기화
@@ -1186,8 +1187,7 @@ async def create_mega_project(req: MegaProjectCreateRequest, p: Principal = Depe
         "template_id": tid,
         "shared_ledger": {}
     }
-    with open(os.path.join(mega_path, "latest_state.json"), "w", encoding="utf-8") as f:
-        json.dump(master_state, f, ensure_ascii=False, indent=2)
+    atomic_write.replace_json(os.path.join(mega_path, "latest_state.json"), master_state, indent=2)
 
     return {"status": "success", "mega_project_id": mega_project_id,
             "mega_project_name": mega_project_name, "sub_projects": sub_projects_map}
@@ -3318,8 +3318,7 @@ async def create_release(project_id: str,
     assert_project_writable(p, project_id)
     _execution_effect()
     os.makedirs(rel_dir, exist_ok=True)
-    with open(os.path.join(rel_dir, "release.json"), "w", encoding="utf-8") as f:
-        json.dump(release, f, ensure_ascii=False, indent=2)
+    atomic_write.replace_json(os.path.join(rel_dir, "release.json"), release, indent=2)
 
     # ── [Wave F-0] 승인된 계약을 **실제 데이터셋으로** 만든다 ──────────────
     #
@@ -3357,8 +3356,7 @@ async def create_release(project_id: str,
         sealed_contract=release.get("runtime_contract") if _studio_release else None)
     #: ⚠️ 결과를 릴리스 파일에 **다시 쓴다** — 「무엇이 만들어졌는가」를 나중에 물을
     #:   수 있어야 한다. 실패했다면 그 사실도 그대로 남는다.
-    with open(os.path.join(rel_dir, "release.json"), "w", encoding="utf-8") as f:
-        json.dump(release, f, ensure_ascii=False, indent=2)
+    atomic_write.replace_json(os.path.join(rel_dir, "release.json"), release, indent=2)
 
     # [Phase 5] 릴리스 소유권 미러 — `assert_release_readable`(api/deps.py:129)이 이 미러를
     #   읽는다. 안 심으면 소유권 미기록으로 간주돼 전원 통과한다. 프로젝트와 같은 규약으로,
