@@ -12,8 +12,12 @@
 
 ## 이 사업의 얼개
 
-    니켈 MHP + 황산 + 소석회 → 조황산니켈 용액 → 고순도 황산니켈(FG-NISO4)
-                                              배터리급 수산화리튬(FG-LIOH)
+    니켈 MHP    + 황산 + 소석회 → 조황산니켈 용액 → 고순도 황산니켈(FG-NISO4)
+    Black Mass  + 황산 + 소석회 →                  배터리급 수산화리튬(FG-LIOH)
+
+★ **원료가 둘이다.** 황산니켈은 광물 유래 MHP 로, 수산화리튬은 **사 오는 리사이클
+  원료(Black Mass)**로 만든다. 1.2.0 까지 후자가 빠져 있었다 — 리튬을 리튬 없이
+  만들고 있었다.
 
 ## ⚠️ 신규 사업 단계는 여기 담지 않는다
 
@@ -45,6 +49,10 @@ class BatteryMaterials(BusinessDef):
 
     materials = (
         ("RM-MHP", "니켈 MHP", "RAW", "TON", "NICKEL"),
+        #: ★ **리사이클 원료.** 폐배터리를 파쇄한 분말을 **사 와서** 투입하고, 그
+        #:   안에 든 리튬을 공정에서 뽑는다. 폐배터리를 직접 수거·파쇄하는 것은
+        #:   **다른 사업**이다(회사 프로파일 `AFS-VIRTUAL-CIRCULAR-METALS`).
+        ("RM-BLACKMASS", "Black Mass(폐배터리 파쇄분)", "RAW", "TON", "LITHIUM"),
         ("RM-H2SO4", "황산 98%", "RAW", "TON", "SULFURIC_ACID"),
         ("RM-LIME", "소석회", "RAW", "TON", "INDUSTRIAL_CHEMICAL"),
         ("WIP-NISO4", "조황산니켈 용액", "WIP", "TON", ""),
@@ -62,7 +70,18 @@ class BatteryMaterials(BusinessDef):
     recipes = {
         "FG-NISO4": (("RM-MHP", 1.15, "INPUT"), ("RM-H2SO4", 0.32, "INPUT"),
                      ("RM-LIME", 0.08, "INPUT")),
-        "FG-LIOH": (("RM-H2SO4", 0.12, "INPUT"), ("RM-LIME", 0.05, "INPUT")),
+        #: ⚠️ 1.2.0 까지 **리튬이 어디서 오는지가 없었다** — 황산·소석회만 있었고,
+        #:   그것은 부재료다. 「없는 것을 만드는」 데이터였다.
+        #:
+        #: 5.2 톤의 근거: 수산화리튬(LiOH·H2O) 1 톤에 든 Li 가 165 kg(16.5%)이고,
+        #: Black Mass 의 Li 함량 4% · 회수율 80% 로 보면 165/(0.04×0.8) ≈ 5.2 톤이다.
+        #:
+        #: ⚠️⚠️ **이 값은 리튬만 기준이다.** 실제로는 같은 Black Mass 에서 니켈·
+        #:   코발트·망간도 함께 나오므로, 투입량을 리튬 하나에 전부 귀속시키는 것은
+        #:   과하다. **공동 산출을 어떻게 배분하는지는 도메인 검토 대상**이다
+        #:   (`docs/decisions/DOMAIN_REVIEW_BATTERY_2026-09-22.md` 2.1).
+        "FG-LIOH": (("RM-BLACKMASS", 5.20, "INPUT"), ("RM-H2SO4", 0.12, "INPUT"),
+                    ("RM-LIME", 0.05, "INPUT")),
     }
     yields = {"FG-NISO4": 0.94, "FG-LIOH": 0.94}
     byproducts = {}
@@ -77,6 +96,9 @@ class BatteryMaterials(BusinessDef):
     #: ⚠️ MHP 의 Ni 함량은 공개 지식으로 쓴 초안이다 — **도메인 검토 대상**
     grades = {
         "RM-MHP": "NI_40PCT",            # 니켈 MHP — Ni 35~40% 가 통상
+        #: ⚠️ Black Mass 는 보통 Ni+Co+Li 합산 함량으로 거래된다고 알고 있으나,
+        #:   지금은 **리튬 기준**으로만 적었다 — 도메인 검토 대상
+        "RM-BLACKMASS": "LI_4PCT",
         "RM-H2SO4": "TECHNICAL_98PCT",
         "RM-LIME": "INDUSTRIAL",
         "WIP-NISO4": "CRUDE_SOLUTION",   # 조황산니켈 — 아직 등급이 없다

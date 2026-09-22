@@ -36,9 +36,12 @@ data: { kits, starter_kit_versions ← 새로 생김, starter_packages }
 
 | 키트 | 판본 | 행 | 줄 수 있는 회사 |
 |---|---|---|---|
-| `KIT-MFG-SMELTING-NONFERROUS` | 1.2.0 | 123,817 | **고려아연 · 영풍** 처럼 제련만 하는 곳 |
-| `KIT-MFG-BATTERY-MATERIALS` | 1.2.0 | 131,740 | **켐코** 처럼 전지소재만 하는 곳 |
-| `KIT-MFG-NONFERROUS-PROCUREMENT` | 1.0.0~1.2.0 | 127,752 | 둘 다 하는 곳(LS MnM 형) |
+| `KIT-MFG-SMELTING-NONFERROUS` | 1.2.0 · **1.3.0** | 123,817 | **고려아연 · 영풍** 처럼 제련만 하는 곳 |
+| `KIT-MFG-BATTERY-MATERIALS` | 1.2.0 · **1.3.0** | 131,741 | **켐코** 처럼 전지소재만 하는 곳 |
+| `KIT-MFG-NONFERROUS-PROCUREMENT` | 1.0.0~**1.3.0** | 127,789 | 둘 다 하는 곳(LS MnM 형) |
+
+★ **1.3.0 (2026-09-22)** — 전지소재에 원료 `Black Mass` 를 더했다. 1.2.0 까지
+  수산화리튬을 **리튬 없이** 만들고 있었다.
 
 셋 다 **검증 420 PASS · 봉인 · 지문 대조 PASS** 입니다. 지금 선반 상태는
 `python scripts/kit_shelf.py` 가 답합니다.
@@ -47,7 +50,7 @@ data: { kits, starter_kit_versions ← 새로 생김, starter_packages }
 
 | | |
 |---|---|
-| 생성기·검증기 기본 판본 | 1.1.0 → **1.2.0** (`--version`·`--kit` 으로 지정) |
+| 생성기·검증기 기본 판본 | 1.1.0 → **1.3.0** (`--version`·`--kit` 으로 지정) |
 | 검사 수 | 406 → **420** (품목 사업범위 12 · 재고음수 2) |
 | `full_rows` | 155,508 → **127,752** (남의 사업 창고 재고 27,756 행이 빠졌습니다) |
 | manifest | `kit_name`·`sector` 추가 · **`industry_codes` 제거** |

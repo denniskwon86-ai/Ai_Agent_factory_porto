@@ -18,7 +18,7 @@ import business_defs as B  # noqa: E402
 
 SMELT = "smelting_nonferrous"
 BATTERY = "battery_materials"
-KIT = os.path.join(REPO, "starter_kits", "KIT-MFG-NONFERROUS-PROCUREMENT", "1.2.0")
+KIT = os.path.join(REPO, "starter_kits", "KIT-MFG-NONFERROUS-PROCUREMENT", "1.3.0")
 
 
 # ── 로더
@@ -99,10 +99,10 @@ def _generate(tmp_path, businesses):
     out = tmp_path / ("-".join(businesses) or "none")
     before = gen.KIT_ROOT
     try:
-        gen.use_version("1.2.0", out)
+        gen.use_version("1.3.0", out)
         gen.build(clean=True, businesses=businesses)
     finally:
-        gen.use_version("1.2.0", before)
+        gen.use_version("1.3.0", before)
     return str(out)
 
 
@@ -111,8 +111,8 @@ def test_둘_다_넣으면_정본과_같다(tmp_path):
     """★★★ **정본 키트가 정말 이 사업 조합에서 나오는가.**
 
     ⚠️ 분리(2026-09-17)에 손실이 없다는 증거는 **1.1.0 의 지문**이 갖고 있다. 그때는
-      이 시험이 1.1.0 과 대조했고 한 글자도 다르지 않았다. 지금은 생성기가 1.2.0 을
-      만들므로 대조 상대가 1.2.0 이다.
+      이 시험이 1.1.0 과 대조했고 한 글자도 다르지 않았다. 지금은 생성기가 1.3.0 을
+      만들므로 대조 상대가 1.3.0 이다.
 
     생성기가 만들지 않는 것(Excel·검증보고서)과 생성 시각에 따라 달라지는 것
     (`manifest.json`)은 비교에서 뺀다.

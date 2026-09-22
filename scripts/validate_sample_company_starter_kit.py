@@ -24,7 +24,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from core.data_preparation import kit_freeze  # noqa: E402
 KIT_ID = "KIT-MFG-NONFERROUS-PROCUREMENT"
-KIT_VERSION = "1.2.0"
+KIT_VERSION = "1.3.0"
 KIT_ROOT = ROOT / "starter_kits" / KIT_ID / KIT_VERSION
 COMMON = {"record_id", "tenant_id", "scope_node_id", "data_class", "business_data_kind",
           "data_origin", "quality_status", "certification_status", "as_of_date", "lineage_id"}

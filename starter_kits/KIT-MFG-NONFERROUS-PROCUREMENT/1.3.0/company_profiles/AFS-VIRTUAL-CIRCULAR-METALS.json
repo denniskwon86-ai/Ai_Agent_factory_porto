@@ -1,0 +1,41 @@
+{
+  "data_class": "SYNTHETIC",
+  "data_origin": "SYNTHETIC",
+  "entity_mode": "VIRTUAL",
+  "certification_status": "CERTIFIED_FOR_DEMO",
+  "not_for_management_decision": true,
+  "currency": "KRW",
+  "timezone": "Asia/Seoul",
+  "company_profile_id": "AFS-VIRTUAL-CIRCULAR-METALS",
+  "company_name": "AFS 순환금속 리사이클링 신사업안",
+  "profile_role": "VIRTUAL_NEW_BUSINESS",
+  "source_profile_id": "AFS-DEMO-MATERIALS-GROUP",
+  "industry_code": "C3832",
+  "industry_name": "금속 폐기물 재생·순환소재",
+  "purpose": "폐배터리·스크랩 회수와 구리·니켈·귀금속 재생사업의 수익성 검증",
+  "valid_until": "2032-12-31",
+  "organization_blueprint": [
+    "순환소재법인",
+    "원료회수사업부",
+    "전처리공장",
+    "습식제련공장"
+  ],
+  "products": [
+    "재생 구리",
+    "재생 니켈염",
+    "회수 귀금속",
+    "블랙매스 중간재"
+  ],
+  "recommended_apps": [
+    "APP-01",
+    "APP-03",
+    "APP-05"
+  ],
+  "default_assumptions": {
+    "feedstock_ton_per_year": 120000,
+    "metal_recovery_rate_pct": 92.0,
+    "scrap_price_to_benchmark_pct": 85.0,
+    "capex_krw_billion": 240.0,
+    "carbon_credit_krw_per_ton": 18000
+  }
+}
