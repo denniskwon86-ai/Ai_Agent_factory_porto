@@ -151,10 +151,13 @@ def test_unit_initial_state_write_failure_leaves_incomplete_metadata_and_no_ledg
     approved = _decide(env, _save(env))
     write = module.write_json
 
-    def fail_state(path, value):
+    def fail_state(path, value, **kwargs):
+        #: ⚠️ [10.2-B] 제품이 `expected_digest` 를 넘기게 됐다. 대역은 **인자를 그대로
+        #:   전달**하고, 실패 지점·의미는 그대로 둔다 — 대역이 안 맞는다고 제품을
+        #:   되돌리지 않는다.
         if Path(path).name == "latest_state.json":
             raise OSError("unit initial state write failure")
-        return write(path, value)
+        return write(path, value, **kwargs)
 
     monkeypatch.setattr(module, "write_json", fail_state)
     _error(lambda: _bootstrap(env, approved), "STUDIO_SETUP_IO_FAILED", 503)
@@ -172,10 +175,11 @@ def test_unit_ledger_ack_then_ready_state_write_failure_recovers_without_new_eve
     approved = _decide(env, _save(env))
     write = module.write_json
 
-    def fail_ready_state(path, value):
+    def fail_ready_state(path, value, **kwargs):
+        #: ⚠️ [10.2-B] 위와 같다 — 인자를 전달하고 **같은 READY 지점에서** 실패한다.
         if Path(path).name == "latest_state.json" and value.get("setup_status") == "READY":
             raise OSError("unit failure after committed ledger ack")
-        return write(path, value)
+        return write(path, value, **kwargs)
 
     monkeypatch.setattr(module, "write_json", fail_ready_state)
     _error(lambda: _bootstrap(env, approved), "STUDIO_SETUP_IO_FAILED", 503)

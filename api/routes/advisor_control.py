@@ -46,7 +46,15 @@ WHAT = "상담 플레이북"
 
 
 def _write_json(path: str, data: dict) -> None:
-    atomic_write.replace_json(path, data, indent=2)
+    """★★ [CR 판단②] 이 함수는 **`latest_state.json` 정본을 «만든다»**(§495).
+
+    앞서 나는 표에 「상담 플레이북, 정본 상태가 아니다」라고 적었는데 **틀렸다** —
+    `workspace_path(project_id)/latest_state.json` 을 쓴다. 같은 파일을
+    `async_orchestrator._save_latest_state` 와 `studio_bootstrap` 도 쓴다.
+
+    생성이므로 **배타 생성**으로 닫는다. 앞 줄의 `FileExistsError` 검사(§486)와 이
+    쓰기 사이가 열려 있었고, 그 창으로 남의 프로젝트 정본을 덮을 수 있었다."""
+    atomic_write.replace_json_if_unchanged(path, data, expected_digest="", indent=2)
 
 
 # ── 권한 헬퍼 ─────────────────────────────────────────────────────────────

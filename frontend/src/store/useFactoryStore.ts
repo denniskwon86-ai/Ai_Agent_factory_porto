@@ -71,6 +71,9 @@ interface FactoryStore {
   isWbsError: boolean;
   wbsErrorCount: number;
   completed_agents: string[];
+  /** ★ [CR-W03-2C] 마지막 «정본 저장» 실패. 계산 완료와 저장 완료는 다른 사건이다.
+   *  값이 있으면 화면이 보고 있는 판본이 서버 정본이 아닐 수 있다는 뜻이다. */
+  lastStateSaveError: { node: string; error: string; stale: boolean } | null;
   currentActivity: any | null;
   // 빌드 자가복구(3회) 소진 등 스프린트 최종 실패 정보 - ControlPanel 실패 배너/재시도 UI 용
   lastSprintFailure: { taskId: string; error: string; detail?: string } | null;
@@ -290,6 +293,7 @@ export const useFactoryStore = create<FactoryStore>()((set, get) => ({
   isWbsError: false,
   wbsErrorCount: 0,
   completed_agents: [],
+  lastStateSaveError: null,
   currentActivity: null,
   lastSprintFailure: null,
   isSuspendedQuota: false,
@@ -334,7 +338,10 @@ export const useFactoryStore = create<FactoryStore>()((set, get) => ({
     set({
       currentProjectId: id, state: null, wbsData: null, logs: [],
       isWbsError: false, wbsErrorCount: 0, isSuspendedQuota: false, suspendedTaskId: null,
-      completed_agents: [], currentActivity: null, lastSprintFailure: null, supervisorFeed: [], healingRetryCount: 0, activeSprintId: null, hotlTaskId: null, currentTemplateData: null
+      completed_agents: [], currentActivity: null, lastSprintFailure: null, supervisorFeed: [], healingRetryCount: 0, activeSprintId: null, hotlTaskId: null, currentTemplateData: null,
+      // ⚠️ [10.2-C] 프로젝트를 바꾸면 앞 프로젝트의 저장 실패 안내도 내린다 —
+      //   남겨 두면 엉뚱한 프로젝트의 경고로 읽힌다.
+      lastStateSaveError: null
     });
     if (id) {
       get().fetchWBS();
@@ -1043,7 +1050,10 @@ export const useFactoryStore = create<FactoryStore>()((set, get) => ({
       if (!isCurrent()) return;
       if (result.status === "success" && result.data) {
         // 머지(...prev.state) 금지 — 전체 교체. 빈 누적 필드가 이전 프로젝트 값으로 남는 stale 누수 차단.
-        set({ state: { ...result.data } as ProjectState });
+        // ★★ [10.2-C] **재조회가 성공했으면 저장 실패 안내를 해제한다.**
+        //   서버가 준 것이 지금 정본이므로 화면은 더 이상 «미확정» 이 아니다.
+        //   안내를 걸기만 하고 내리지 않으면 그 안내는 곧 소음이 된다.
+        set({ state: { ...result.data } as ProjectState, lastStateSaveError: null });
         const execution = result.data.studio_execution_state;
         if (execution && execution.task_id === result.data.current_sprint_task_id && typeof execution.running === 'boolean') {
           if (execution.running) set({ activeSprintId: execution.task_id });
@@ -1185,16 +1195,27 @@ export const useFactoryStore = create<FactoryStore>()((set, get) => ({
           //
           // ⚠️ `state_version` 으로 중복 조회를 거른다 — 노드가 끝날 때마다 전체 상태를
           //   다시 받으면 오히려 느려진다. 판본이 같으면 이미 가진 것이다.
+          // ★★ [CR-W03-2C] **저장이 실패했으면 그 판본을 «확인된 최신» 으로 적지 않는다.**
+          //   예전에는 `state_saved` 를 보지 않고 판본을 기록했다. 그러면 서버 정본은
+          //   옛 판본인데 화면은 새 판본을 가졌다고 믿고, 같은 번호가 다시 와도
+          //   «이미 가진 것» 이라며 재조회하지 않는다 — 옛 상태가 고정된다.
+          const saveOk = data.payload?.state_saved !== false;
           const version = String(data.payload?.state_version || '');
-          if (version && version !== _lastStateVersion) {
-            _lastStateVersion = version;
+          if (version && (version !== _lastStateVersion || !saveOk)) {
+            if (saveOk) _lastStateVersion = version;
             // ⚠️ 여기서 await 하지 않는다 — 이 함수는 이벤트 축소(reducer)이고, 안에서
             //   네트워크를 기다리면 뒤따르는 이벤트 처리가 밀린다.
             void useFactoryStore.getState().fetchLatestState();
           }
           return {
             logs,
-            completed_agents: [...prev.completed_agents, data.payload.node]
+            // 계산은 끝났다 — 그건 그대로 센다. 저장 실패는 «따로» 남긴다.
+            completed_agents: [...prev.completed_agents, data.payload.node],
+            lastStateSaveError: saveOk ? null : {
+              node: String(data.payload?.node || ''),
+              error: String(data.payload?.state_save_error || ''),
+              stale: Boolean(data.payload?.state_save_stale),
+            },
           };
         }
         if (data.type === 'AGENT_ACTIVITY') {
@@ -1228,8 +1249,14 @@ export const useFactoryStore = create<FactoryStore>()((set, get) => ({
           };
         }
         if (data.type === 'QUOTA_EXHAUSTED') {
+          // ★★ [10.2-C] 중단 상태를 정본에 못 적었으면 «보류됨» 만 보여 주고
+          //   끝내지 않는다 — 재개를 판단할 근거가 서버에 없는 상태이기 때문이다.
+          const quotaSaved = data.payload?.state_saved !== false;
           return {
             logs,
+            lastStateSaveError: quotaSaved ? prev.lastStateSaveError : {
+              node: 'QUOTA_EXHAUSTED', error: '중단 상태를 저장하지 못했습니다', stale: false,
+            },
             isSuspendedQuota: true,
             suspendedTaskId: data.payload?.task_id || prev.suspendedTaskId,
             activeSprintId: null,
@@ -1237,12 +1264,25 @@ export const useFactoryStore = create<FactoryStore>()((set, get) => ({
           };
         }
         if (data.type === 'SPRINT_COMPLETED') {
+          // ★★★ [10.2-C] **계산 완료와 저장 미확정을 가른다.**
+          //   마지막 저장이 실패한 채 완료 표시를 하면 화면은 「끝났고 저장도
+          //   됐다」로 읽고, 새로고침하면 옛 판본이 온다. 실패면 **다시 물어본다.**
+          const doneSaved = data.payload?.state_saved !== false;
+          if (!doneSaved) {
+            _lastStateVersion = '';            // 재조회를 막던 빗장을 푸다
+            void useFactoryStore.getState().fetchLatestState();
+          }
           return {
             logs,
             state: { ...(prev.state || {}), current_sprint_task_id: "" } as ProjectState,
             activeSprintId: null,
             hotlTaskId: null,
-            currentActivity: null
+            currentActivity: null,
+            lastStateSaveError: doneSaved ? prev.lastStateSaveError : {
+              node: 'SPRINT_COMPLETED',
+              error: String(data.payload?.state_save_error || ''),
+              stale: false,
+            },
           };
         }
         if (data.type === 'SPRINT_PAUSED') {

@@ -76,6 +76,14 @@ def _checked_target(path, *, root=None) -> Path:
       꼭대기까지 올라간다 — 모르는 것을 안전으로 바꾸지 않는다.
     """
     target = Path(os.path.abspath(path))
+    #: ★ [CR-W03-2B] `root` 는 **검사 범위를 좁히는 데 쓰지 않는다.** 여기서는 「대상이
+    #:   그 뿌리 안에 있는가」만 본다(담김 확인). 링크 검사는 아래에서 언제나 전체
+    #:   조상을 훑는다 — 뿌리 위에 걸린 junction 이 숨지 않게.
+    if root is not None:
+        base = Path(os.path.abspath(root))
+        if target != base and base not in target.parents:
+            raise ValueError(
+                f"명시한 저장 뿌리 안에 있지 않습니다: {target} (뿌리: {base})")
     for entry in _components_to_check(target, root):
         if not _is_link(entry):
             continue
@@ -105,21 +113,19 @@ def _is_formal_mount(entry: Path) -> bool:
 
 
 def _components_to_check(target: Path, root=None):
-    """뿌리→대상 사이의 **모든** 구성요소. 뿌리 자체도 검사 대상이다.
+    """대상에서 **파일시스템 꼭대기까지** 모든 구성요소. 예외 없다.
 
-    ⚠️ 뿌리를 믿지 않는다. 뿌리가 링크면 그 아래 전부가 남의 저장소다."""
-    chain = [target] + list(target.parents)
-    if root is None:
-        return chain                      # 모르면 꼭대기까지
-    base = Path(os.path.abspath(root))
-    #: ⚠️ 뿌리 밖이라고 **거절하지 않는다.** 이 모듈은 경로 봉쇄의 권위가 아니다(호출부에
-    #:   각자 `_safe_path` 류가 있다). 뿌리의 쓰임은 「검사를 어디서 멈추는가」 하나다.
-    #:   그래서 뿌리와 무관한 경로면 **더 넓게** 본다 — 모르는 것을 안전으로 바꾸지 않는다.
-    #:   (뿌리 밖을 거절하게 만들었더니 임의 작업공간을 쓰는 정상 호출자가 막혔다.)
-    if base != target and base not in target.parents:
-        return chain
-    #: 뿌리보다 위는 배포의 몫이다 — 뿌리 «포함» 해서 아래만 본다.
-    return [p for p in chain if p == base or base in p.parents]
+    ⚠️⚠️ [CR-W03-2B] 앞 판은 `root` 가 조상이면 **그 위를 잘라냈다.** 「뿌리보다 위는
+      배포의 몫」이라는 주석을 달았는데, 그 주석이 곧 구멍이었다 — 실측 반례:
+      `junction/projects/proj/latest_state.json` 에 `root=junction/projects` 를 넘기면
+      **예외 없이 링크 너머에 저장**됐다. 제품 호출부가 바로 그 모양으로 부른다.
+      주석으로 생략한 검사는 검사가 아니다.
+
+    ★ 그래서 `root` 는 **검사 범위를 좁히지 않는다.** 아래 `_checked_target` 에서
+      «담김(containment)» 확인에만 쓰고, 링크 검사는 언제나 전체 조상을 본다.
+      정상 배포의 상위 링크는 `_is_formal_mount` 로만 면제된다 — 그쪽이 「의도한
+      구성」과 「임의 junction」을 가르는 자리다."""
+    return [target] + list(target.parents)
 
 
 def ensure_directory(path, *, root=None) -> Path:
@@ -238,6 +244,14 @@ def digest_of(path) -> str:
 #: 동시 저장이 그냥 실패한다.
 _LOCK_DELAYS = (0.01, 0.02, 0.04, 0.08, 0.16)
 
+#: 잠금 파일의 꼬리. **공개한다** — 정본 옆에 남으므로 목록을 세는 쪽이 가려내야 한다.
+LOCK_SUFFIX = ".lck"
+
+
+def is_lock_file(name) -> bool:
+    """이 이름이 잠금 파일인가. 디렉터리를 «내용» 으로 세는 자리가 쓴다."""
+    return str(getattr(name, "name", name)).endswith(LOCK_SUFFIX)
+
 
 @contextmanager
 def _target_lock(target: Path):
@@ -257,7 +271,13 @@ def _target_lock(target: Path):
       잠금을 지원하지 않는 프로토콜이면 성립하지 않는다 — 실제 공유 마운트에서 다시
       확인해야 한다(이번 증거는 단일 PC 다).
     """
-    name = "." + hashlib.sha256(target.name.encode("utf-8")).hexdigest()[:6] + ".lck"
+    #: ⚠️⚠️ **잠금 파일은 지우지 않는다.** 놓으면서 지우면 그 사이 다른 프로세스가 같은
+    #:   이름으로 새로 열어 잡은 잠금이 «다른 파일» 을 가리키게 되고, 두 writer 가 서로를
+    #:   못 본다 — 상호배제가 조용히 사라진다. `contract_decision._workspace_lock` 도
+    #:   같은 이유로 남긴다.
+    #: ★ 그래서 정본 디렉터리에 `.<hex6>.lck` 이 **남는다.** 목록을 세는 소비자는
+    #:   `LOCK_SUFFIX` 로 가려내야 한다(디렉터리를 내용으로만 보는 자리가 있다).
+    name = "." + hashlib.sha256(target.name.encode("utf-8")).hexdigest()[:6] + LOCK_SUFFIX
     lock_path = target.with_name(name)
     descriptor = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o600)
     acquired = False

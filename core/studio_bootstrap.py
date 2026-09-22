@@ -5,7 +5,9 @@ from pathlib import Path
 from core.advisor_revision_store import RevisionStoreError
 from core.enterprise_context.process_schema import ProcessError
 from core.studio_drafts import StudioDraftService, context_key
-from core.studio_project_files import STUDIO_FIELDS, operation_lock, projection, read_json, verify_files, write_json
+from core.studio_project_files import (STUDIO_FIELDS, operation_lock, projection,
+                                      read_json, read_json_with_digest, verify_files,
+                                      write_json)
 
 
 def fixed_project_fields(approved, operation):
@@ -124,7 +126,18 @@ class StudioBootstrapService:
                              "owner_dept_id": "", "runtime_contract_profile": "v1",
                              "initial_idea": json.dumps(blueprint, ensure_ascii=False, sort_keys=True),
                              "workspace_root": str(workspace)}
-                    write_json(workspace / "latest_state.json", state)
+                    #: ★★★ [10.2-B] 이 파일은 **공유 정본**이다 —
+                    #:   `async_orchestrator._save_latest_state` · `advisor_control` 도 쓴다.
+                    #:   `operation_lock` 은 잠금 파일이 노드 로컬이라 **다른 노드의 writer 를
+                    #:   막지 못한다.** 그래서 저장 수준의 보장은 조건부 저장으로 세운다 —
+                    #:   잠금 하나에 두 가지 다른 일을 시키지 않는다.
+                    #:
+                    #: ⚠️ 기준은 **이 조작이 읽은 판본**이다. 단계가 재시도되면 앞선 부분
+                    #:   시도가 남긴 판본을 읽어 이어간다(이 조작은 `operation_lock` 아래에서
+                    #:   자기 작업공간을 소유한다). 남이 그 사이에 바꿨으면 거절된다.
+                    state_path = workspace / "latest_state.json"
+                    _, state_digest = read_json_with_digest(state_path)
+                    write_json(state_path, state, expected_digest=state_digest)
                     operation = self._advance(operation, "CONTEXT_WRITTEN", **verify_files(workspace, expected))
                 if operation["stage"] == "CONTEXT_WRITTEN":
                     verify_files(workspace, expected)
@@ -139,9 +152,15 @@ class StudioBootstrapService:
                         raise RevisionStoreError("ADVISOR_LEDGER_ACK_REQUIRED", "원장 접수를 확인하지 못했습니다.", 503)
                     for name in ("project_meta.json", "latest_state.json"):
                         path = workspace / name
-                        value = read_json(path)
+                        #: ★★ [10.2-B] 읽기-수정-쓰기의 기준은 **그 읽기** 다.
+                        #:   따로 `digest_of` 를 부르면 그 사이가 창이다.
+                        value, base_digest = read_json_with_digest(path)
+                        if value is None:
+                            raise RevisionStoreError(
+                                "STUDIO_PROJECT_UNREADABLE",
+                                "프로젝트 저장 상태를 확인할 수 없습니다.", 503)
                         value["setup_status"] = "READY"
-                        write_json(path, value)
+                        write_json(path, value, expected_digest=base_digest)
                     verify_files(workspace, expected, ready=True)
                     operation = self._advance(operation, "COMPLETED", ledger_event_id=event["event_id"], ledger_acknowledged=True)
                 return operation

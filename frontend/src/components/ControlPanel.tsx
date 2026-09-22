@@ -170,6 +170,10 @@ export default function ControlPanel() {
   const clearSuspendedQuota = useFactoryStore((s) => s.clearSuspendedQuota);
   const currentTemplateData = useFactoryStore((s) => s.currentTemplateData);
   const lastSprintFailure = useFactoryStore((s) => s.lastSprintFailure);
+  // ★★ [10.2-C] 계산은 끝났는데 **정본 저장이 미확정**인 경우. 이것을 안 보여 주면
+  //   화면은 「끝났다」로 읽히고, 새로고침하면 옛 상태가 온다 — 그 차이를 사람이
+  //   「내가 뭐가 잘못했나」로 읽는다. 재조회가 성공하면 store 가 해제한다.
+  const lastStateSaveError = useFactoryStore((s) => s.lastStateSaveError);
   const clearSprintFailure = useFactoryStore((s) => s.clearSprintFailure);
   const fileInputRef = React.useRef<HTMLInputElement>(null);
 
@@ -237,6 +241,13 @@ export default function ControlPanel() {
   } else if (errorLike && !activeSprintId) {
     // 할당량 소진/LLM 오류 등은 needs_revision 도 세팅되지만, '대기'가 아니라 '오류 정지'로 명확히 구분
     pipeStatus = { key: "error", icon: "🚨", label: "오류로 정지 — 재가동이 필요합니다", cls: "bg-red-900/40 border-red-600 text-red-200", detail: supFb };
+  } else if (lastStateSaveError) {
+    pipeStatus = {
+      key: "state-unsaved", icon: "⚠️",
+      label: "계산은 끝났지만 **저장이 확인되지 않았습니다** — 화면이 최신이 아닐 수 있습니다",
+      cls: "bg-amber-900/40 border-amber-500 text-amber-200",
+      detail: `${lastStateSaveError.node}: ${lastStateSaveError.error}`.slice(0, 400) || undefined,
+    };
   } else if (lastSprintFailure && !activeSprintId) {
     // 빌드 자가복구(3회) 소진 등 스프린트 최종 실패 - '완료' 위장 없이 실패로 표시 + 재시도 선택지 제공
     pipeStatus = {

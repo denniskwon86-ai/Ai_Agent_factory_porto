@@ -358,6 +358,17 @@ def publish_release(*, release_id: str, app_id: str, name: str, instance_id: str
     import os
 
     from core import library_paths
+    from core import atomic_write as _aw
+
+    #: ★★★ [10.2-B] 기준 판본을 **게시가 시작되는 여기서** 잡는다.
+    #:   ⚠️ 쓰기 «직전» 에 `digest_of` 를 부르면 그건 조건이 아니라 형식이다 — 계약을
+    #:     읽고 이 payload 를 만드는 동안 남이 바꿔도 그대로 덮는다. 그 창을 닫으려면
+    #:     기준이 **payload 가 만들어지기 시작한 시점**의 것이어야 한다.
+    #:   ★ `release_id_for` 가 결정론적이라 재게시는 **같은 자리를 교체**하는 일이고,
+    #:     그 교체가 «의도된 것» 인지는 시작 시점의 판본으로만 말할 수 있다.
+    _release_path_at_entry = os.path.join(library_paths.release_dir(release_id),
+                                          "release.json")
+    _baseline_digest = _aw.digest_of(_release_path_at_entry)
 
     owner_dept = _owner_dept_of(scope_node_id)
     release = {
@@ -426,8 +437,14 @@ def publish_release(*, release_id: str, app_id: str, name: str, instance_id: str
     #:   상위 아래에 디렉터리를 만들어 놓고 「대상은 링크가 아니다」로 통과한다.
     atomic_write.ensure_directory(rel_dir, root=library_paths.library_dir())
     # 정본이다 — 다른 노드가 이걸 읽는다(W03.1). 반쯤 쓰인 상태가 보이면 안 된다.
-    atomic_write.replace_json(os.path.join(rel_dir, "release.json"), release, indent=2,
-                              root=library_paths.library_dir())
+    #: ★★ [CR 판단②] 여기는 **갱신**이다. `release_id_for` 가 결정론적이라(§307)
+    #:   같은 인스턴스·같은 앱을 다시 만들면 **같은 파일**을 쓴다 — 앞서 「릴리스 id
+    #:   마다 새 디렉터리라 경쟁 없음」이라고 적은 것은 틀렸다. 읽은 판본을 기준으로
+    #:   조건부 저장한다: 그 사이 남이 바꿨으면 덮지 않고 거절한다.
+    release_path = os.path.join(rel_dir, "release.json")
+    atomic_write.replace_json_if_unchanged(
+        release_path, release, expected_digest=_baseline_digest,
+        indent=2, root=library_paths.library_dir())
 
     if owner_dept:
         try:

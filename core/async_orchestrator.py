@@ -1,4 +1,5 @@
 import asyncio
+import hashlib
 import os
 import shutil
 import json
@@ -8,6 +9,30 @@ from typing import Optional, Dict, Any
 
 from core import atomic_write
 from core.agent_graph import get_runtime_app
+
+
+#: 「인자를 주지 않았다」와 「None 을 주었다」를 가른다 — 재개는 전자다.
+_UNSET = object()
+
+
+def _declared_root(workspace_root: str) -> str:
+    """이 작업공간이 속한다고 **선언하는** 저장 뿌리.
+
+    표준 `projects/` 아래면 그것, 아니면 작업공간 자체다. 후자는 「검증된 다른 뿌리」로
+    취급한다는 뜻이고, 그래도 링크 검사는 전체 조상을 본다."""
+    from core.paths import PROJECTS_DIR
+
+    base = os.path.abspath(PROJECTS_DIR)
+    target = os.path.abspath(workspace_root)
+    return PROJECTS_DIR if (target == base or target.startswith(base + os.sep)) else workspace_root
+
+
+class StateNotClaimedError(RuntimeError):
+    """★ [CR-W03-2A] 이 실행이 읽은 적 없는 정본을 덮으려 했다.
+
+    ⚠️ 저장 실패로 다루되 **재시도로 풀리지 않는다.** `claim_project_state()` 로
+      명시 인수하거나, 새로 읽어 만든 payload 여야 한다."""
+
 from core.broadcaster import factory_broadcaster
 from core.studio_execution_guard import execution_command, finish_before_cancel
 
@@ -87,9 +112,12 @@ class AsyncFactoryOrchestrator:
         #:   단일 필드는 화면 호환을 위해 남기되, 판정은 이 표로 한다.
         self.state_save_failures: Dict[str, Dict[str, Any]] = {}
         #: 조건부 저장의 기준 판본(프로젝트별). **이 writer 가 마지막으로 본 값**이다.
-        #: ⚠️ 충돌로 거절되면 지운다 — 다음 저장이 현재 판본을 다시 읽어 이어받는다.
-        #:   낡은 기준을 그대로 들고 재시도하면 영원히 거절된다.
+        #: ⚠️⚠️ [CR-W03-2A] 충돌이어도 **지우지 않는다.** 지웠더니 다음 호출이 현재
+        #:   digest 를 새로 읽어 같은 낡은 payload 를 승인했다 — 거절이 지연된
+        #:   덮어쓰기가 됐다. 다시 쓰려면 `claim_project_state()` 로 명시 인수한다.
         self._state_baselines: Dict[str, str] = {}
+        #: 충돌·미인수로 막힌 프로젝트. 인수를 다시 하기 전까지 저장이 열리지 않는다.
+        self._state_conflicts: set = set()
 
     def _forget_task(self, key, task):
         """이전 실행의 완료 콜백이 같은 ID의 새 실행을 지우지 않는다."""
@@ -107,31 +135,99 @@ class AsyncFactoryOrchestrator:
         return any(not task.done() and (self.task_projects.get(key) == project_id
                    or key.startswith(project_id + "__")) for key, task in self.active_tasks.items())
 
-    async def _save_latest_state(self, state_data: Any, workspace_root: str):
+    def claim_project_state(self, workspace_root: str, *, execution_key: str,
+                            started_from: Any = _UNSET) -> Dict[str, Any]:
+        """★★★ [CR-W03-2A/10.2-A] **같은 바이트에서 내용과 digest 를 얻어** 인수한다.
+
+        ⚠️⚠️ 앞 판은 **digest 만** 읽어 저장했다. 그래서 「인수」라는 이름만 붙었을 뿐
+          실제로는 **현재 파일이 무엇이든 덮어쓸 권한**을 준 것이었다 — 남이 확정한 값을
+          낡은 입력에서 나온 결과가 덮고 `state_saved=True` 가 됐다. 실행 권한을 확인한
+          자리에서 불렀다는 사실은 **데이터 판본의 최신성 증명이 아니다.**
+
+        그래서 두 경우를 가른다.
+
+            시작   `started_from` 이 있다 — 이 실행은 «무엇에서 나왔는지» 를 안다.
+                   파일이 그것과 다르면 이 실행의 결과는 **낡은 바탕에서 나온 것**이다.
+                   인수하지 않는다 → 이후 저장이 거절된다.
+            재개   `started_from` 이 없다 — 엔진 checkpoint 에서 이어받으므로 경쟁하는
+                   다른 판본에서 파생된 것이 아니다. 현재 판본을 기준으로 삼는다.
+
+        ⚠️ 기준은 **실행 단위**로 잡는다(`execution_key`). 프로젝트 전역 하나로 두면
+          별도 실행의 낡은 결과가 남의 기준을 빌려 승인된다."""
+        state_path = os.path.join(workspace_root, "latest_state.json")
+        raw = b""
+        try:
+            with open(state_path, "rb") as stream:
+                raw = stream.read()
+        except FileNotFoundError:
+            pass
+        #: ★ 내용과 지문을 **같은 바이트에서** 얻는다 — 따로 읽으면 그 사이가 창이다.
+        digest = hashlib.sha256(raw).hexdigest() if raw else ""
+        content = None
+        if raw:
+            try:
+                content = json.loads(raw.decode("utf-8"))
+            except ValueError:
+                content = None
+
+        if started_from is not _UNSET and raw:
+            if content != jsonable_encoder(started_from):
+                self._state_conflicts.add(execution_key)
+                self._state_baselines.pop(execution_key, None)
+                return {"execution_key": execution_key, "claimed": False,
+                        "reason": "stale-input", "existing": True}
+
+        self._state_baselines[execution_key] = digest
+        self._state_conflicts.discard(execution_key)
+        return {"execution_key": execution_key, "claimed": True,
+                "existing": bool(raw), "content": content}
+
+    async def _save_latest_state(self, state_data: Any, workspace_root: str,
+                                 *, execution_key: str = ""):
         # 전체 상태(생성 코드 포함 - 수 MB 가능)의 json 직렬화+쓰기는 동기 작업이라
         # 매 노드마다 이벤트 루프(SSE/전체 API)를 멈추게 하므로 스레드로 내린다
         def _write():
             #: ★★ [2026-09-22] `makedirs` 도 **링크 경계 안**에서 한다. 검사 밖에 있으면
             #:   그 자체가 우회로다 — 연결된 상위 아래에 디렉터리를 만들어 놓고 나서
             #:   「대상은 링크가 아니다」로 통과한다.
-            from core.paths import PROJECTS_DIR
-            atomic_write.ensure_directory(workspace_root, root=PROJECTS_DIR)
+            #: ★ [CR-W03-2B] 뿌리는 **담김 확인용**이다. 작업공간이 표준 `projects/`
+            #:   아래면 그것을 뿌리로 선언하고, 아니면 **그 작업공간 자체를 «명시적으로
+            #:   검증된 다른 뿌리»** 로 선언한다(독립 작업공간). 어느 쪽이든 링크 검사는
+            #:   전체 조상을 훑으므로 경계가 약해지지 않는다.
+            declared_root = _declared_root(workspace_root)
+            atomic_write.ensure_directory(workspace_root, root=declared_root)
             state_path = os.path.join(workspace_root, "latest_state.json")
             data_to_save = jsonable_encoder(state_data)
-            #: ★★★ **조건부 저장.** 기준은 「이 writer 가 마지막으로 본 판본」이다 —
-            #:   쓰기 직전에 읽어 기준으로 삼으면 그건 조건이 아니라 형식이고, 늦게 온
-            #:   쓰기가 여전히 이긴다. 다른 노드가 그 사이에 올렸으면 여기서 거절된다.
+            #: ★★★ **조건부 저장.** 기준은 「이 writer 가 마지막으로 본 판본」이다.
             #:
-            #: ⚠️ 기준을 모를 때(프로세스 재시작 뒤 이어받기)는 **현재 판본을 한 번
-            #:   받아들인다.** 그 한 번은 경쟁을 못 잡는다 — 재시작 직후 동시 쓰기는
-            #:   여전히 뒤엣것이 이긴다. 그 한계를 숨기지 않고 적어 둔다.
-            baseline = self._state_baselines.get(project_id)
+            #: ⚠️⚠️ [CR-W03-2A] 앞 판은 기준을 모르면 **현재 파일 digest 를 읽어
+            #:   받아들였다.** 그래서 충돌로 거절된 뒤 **같은 낡은 payload 를 다시
+            #:   보내면 그때는 성공**했고, 남의 새 판본이 사라졌다. 거절이 «지연된
+            #:   덮어쓰기» 로 바뀐 것이다. 새 인스턴스의 첫 저장도 같았다.
+            #:   → **digest 만 새로 읽어 재시도하는 경로를 없앴다.**
+            #:
+            #: ★ 기준이 없으면 쓰지 않는다. 기존 파일이 있는데 기준이 없다는 것은
+            #:   **이 writer 가 그 판본을 읽은 적이 없다**는 뜻이고, 그러면 남의 것을
+            #:   덮는 일이다. 인수는 `claim_project_state()` 로 **명시**해야 한다
+            #:   (새 파일 생성과 기존 판본 인수를 가른다).
+            #: ★ 기준은 **이 실행의 것**이다. 프로젝트 전역 하나를 쓰면 남의 실행이
+            #:   세운 기준으로 내 낡은 결과가 승인된다.
+            baseline = self._state_baselines.get(key)
+            if key in self._state_conflicts:
+                raise StateNotClaimedError(
+                    f"{project_id}: 이 실행의 입력이 현재 정본과 다릅니다 — 낡은 바탕에서 "
+                    f"나온 결과를 덮어쓰지 않습니다. 다시 읽어 다시 시작하십시오.")
             if baseline is None:
-                baseline = atomic_write.digest_of(state_path)
-            self._state_baselines[project_id] = atomic_write.replace_json_if_unchanged(
+                if atomic_write.digest_of(state_path):
+                    raise StateNotClaimedError(
+                        f"{project_id}: 이 실행이 읽은 적 없는 정본이 이미 있습니다 — "
+                        f"인수(claim)를 거치지 않고 덮지 않습니다.")
+                baseline = ""          # 정말로 새로 만드는 경우만 여기로 온다
+            self._state_baselines[key] = atomic_write.replace_json_if_unchanged(
                 state_path, data_to_save, expected_digest=baseline,
-                root=PROJECTS_DIR, indent=2)
+                root=declared_root, indent=2)
         project_id = _pid(workspace_root)
+        key = execution_key or project_id
         try:
             await finish_before_cancel(asyncio.to_thread(_write))
             #: ★★ [2026-09-22 보완] **이 프로젝트 것만** 지운다.
@@ -139,6 +235,7 @@ class AsyncFactoryOrchestrator:
             #:     성공하면 A 의 실패가 지워졌다.** 실패 하나를 남의 성공이 덮는 구조는
             #:     「관측을 붙였다」고 말할 수 없다 — 물어보면 없다고 답한다.
             self.state_save_failures.pop(project_id, None)
+            self._state_conflicts.discard(key)
             self.last_state_save_error = None       # 성공했으니 지난 실패 표시를 지운다
             return {"saved": True, "project_id": project_id, "error": ""}
         except Exception as e:
@@ -155,9 +252,13 @@ class AsyncFactoryOrchestrator:
                 #:   앞쪽은 **다시 읽고 다시 만들어야** 하고, 뒤쪽은 재시도로 풀린다.
                 "stale": type(e).__name__ == "StaleWriteError",
             }
-            #: ⚠️ 충돌이면 기준을 버린다. 안 버리면 같은 낡은 기준으로 계속 거절된다.
-            if record["stale"]:
-                self._state_baselines.pop(project_id, None)
+            #: ⚠️⚠️ [CR-W03-2A] **충돌이어도 기준을 버리지 않는다.** 버렸더니 다음
+            #:   호출이 현재 digest 를 새로 읽어 **같은 낡은 payload 를 승인**했다.
+            #:   기준을 그대로 두면 같은 payload 는 **몇 번을 다시 보내도 거절**된다 —
+            #:   그게 조건부 저장의 뜻이다. 다시 쓰려면 새로 읽어 만든 payload 여야 하고,
+            #:   그 경로는 `claim_project_state()` 다.
+            if record["stale"] or type(e).__name__ == "StateNotClaimedError":
+                self._state_conflicts.add(key)
             self.state_save_failures[project_id] = record
             self.last_state_save_error = record
             print(f" 상태 백업 실패: {e}")
@@ -585,7 +686,15 @@ class AsyncFactoryOrchestrator:
             print(f"⚠️ [Orchestrator] WBS DONE 마킹 실패: {e}")
 
         await factory_broadcaster.broadcast("WBS_UPDATED", {"task_id": task_id, "project_id": pid, "status": "DONE"})
-        await factory_broadcaster.broadcast("SPRINT_COMPLETED", {"task_id": task_id, "project_id": pid})
+        #: ★★ [CR-W03-2C] 완료 통지가 **정본 저장 성공을 뜻하지 않게** 한다.
+        #:   압서 마지막 저장이 실패했으면 화면이 보는 것은 옛 판본이다 — 그런데도
+        #:   DONE/SPRINT_COMPLETED 를 그대로 보내면 「끝났고 저장도 됐다」로 읽힌다.
+        #:   실행 결과를 버리지 않으되, **미확정임을 같이 싣는다.**
+        pending = self.state_save_failures.get(pid)
+        await factory_broadcaster.broadcast(
+            "SPRINT_COMPLETED", {"task_id": task_id, "project_id": pid,
+                                 "state_saved": pending is None,
+                                 "state_save_error": (pending or {}).get("error", "")})
 
 
     async def _bound_engine(self, project_id: str):
@@ -765,6 +874,12 @@ class AsyncFactoryOrchestrator:
 
     async def _run_sprint_loop(self, config: dict, state_dict: dict, task_id: str, workspace_root: str):
         pid = _pid(workspace_root)
+        #: ★★ [10.2-A] 시작은 **자기 입력이 지금 파일에서 나왔음을 보여야** 인수한다.
+        #:   다르면 인수하지 않고, 이후 저장이 거절된다 — 낡은 바탕에서 나온 결과가
+        #:   남이 확정한 값을 덮지 않게.
+        execution_key = _skey(pid, task_id)
+        self.claim_project_state(workspace_root, execution_key=execution_key,
+                                 started_from=state_dict)
         # T2-b: 이 프로젝트의 워크플로우 템플릿 그래프로 실행(스킬/토폴로지/HOTL 게이트가 템플릿별)
         tid = (state_dict or {}).get("template_id", "default")
         expected_fp = (state_dict or {}).get("config_fingerprint", "")
@@ -776,7 +891,8 @@ class AsyncFactoryOrchestrator:
                         or node_name in getattr(langgraph_engine, "interrupt_after_nodes", ()))
                     snapshot = await langgraph_engine.aget_state(config)
                     full_state = snapshot.values
-                    saved = await self._save_latest_state(full_state, workspace_root)
+                    saved = await self._save_latest_state(full_state, workspace_root,
+                                                          execution_key=execution_key)
 
                     #: ★★ [2026-09-22] **계산 성공과 정본 저장 성공을 구분해 보낸다.**
                     #:   예전에는 저장이 실패해도 `NODE_COMPLETED` 가 그대로 나갔다 —
@@ -928,6 +1044,11 @@ class AsyncFactoryOrchestrator:
     async def _resume_stream(self, config: dict, task_id: str, workspace_root: str,
                              template_id: str = "default", expected_fingerprint: str = ""):
         pid = _pid(workspace_root)
+        #: ★★ [10.2-A] 재개도 **인수를 거친다.** 앞 판은 여기 인수가 없어 새 프로세스의
+        #:   **정상 저장까지 막혔다.** 재개는 엔진 checkpoint 에서 이어받으므로 경쟁하는
+        #:   다른 판본에서 파생된 것이 아니다 — 현재 판본을 기준으로 삼는다.
+        execution_key = _skey(pid, task_id)
+        self.claim_project_state(workspace_root, execution_key=execution_key)
         langgraph_engine = await get_runtime_app(template_id, expected_fingerprint)
         try:
             async for event in langgraph_engine.astream(None, config=config):
@@ -936,7 +1057,8 @@ class AsyncFactoryOrchestrator:
                         or node_name in getattr(langgraph_engine, "interrupt_after_nodes", ()))
                     snapshot = await langgraph_engine.aget_state(config)
                     full_state = snapshot.values
-                    saved = await self._save_latest_state(full_state, workspace_root)
+                    saved = await self._save_latest_state(full_state, workspace_root,
+                                                          execution_key=execution_key)
 
                     #: ★★ [2026-09-22] **계산 성공과 정본 저장 성공을 구분해 보낸다.**
                     #:   예전에는 저장이 실패해도 `NODE_COMPLETED` 가 그대로 나갔다 —
@@ -977,10 +1099,15 @@ class AsyncFactoryOrchestrator:
                 updates["pre_suspend_mode"] = prev_mode  # 직전 정상 모드 보존
             await langgraph_engine.aupdate_state(config, updates)
             snapshot = await langgraph_engine.aget_state(config)
-            await self._save_latest_state(snapshot.values, workspace_root)
+            #: ★ [CR-W03-2C] 반환값을 무시하지 않는다 — 중단 상태를 정본에 못 적었으면
+            #:   재개를 판단할 근거가 없다. 실행을 멈추지는 않되 화면이 알 수 있게 싣는다.
+            saved = await self._save_latest_state(snapshot.values, workspace_root)
         except Exception as e:
+            saved = {"saved": False, "error": f"{type(e).__name__}: {e}"}
             print(f"⚠️ [Orchestrator] SUSPENDED_QUOTA 상태 기록 실패: {e}")
-        await factory_broadcaster.broadcast("QUOTA_EXHAUSTED", {"task_id": task_id, "project_id": pid})
+        await factory_broadcaster.broadcast(
+            "QUOTA_EXHAUSTED", {"task_id": task_id, "project_id": pid,
+                                "state_saved": bool(saved.get("saved"))})
 
     @execution_command("project_id")
     async def resume_from_suspend(self, task_id: str, project_id: str) -> bool:

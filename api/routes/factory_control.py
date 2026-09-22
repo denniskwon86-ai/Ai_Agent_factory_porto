@@ -3322,8 +3322,21 @@ async def create_release(project_id: str,
     #: ★ [2026-09-22] `makedirs` 도 링크 경계 «안» 에서 한다 — 검사 밖에 있으면
     #:   연결된 상위 아래에 디렉터리를 만들어 놓고 통과하는 우회로가 된다.
     atomic_write.ensure_directory(rel_dir, root=library_paths.library_dir())
-    atomic_write.replace_json(os.path.join(rel_dir, "release.json"), release, indent=2,
-                              root=library_paths.library_dir())
+    #: ★★ [CR 판단②] 이것은 **생성**이다 — 배타 생성으로 닫는다.
+    #:   ⚠️ `release_id` 가 **초 단위**(`:3164`)라 같은 프로젝트를 같은 초에 두 번
+    #:     게시하면 **같은 id** 가 나온다. `exist_ok=True` 라 앞서 게시한 릴리스를
+    #:     조용히 덮어쓰게 된다 — 「새 디렉터리라 경쟁 없음」이 성립하지 않는다.
+    #:   이미 있으면 거절하고, 그 거절을 호출자가 보게 한다.
+    release_path = os.path.join(rel_dir, "release.json")
+    try:
+        release_digest = atomic_write.replace_json_if_unchanged(
+            release_path, release, expected_digest="", indent=2,
+            root=library_paths.library_dir())
+    except atomic_write.StaleWriteError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail=f"같은 식별자의 릴리스가 이미 있습니다: {release_id} — "
+                   f"잠시 뒤 다시 게시하십시오.") from exc
 
     # ── [Wave F-0] 승인된 계약을 **실제 데이터셋으로** 만든다 ──────────────
     #
@@ -3361,7 +3374,11 @@ async def create_release(project_id: str,
         sealed_contract=release.get("runtime_contract") if _studio_release else None)
     #: ⚠️ 결과를 릴리스 파일에 **다시 쓴다** — 「무엇이 만들어졌는가」를 나중에 물을
     #:   수 있어야 한다. 실패했다면 그 사실도 그대로 남는다.
-    atomic_write.replace_json(os.path.join(rel_dir, "release.json"), release, indent=2)
+    #: ★★ [CR 판단②] 이것은 **갱신**이다(같은 파일의 두 번째 쓰기). 위에서
+    #:   돌려받은 digest 를 기준으로 쓴다 — 그 사이에 남이 바꿨으면 거절된다.
+    atomic_write.replace_json_if_unchanged(
+        release_path, release, expected_digest=release_digest, indent=2,
+        root=library_paths.library_dir())
 
     # [Phase 5] 릴리스 소유권 미러 — `assert_release_readable`(api/deps.py:129)이 이 미러를
     #   읽는다. 안 심으면 소유권 미기록으로 간주돼 전원 통과한다. 프로젝트와 같은 규약으로,

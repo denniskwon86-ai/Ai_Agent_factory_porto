@@ -27,7 +27,10 @@ def _digest(path) -> str:
 
 
 def _strays(folder) -> list:
-    return sorted(p.name for p in Path(folder).iterdir() if p.name != "state.json")
+    """남은 곁다리. ⚠️ **잠금 파일은 뺀다** — 지우면 상호배제가 깨지므로 남는 것이
+    규약이다(`atomic_write.LOCK_SUFFIX`). 임시 파일이 남는 것과는 다른 일이다."""
+    return sorted(p.name for p in Path(folder).iterdir()
+                  if p.name != "state.json" and not atomic_write.is_lock_file(p.name))
 
 
 @pytest.fixture
@@ -218,15 +221,24 @@ def test_advisor_state_write_is_atomic(tmp_path, monkeypatch):
     """제품 쓰기 함수를 **직접 불러서** 원자 경로를 타는지 본다(소스 문자열 검사가 아니다)."""
     from api.routes import advisor_control
 
+    #: ★★ [CR 판단② 정정] 이 writer 는 **생성 전용**이다 —
+    #:   `latest_state.json` 을 프로젝트당 한 번 만든다(`advisor_control:495`).
+    #:   그래서 「두 번 써서 원자성을 본다」는 모양이 더 이상 계약과 맞지 않는다.
+    #:   **첫 쓰기에서** 원자 경로를 보고, 둘째 쓰기는 «거절되는 것» 을 본다.
     path = tmp_path / "state.json"
-    advisor_control._write_json(str(path), {"revision": 1})
-    before = _digest(path)
-
     monkeypatch.setattr(atomic_write.os, "replace", lambda *a, **k: (_ for _ in ()).throw(OSError("끊김")))
     with pytest.raises(OSError):
-        advisor_control._write_json(str(path), {"revision": 2})
-    assert _digest(path) == before, "제품 쓰기가 원자 경로를 타지 않는다"
+        advisor_control._write_json(str(path), {"revision": 1})
+    assert not path.exists(), "중간에 끊겼는데 반쪽짜리가 남았다"
     assert _strays(path.parent) == []
+
+    monkeypatch.undo()
+    advisor_control._write_json(str(path), {"revision": 1})
+    before = _digest(path)
+    #: 이미 있는 정본은 **덮지 않는다** — 생성 전용 writer 의 계약이다.
+    with pytest.raises(atomic_write.StaleWriteError):
+        advisor_control._write_json(str(path), {"revision": 2})
+    assert _digest(path) == before
 
 
 def test_state_save_failure_is_swallowed_but_left_findable(tmp_path, monkeypatch):

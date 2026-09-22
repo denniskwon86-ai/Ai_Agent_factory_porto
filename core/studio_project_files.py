@@ -1,5 +1,6 @@
 """B3 승격 전용 파일 IO. 고정 참조와 일반 실행 상태를 분리한다."""
 from contextlib import contextmanager
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -27,13 +28,52 @@ def read_json(path):
         raise RevisionStoreError("STUDIO_PROJECT_UNREADABLE", "프로젝트 저장 상태를 확인할 수 없습니다.", 503) from exc
 
 
-def write_json(path, value):
+def read_json_with_digest(path):
+    """★★ [10.2-B] 내용과 지문을 **같은 바이트에서** 얻는다.
+
+    읽고 나서 따로 `digest_of` 를 부르면 그 사이가 창이다 — 남이 바꾼 뒤의 지문을
+    「내가 읽은 것」으로 삼게 된다. 읽기-수정-쓰기의 기준은 **그 읽기** 여야 한다.
+
+    파일이 없으면 `(None, "")` 이다."""
+    try:
+        with open(path, "rb") as stream:
+            raw = stream.read()
+    except FileNotFoundError:
+        return None, ""
+    except OSError as exc:
+        raise RevisionStoreError("STUDIO_PROJECT_UNREADABLE",
+                                 "프로젝트 저장 상태를 확인할 수 없습니다.", 503) from exc
+    try:
+        value = json.loads(raw.decode("utf-8"))
+        if not isinstance(value, dict):
+            raise ValueError("object required")
+    except (ValueError, TypeError) as exc:
+        raise RevisionStoreError("STUDIO_PROJECT_UNREADABLE",
+                                 "프로젝트 저장 상태를 확인할 수 없습니다.", 503) from exc
+    return value, hashlib.sha256(raw).hexdigest()
+
+
+def write_json(path, value, *, expected_digest=None):
     """같은 폴더 임시 파일 → 교체. 오류를 성공으로 삼키지 않는다.
 
     구현은 `core/atomic_write.py` 한 곳에 있다(여기서 먼저 쓰던 것을 그리로 옮겼다).
     직렬화 정책 — `sort_keys`·`allow_nan=False` — 은 이 저장의 것이므로 여기 남는다.
+
+    ★★ [CR 판단③] `expected_digest` 를 주면 **조건부 저장**이 된다 — 읽은 판본이
+      그대로일 때만 바꾼다. `operation_lock` 은 잠금 파일이 `data/studio_bootstrap_locks`
+      즉 **노드 로컬**이라 승격 조작의 «이 노드 안» 멱등성만 지키고, 다른 노드의 writer 는
+      막지 못한다. 저장 수준의 보장은 정본 옆 잠금 + 판본 조건으로 세운다.
+
+    ⚠️ 별도 함수로 빼지 않는다. 한 번 빼 봤더니 **실패 주입 지점이 갈라져**
+      `monkeypatch.setattr(module, "write_json", …)` 로 세운 기존 보장이 조용히
+      무력화됐다(시험이 잡았다). 이음매는 하나로 둔다.
     """
-    atomic_write.replace_json(path, value, sort_keys=True, indent=2, allow_nan=False)
+    if expected_digest is None:
+        atomic_write.replace_json(path, value, sort_keys=True, indent=2, allow_nan=False)
+        return ""
+    return atomic_write.replace_json_if_unchanged(
+        path, value, expected_digest=expected_digest,
+        sort_keys=True, indent=2, allow_nan=False)
 
 
 def projection(value):

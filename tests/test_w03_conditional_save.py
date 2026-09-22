@@ -186,24 +186,45 @@ def test_an_unknown_root_checks_all_the_way_up_not_just_the_parent(tmp_path):
         atomic_write.replace_json(linked / "x" / "y" / "state.json", {"a": 1}, indent=2)
 
 
-def test_a_root_outside_the_target_widens_the_check_instead_of_refusing(tmp_path):
-    """⚠️ 뿌리 밖 경로를 **거절하지 않는다** — 이 모듈은 경로 봉쇄의 권위가 아니다.
+def test_a_root_that_does_not_contain_the_target_is_refused(tmp_path):
+    """★★ [CR-W03-2B 정정] 뿌리 밖 경로는 **거절**한다.
 
-    대신 **더 넓게** 본다. 처음에 거절로 만들었더니 임의 작업공간을 쓰는 정상 호출자가
-    막혔다(실측: `_save_latest_state` 시험 1건)."""
+    ⚠️⚠️ 앞 판에서 나는 정반대를 단언했다 — 「거절하지 않고 더 넓게 본다」. 근거는
+      「거절로 만들었더니 정상 호출자가 막혔다」였는데, 검토가 짚은 대로 **임시 fixture
+      한 건이 막혔다는 것이 정상 제품의 외부 경로 필요성을 증명하지 않는다.**
+      독립 작업공간은 **명시적으로 검증된 다른 뿌리**로 넘기는 것이 맞고, 실제로
+      `_save_latest_state` 는 그렇게 고쳤다(`_declared_root`).
+      시험을 지워서 초록을 만들지 않고 **새 계약을 단언하도록** 고쳐 둔다."""
+    elsewhere = tmp_path / "unrelated_root"
+    elsewhere.mkdir()
+    (tmp_path / "mine").mkdir()
+    with pytest.raises(ValueError) as caught:
+        atomic_write.replace_json(tmp_path / "mine" / "state.json", {"a": 1},
+                                  indent=2, root=elsewhere)
+    assert "뿌리" in str(caught.value), str(caught.value)
+
+
+def test_a_junction_above_the_declared_root_is_still_caught(tmp_path):
+    """★★★ [CR-W03-2B] **명시 뿌리가 그보다 위의 junction 을 숨기면 안 된다.**
+
+    앞 판은 `root` 가 조상이면 그 위를 잘라냈다. 그래서 실제 제품 호출 형태인
+    `root=junction/projects` 로 `junction/projects/proj/state.json` 을 쓰면 **예외 없이
+    링크 너머에 저장**됐다. 「뿌리보다 위는 배포의 몫」이라는 주석이 곧 구멍이었다."""
     real = tmp_path / "real_root"
-    (real / "sub").mkdir(parents=True)
+    (real / "projects" / "proj").mkdir(parents=True)
     linked = tmp_path / "linked_root"
     if not _try_junction(linked, real):
         pytest.skip("이 환경에서는 junction 을 만들 수 없다")
 
-    elsewhere = tmp_path / "unrelated_root"
-    elsewhere.mkdir()
-    #: 뿌리가 대상과 무관하다 — 거절이 아니라 전체 조상 검사로 떨어져야 한다.
+    declared = linked / "projects"          # 뿌리 «자체» 는 링크가 아니다
+    target = declared / "proj" / "state.json"
+    assert not declared.is_symlink(), "뿌리가 링크면 이 반례가 성립하지 않는다"
+
     with pytest.raises(ValueError) as caught:
-        atomic_write.replace_json(linked / "sub" / "state.json", {"a": 1},
-                                  indent=2, root=elsewhere)
+        atomic_write.replace_json(target, {"a": 1}, indent=2, root=declared)
     assert "연결된" in str(caught.value), str(caught.value)
+    assert not (real / "projects" / "proj" / "state.json").exists(), \
+        "거절했는데 링크 너머 실제 위치에 썼다"
 
 
 # ── ③ 실패 소비 ─────────────────────────────────────────────────────────
@@ -288,3 +309,80 @@ def test_a_stale_save_is_marked_differently_from_a_replace_failure(tmp_path, mon
         module.atomic_write.replace_json_if_unchanged = original
     assert result["stale"] is True
     assert orchestrator.state_save_failures["proj_S"]["stale"] is True
+
+
+# ── [CR 판단②③] writer 의 «의미» 별 처리 ────────────────────────────────
+#
+# ⚠️ 앞 표는 두 곳이 틀렸다. 「릴리스 id 마다 새 디렉터리라 경쟁 없음」으로 뭉뚱그렸는데
+#   실제로는 생성과 갱신이 섞여 있었다. 아래 시험이 그 구분을 고정한다.
+
+def test_the_release_id_is_second_grained_so_collision_is_possible():
+    """★★ 「새 디렉터리라 경쟁 없음」의 전제가 **성립하지 않는다**.
+
+    `release_id` 가 초 단위라 같은 프로젝트를 같은 초에 두 번 게시하면 같은 id 다.
+    전제를 시험으로 박아 두면, 누가 id 규칙을 바꿀 때 이 판단도 함께 재검토된다."""
+    import re
+
+    body = open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                             "api", "routes", "factory_control.py"), encoding="utf-8").read()
+    assert re.search(r"release_id = f\"\{project_id\}_\{datetime\.now\(\)\.strftime\('%Y%m%d_%H%M%S'\)\}\"",
+                     body), "release_id 생성 규칙이 바뀌었다 — 생성/갱신 판단을 다시 보라"
+
+
+def test_the_kit_app_release_id_is_deterministic_so_republish_is_an_update():
+    """★★ `release_id_for` 는 결정론적이다 — 재게시는 **갱신**이지 생성이 아니다.
+
+    이 사실 때문에 `kit_app_builder` 는 조건부 저장이어야 한다."""
+    from core.kit_app_builder import release_id_for
+
+    assert release_id_for("inst", "app") == release_id_for("inst", "app")
+    assert release_id_for("inst", "app") != release_id_for("inst2", "app")
+
+
+def test_exclusive_create_refuses_an_existing_canonical_file(tmp_path):
+    """생성 전용 writer 의 계약 — 이미 있으면 **거절**한다. 조용히 덮지 않는다."""
+    path = tmp_path / "latest_state.json"
+    atomic_write.replace_json_if_unchanged(path, {"a": 1}, expected_digest="", indent=2)
+    with pytest.raises(atomic_write.StaleWriteError):
+        atomic_write.replace_json_if_unchanged(path, {"a": 2}, expected_digest="", indent=2)
+    assert "\"a\": 1" in path.read_text(encoding="utf-8"), "거절했는데 내용이 바뀌었다"
+
+
+def test_the_conditional_variant_keeps_the_same_serialization_policy(tmp_path):
+    """⚠️ 조건부 갈래가 **다른 직렬화**를 쓰면 같은 값인데 digest 가 갈려 조건이 엉뚱하게
+    실패한다. 두 갈래가 한 함수 안에 있으므로 여기서 고정해 둔다."""
+    from core.studio_project_files import write_json
+
+    a, b = tmp_path / "a.json", tmp_path / "b.json"
+    value = {"z": 1, "a": {"y": 2, "b": 3}}
+    write_json(a, value)
+    write_json(b, value, expected_digest="")
+    assert a.read_bytes() == b.read_bytes(), "두 갈래의 직렬화 정책이 갈렸다"
+
+
+def test_the_bootstrap_binds_its_writes_to_a_prior_read():
+    """★★★ [10.2-B] `studio_bootstrap` 이 **공유 정본**을 쓴다 — 이제 조건부로 쓴다.
+
+    ⚠️ 앞서 나는 이 자리를 「열린 결함」으로 남기고 시험도 그렇게 썼다. 근거는 ①기준이
+      그 조작의 앞선 읽기여야 하는데 단계 기계가 안 들고 다닌다 ②`write_json` 의 호출
+      모양을 바꾸면 실패 주입 대역이 깨진다 였는데, 검토가 짚은 대로 **대역이 안 맞는
+      것은 제품을 되돌릴 이유가 아니었다.** 읽기가 내용과 지문을 함께 돌려주게 하고
+      (`read_json_with_digest`), 대역은 인자를 전달하도록 함께 고쳤다.
+
+    여기서 고정하는 것은 **「읽은 판본을 그 쓰기에 넘긴다」** 는 사실이다."""
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    body = open(os.path.join(root, "core", "studio_bootstrap.py"), encoding="utf-8").read()
+    assert "read_json_with_digest" in body, "bootstrap 이 읽은 판본을 기준으로 삼지 않는다"
+    assert body.count("expected_digest=") >= 2,         "초기 기록과 READY 갱신 둘 다 기준을 넘겨야 한다"
+    assert "operation_lock" in body
+
+
+def test_a_read_returns_content_and_digest_from_the_same_bytes(tmp_path):
+    """★★ 따로 읽으면 그 사이가 창이다 — 「내가 읽은 것」이 남이 바꾼 뒤의 지문이 된다."""
+    from core.studio_project_files import read_json_with_digest, write_json
+
+    path = tmp_path / "latest_state.json"
+    assert read_json_with_digest(path) == (None, "")
+    write_json(path, {"a": 1})
+    value, digest = read_json_with_digest(path)
+    assert value == {"a": 1} and digest == atomic_write.digest_of(path)
