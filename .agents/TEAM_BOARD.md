@@ -1,5 +1,15 @@
 # AI Factory Studio 팀 현황판
 
+## [W03 검토·다음 지시] ⚠️ 자기 검토 — 브랜치 한정 / 2026-09-22 KST
+
+- ⚠️⚠️ **독립 검토가 아니다.** 사용자가 이 브랜치(`claude/w03-atomic-save-20260922`)에 한해 Codex 역할을 대신하라고 지시해 같은 세션이 자기 작업을 검토했다. **공용 원장·PROGRESS 를 갱신하지 않았고 점수도 올리지 않았다.** 진짜 수용은 Codex 판단 뒤.
+- 판정: **W03.1 수용 가능**(조건 — 단일 PC 증거, 읽기 가시성만) · **W03.2 조건부 보류 — CR-1 해결 전 수용 안 함.**
+- ★★ **CR-1(차단): 링크 정책이 저장소와 반대다.** `atomic_write._resolved_target()` 은 링크를 **따라가는데**, 이 저장소는 아홉 곳에서 링크를 **거절**한다(`async_orchestrator:295`, `factory_control:2448·2631·2662`, `studio_project_files:53·56`, `studio_pause_state:37`, `studio_revision_requests:81·87`, `studio_contract_reconcile:219·292`, `studio_input_draft_control:106`). P05.1 CR「junction 차단 누락」과 같은 방향. **실제 결과: `latest_state.json` 이 링크면 쓰기는 성공하고 읽기는 503 으로 거절된다** — W03 이 없애려던 「한쪽에서만 열리는 자원」을 오히려 만든다. 구현자가 댄 「공유 마운트 지원」 근거가 틀렸다.
+- 잔여: acceptance 에 「부분 파일**이나 잘못된 판본**」이 둘 다 있다. 지시 §4-2 의 「다른 문제」는 **「한 번에 달성했다고 쓰지 말라」**이지 「하나만 해도 된다」가 아니다. 과장 없이 명시돼 있으므로 결함 아닌 **잔여**로 분류. 구체적으로 `_save_latest_state` 의 `except: print` 에서 **「정상 반환한 성공 버전의 소실」이 실제로 깨진다**(Windows 교체거절 41/180).
+- 관측: 원자 쓰기 구현이 저장소에 **넷**(`studio_project_files`✅통합 · `config_snapshot:160` · `contract_decision:298` · 신규). 「구현을 한 곳에」는 정본 저장 범위로 좁혀 적어야 정확하다. W03.2 대상 밖이라 판정 무영향.
+- 다음 지시 ①CR-1 정정(20~40분, `session_data_snapshot:70 regular()` 재사용 먼저 검토) ②`_save_latest_state` 삼킴 — **유지하되 실패를 관측 가능하게**(재시도로 덮지 말 것) ③W03.3 DB·파일 일관성(가설로 복구기 만들지 말고 가능한 불일치 목록부터) ④낮은 순위: 구현 4→1 통합·advisor_bootstrap fixture 부채·lost update 단계 분리 여부.
+- Codex 가 함께 볼 것 셋: CR-1 방향이 맞는가(**쓰기 쪽 정책 문서를 못 찾았다** — 아홉 곳 전부 읽기·검증 경로다) / 「잘못된 판본」이 lost update 를 포함하는가(**점수에 직접 영향**) / 단일 PC 증거를 W03.1 수용 근거로 받을지. 정본 `CODEX_W03_REVIEW_AND_NEXT_2026-09-22.md`.
+
 ## [W03.1 보완 READY_FOR_REVIEW] 프로젝트 갈래·접근권한 — 다른 PC Claude Code / 2026-09-22 KST
 
 - 사용자 지시로 W03.2 에 이어 W03.1 부족분을 채웠다. 첫 제출은 **릴리스 한 갈래**였고 출구는 「두 노드가 같은 **프로젝트/릴리스** 판본을 읽고 **접근권한을 확인**」이다.
