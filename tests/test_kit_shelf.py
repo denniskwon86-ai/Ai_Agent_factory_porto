@@ -130,3 +130,71 @@ def test_빈_칸을_양쪽으로_보여준다():
 
 def test_json_이_직렬화된다():
     json.dumps(kit_shelf.catalog(), ensure_ascii=False)
+
+
+# ── 지워도 되나 — **참조를 실측한다**
+
+def test_묵은_판본이라고_지울_수_있는_것이_아니다():
+    """★★★ **이번에 데인 것의 회귀 감시.**
+
+    1.0.0·1.1.0 을 「봉인 결함이 있던 판본」이라고 지우려다 멈췄다. 둘은 **시험의
+    고정물**이었다 —
+
+        1.0.0   core/demo_vertical_slice.py 가 그 samples/full/*.csv 를 읽는다
+                (플랫폼 계산 카나리의 정본)
+        1.1.0   tests/test_kit_freeze.py 가 그 봉인을 지켜본다
+                ← **그 판본이 바로 「대장 없이 PASS」 하던 것**이다
+
+    지웠으면 감시가 조용히 사라졌을 것이다. 「오래됐나」가 아니라 **「누가 가리키나」**
+    로 판단해야 한다.
+    """
+    for ver in ("1.0.0", "1.1.0"):
+        r = kit_shelf.referrers("KIT-MFG-NONFERROUS-PROCUREMENT", ver)
+        assert r["count"], f"{ver} 를 가리키는 곳이 하나도 없다고 나온다 — 훑기가 고장났다"
+
+
+def test_플랫폼이_1_0_0_을_읽는_것이_보인다():
+    """`core/demo_vertical_slice.py` 는 `KIT_ID` 와 `KIT_VERSION` 을 **따로** 적는다.
+    경로 한 덩어리만 찾으면 이 가장 중요한 참조를 놓친다."""
+    r = kit_shelf.referrers("KIT-MFG-NONFERROUS-PROCUREMENT", "1.0.0")
+    assert "core/demo_vertical_slice.py" in r["direct"] + r["probable"]
+
+
+def test_1_1_0_의_봉인_감시가_보인다():
+    r = kit_shelf.referrers("KIT-MFG-NONFERROUS-PROCUREMENT", "1.1.0")
+    assert "tests/test_kit_freeze.py" in r["direct"] + r["probable"]
+
+
+def test_선반_도구_자신은_세지_않는다():
+    """⚠️ 이 파일의 설명이 판본 번호를 예로 든다. 빼지 않으면 **모든 판본이
+    「선반 도구가 쓴다」**로 잡혀 셈이 무의미해진다."""
+    for ver in ("1.0.0", "1.1.0", "1.2.0", "1.3.0"):
+        r = kit_shelf.referrers("KIT-MFG-NONFERROUS-PROCUREMENT", ver)
+        assert "scripts/kit_shelf.py" not in r["direct"] + r["probable"]
+
+
+def test_아무도_안_쓰는_판본은_그렇게_보인다():
+    """셈이 언제나 0 이 아닌 것을 확인한다 — **거짓 초록을 막는다.**
+
+    ⚠️ 이름을 **런타임에 조립한다.** 소스에 그대로 적으면 이 파일 자신이 그 이름을
+      담게 되어 「1 곳이 쓴다」가 나온다 (처음에 그렇게 썼다가 걸렸다). 훑기가
+      **언급과 참조를 구분하지 못한다**는 사실이 여기서 드러난다.
+    """
+    kit = "KIT-" + "".join(["없는", "키트"])
+    r = kit_shelf.referrers(kit, "9." + "9.9")
+    assert r["count"] == 0 and r["direct"] == [] and r["probable"] == []
+
+
+def test_판본마다_참조가_카탈로그에_실린다():
+    for k in kit_shelf.shelf():
+        for v in k["versions"]:
+            assert "referrers" in v, f"{k['kit_id']}/{v['version']} 에 참조가 없다"
+            assert set(v["referrers"]) >= {"direct", "probable", "count"}
+
+
+def test_요약이_지울_후보를_말한다():
+    c = kit_shelf.catalog()
+    assert "unreferenced" in c["summary"]
+    on_shelf = {f'{k["kit_id"]}/{v["version"]}'
+                for k in c["shelf"] for v in k["versions"]}
+    assert set(c["summary"]["unreferenced"]) <= on_shelf
