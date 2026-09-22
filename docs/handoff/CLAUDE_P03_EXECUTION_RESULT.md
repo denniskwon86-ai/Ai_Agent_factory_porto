@@ -2081,11 +2081,80 @@ W03.3 을 하며 묶음을 넓혔더니 나왔습니다 — 회귀 범위가 증
 | 변이 | `_artifact_present` 제거 → **2건 실패** · `get_status` 쪽 제거 → **1건 실패** · 원복 해시 일치 |
 | 격리 | `sources_unchanged: true` · `protected_assets_unchanged: true` · 차단 쓰기 0 |
 
-**하지 않은 것**
+**하지 않은 것** → §18~§20 에서 처리했습니다(사용자가 ②를 고르고 호출자 연결을 지시).
 
-- **다섯 호출자를 `artifact_present` 에 연결하지 않았습니다.** 각 호출자의 판정 의미가
-  달라 한 번에 바꾸면 경계가 흐려집니다. **다음 분량**입니다.
-- **복구 실행** — §16 결정 뒤.
+- ~~다섯 호출자 연결~~ → **셋 연결**(§18 에 정정 근거).
+- ~~복구 실행~~ → **정책 ② 구현**(§19).
 - 프로젝트 쪽(`latest_state.json` ↔ 판본 DB) 불일치는 **이번 범위 밖**입니다. `project_context()`
   가 이미 `is_v2_project` 와 파일을 대조해 차단하고 있어(`STUDIO_PROJECT_PROVENANCE_REQUIRED`
   ·`STUDIO_PROJECT_CONTEXT_MISSING`) 릴리스 쪽과 상태가 다릅니다. 별도로 봐야 합니다.
+
+---
+
+# W03.3 (2) — 정책 ② 적용과 호출자 연결 / 2026-09-22
+
+사용자 결정: **②「행 보존 + 격리 표시」**, 그리고 **호출자 연결**.
+
+## 18. ⚠️ 정정 — 위험한 호출자는 다섯이 아니라 **셋**이었다
+
+§13 에서 「단건 `get_status` 를 쓰는 다섯 곳이 없는 릴리스를 사용 가능으로 판정할 수
+있다」고 적었습니다. **연결하려고 실제 코드를 읽으니 둘은 이미 파일을 확인하고 있었습니다.**
+
+| 호출자 | 정본 확인 | 조치 |
+|---|---|---|
+| `calculation_control.py:683` | **이미 있었다** — 없으면 409 「아직 생성되지 않았습니다」 | 그대로 둠 |
+| `data_preparation_control.py:1475` | **이미 있었다** — 없으면 `""` | 그대로 둠 |
+| `app_data_control.py:349` | 없었다 | **연결** |
+| `app_data_runtime.py:237` | 없었다 | **연결** |
+| `factory_control.py:2881` | 없었다 | **연결** |
+
+★ 이미 확인하는 둘을 굳이 바꾸지 않았습니다. `calculation_control` 은 정본 없음을 **다른
+문구로 구분해 답하고**(「아직 생성되지 않았습니다」) 그 구분이 사용자에게 쓸모가 있습니다.
+공통 함수로 뭉뚱그리면 그 말이 사라집니다.
+
+## 19. 정책 ② — 기록은 남기고, 판정에서만 뺀다
+
+`ProgramLifecycle.effective_status(release_id)` 를 추가했습니다. **정본이 없으면 빈
+문자열**입니다.
+
+- **행은 지우지 않습니다.** `get_status` 는 여전히 `status`·`reason`·`changed_by` 를 다
+  줍니다. 격리와 기록 삭제는 다릅니다.
+- **재게시하면 껐던 결정이 그대로 살아납니다** — ② 를 고른 이유입니다. ①(행 폐기)이었다면
+  꺼 두었던 프로그램이 `active` 로 돌아옵니다. 시험
+  `test_the_old_decision_comes_back_with_the_artifact` 가 이것을 고정합니다.
+- ⚠️ **새 상태 어휘를 만들지 않았습니다.** 빈 문자열을 씁니다 — 받는 자리들이 이미
+  「모르면 접지 않는다」로 짜여 있기 때문입니다(`audience_for_state("")` → 청중 없음 →
+  평면도 안 고름). 새 값을 만들면 그 fail-closed 경로를 타지 않고 각자 새로 판단하게 됩니다.
+
+세 호출자는 `get_status(...)["status"]` 대신 `effective_status(...)` 를 부릅니다. 각자의
+기존 fail-closed 주석(「모르면 운영으로 접지 않는다」)이 그대로 유효합니다.
+
+## 20. 검증과 귀속
+
+| 대상 | 결과 |
+|---|---|
+| `tests/test_w03_release_consistency.py` | **7 → 11건** |
+| 핵심 묶음 4스위트 | **65 passed / exit 0** |
+| 변이(`effective_status` 에서 격리 제거) | **3건 실패** → 원복 |
+| 격리 | `sources_unchanged: true` · `protected_assets_unchanged: true` · 차단 쓰기 0 |
+
+**★ 호출자 연결은 소스 문자열이 아니라 제품 함수를 직접 불러 확인했습니다** —
+`app_data_control._audience_for_release` 가 정본 삭제 후 빈 청중을 주고,
+`app_data_runtime._release_state` 가 빈 문자열을 줍니다.
+
+### 111건 기존 실패 — 이 PC 에서도 재현됩니다
+
+`test_app_data_runtime` 을 돌렸더니 **28 failed / 18 passed** 로, 원래 PC 보고의
+`test_app_data_runtime 28` 과 **수가 같습니다.** 증상도 대표 증상 그대로입니다.
+
+```
+26건  {"detail":"같은 이름의 데이터셋이 이미 있습니다: orders"}
+ 2건  {"detail":"저장소 상태를 확인할 수 없습니다 …"}
+```
+
+**내 변경(`effective_status`·`_release_state`·`artifact_present`·`release_consistency`)이
+traceback 에 등장한 실패는 0건입니다.**
+
+⚠️ 다만 **A/B 비교는 하지 않았습니다**(스위트당 20분 이상). 위 셋 — 원래 PC 와 같은 수,
+같은 대표 증상, 내 심볼 부재 — 을 근거로 기존 실패로 판단했으며, 그것이 증명은 아닙니다.
+인계서는 「새PC 재현은 미확인」이라고 했으나 **이 PC 에서는 재현됨을 확인했습니다.**
