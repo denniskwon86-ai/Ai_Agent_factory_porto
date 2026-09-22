@@ -19,12 +19,15 @@ if str(ROOT) not in sys.path:
 
 from core.data_preparation.production_inputs import modern, verify_model
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import business_defs  # noqa: E402
+
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from core.data_preparation import kit_freeze  # noqa: E402
 KIT_ID = "KIT-MFG-NONFERROUS-PROCUREMENT"
-KIT_VERSION = "1.3.0"
+KIT_VERSION = "1.4.0"
 KIT_ROOT = ROOT / "starter_kits" / KIT_ID / KIT_VERSION
 COMMON = {"record_id", "tenant_id", "scope_node_id", "data_class", "business_data_kind",
           "data_origin", "quality_status", "certification_status", "as_of_date", "lineage_id"}
@@ -104,6 +107,66 @@ def validate_profile(profile: str, dataset_ids: Sequence[str], v: Validation) ->
     neg = [(r["material_id"], r["location_id"], r["unrestricted_quantity"])
            for r in (data.get("INV-01") or []) if float(r.get("unrestricted_quantity") or 0) < 0]
     v.check(f"{profile}:재고가_음수가_아니다", not neg, f"음수 {len(neg)}행: {neg[:3]}")
+
+    #: ★★★ **주력이 매출의 대부분인가** (1.4.0).
+    #:
+    #: ⚠️ 검사 420 건이 이것을 못 잡았다. 판매가 품목을 균등하게 돌아서 매출의
+    #:   **99% 를 볼륨용 더미**(「완제품 011」)가 차지했다. 「이 산업은 이렇게
+    #:   일한다」를 보이려는 키트인데 산업이 1% 뿐이었고, 그것을 **현업에게 드린
+    #:   문서의 숫자와 데이터가 달랐다**(2026-09-22 재검수에서 드러남).
+    #:
+    #: 하한만 본다 — 정확한 비중은 사업·판본마다 다르지만 **주력이 과반도 안 되는
+    #: 제조사는 없다.**
+    #: manifest 는 이 함수 밖에서 읽는다 — 여기서 다시 읽어 **둘이 어긋나지 않게** 한다
+    try:
+        _mf = json.loads((KIT_ROOT / "manifest.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        _mf = {}
+    _biz = _mf.get("businesses") or []
+    if _biz and data.get("SLS-01"):
+        #: manifest 가 사업을 밝힌 판본만 검사한다 — 옛 판본은 그 열이 없다
+        _known = {m["code"] for m in business_defs.materials_of(business_defs.load(list(_biz)))}
+        _major = _rest = 0.0
+        for r in data["SLS-01"]:
+            try:
+                a = float(r.get("shipped_quantity") or 0) * float(r.get("unit_price") or 0)
+            except (TypeError, ValueError):
+                continue
+            if r.get("product_id") in _known:
+                _major += a
+            else:
+                _rest += a
+        _share = _major / (_major + _rest) if (_major + _rest) else 0.0
+        v.check(f"{profile}:주력이_매출의_대부분이다", _share >= 0.70,
+                f"주력 {_share:.1%} (하한 70%) — 나머지는 볼륨용 더미다")
+
+        #: ★★★ **만든 것보다 많이 팔지 않는가** (1.4.0).
+        #:
+        #: ⚠️ **재고 음수 검사가 이것을 못 잡는다.** 조정 이벤트(`MOV-ADJ`, 이동의
+        #:   32%)가 재고를 채워 잔고가 양수로 남기 때문이다. 실제로 1.4.0 을 만들다
+        #:   **전기동을 6,972 톤 만들면서 12,980 톤 파는** 데이터를 냈는데 검사
+        #:   422 건이 전부 통과했다.
+        #:
+        #: 주력만 본다 — 더미는 기초재고로 사는 것도 있어 생산과 대응하지 않는다.
+        _made = defaultdict(float)
+        for r in (data.get("MFG-02") or []):
+            try:
+                _made[r.get("output_material_id")] += float(r.get("output_quantity") or 0)
+            except (TypeError, ValueError):
+                pass
+        _sold = defaultdict(float)
+        for r in (data.get("SLS-01") or []):
+            try:
+                _sold[r.get("product_id")] += float(r.get("shipped_quantity") or 0)
+            except (TypeError, ValueError):
+                pass
+        #: 부산물은 `MFG-02` 에 배치로 남지 않고 부산물 입고(`MOV-BP-`)로만 들어온다
+        _bp = {r.get("material_id") for r in (data.get("INV-02") or [])
+               if str(r.get("movement_id") or "").startswith("MOV-BP-")}
+        over = [f"{m}: 생산 {_made.get(m, 0):,.0f} < 판매 {q:,.0f}"
+                for m, q in _sold.items()
+                if m in _known and m not in _bp and q > _made.get(m, 0.0)]
+        v.check(f"{profile}:만든_것보다_많이_팔지_않는다", not over, "; ".join(over[:3]))
 
     org = data["FND-01"]
     org_ids = {r["node_id"] for r in org}

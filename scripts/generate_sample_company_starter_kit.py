@@ -24,7 +24,7 @@ from collections import defaultdict
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Mapping, Sequence
+from typing import Any, Dict, Iterable, List, Mapping, Sequence, Tuple
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -39,6 +39,7 @@ KIT_ID = "KIT-MFG-NONFERROUS-PROCUREMENT"
 #:   안에 한 덩어리로 박혀 있어, 고려아연(제련만)·켐코(황산니켈만)에 줄 수 없었다.
 #:   `--business` 로 갈아 끼운다 — `scripts/business_defs/` 참고.
 DEFAULT_BUSINESSES = ("smelting_nonferrous", "battery_materials")
+BUSINESS_CODES: Tuple[str, ...] = DEFAULT_BUSINESSES
 #: 기본 조합(LS MnM 형 — 한 법인이 두 사업)의 정체성. **하위호환을 위해 그대로 둔다** —
 #: 1.0.0~1.2.0 이 이 이름으로 봉인돼 있다.
 DEFAULT_KIT = ("KIT-MFG-NONFERROUS-PROCUREMENT", "비철 제련·전지소재 통합 업무키트",
@@ -72,8 +73,12 @@ def use_businesses(codes, kit_id: str = "", kit_name: str = "") -> None:
       `KIT-MFG-NONFERROUS-PROCUREMENT` 로 나온다 — **데이터는 전지소재인데 이름표가
       제련**이고, 그대로 주면 켐코에 「비철 조달 키트」를 주는 셈이다.
     """
-    global BUSINESSES, KIT_ID, KIT_NAME, USE_CASE
+    global BUSINESSES, BUSINESS_CODES, KIT_ID, KIT_NAME, USE_CASE
     BUSINESSES = business_defs.load(list(codes))
+    #: ★ 어느 사업에서 나왔는지를 **manifest 에 남긴다**(1.4.0). 선반이 「재현할 수
+    #:   있나」를 묻고 검증기가 「무엇이 주력인가」를 물을 때 이것이 답이다. 없으면
+    #:   둘 다 이름으로 추측해야 한다.
+    BUSINESS_CODES = tuple(codes)
     #: 기본 조합은 **기존 이름을 그대로 쓴다** — 1.0.0~1.2.0 이 그 이름으로 봉인돼 있다
     if not kit_id and tuple(codes) == DEFAULT_BUSINESSES:
         kit_id, kit_name = DEFAULT_KIT[0], DEFAULT_KIT[1]
@@ -93,7 +98,7 @@ def company_name() -> str:
 #: **판본은 `--version` 으로 받는다** (P2). 예전에는 여기에 "1.0.0" 이 박혀 있어서,
 #: 1.1.0 을 내려면 이 줄을 고쳐야 했고 고치는 순간 1.0.0 을 재현할 수 없게 됐다.
 #: `main()`/`build()` 이 아래 셋을 판본에 맞게 다시 세운다.
-KIT_VERSION = "1.3.0"
+KIT_VERSION = "1.4.0"
 KIT_ROOT = ROOT / "starter_kits" / KIT_ID / KIT_VERSION
 OVERLAY: kit_defs.KitOverlay = kit_defs.KitOverlay()
 
@@ -712,9 +717,51 @@ def generate_purchase_and_logistics(profile: Profile, contracts: List[Dict[str, 
             stamp("LOG-04", customs_rows, kind="ACTUAL"), stamp("LOG-05", transport_rows, kind="ACTUAL"))
 
 
+#: ★★★ **주력이 매출을 만든다** (1.4.0).
+#:
+#: 1.3.0 까지 판매가 품목을 **균등하게** 돌았다. 그런데 완제품은 사업이 정의한 것
+#: 1~2 종이고 볼륨용 더미(`MAT-FI-*`)가 35 종이라, 매출의 **99% 를 「완제품 011」
+#: 같은 이름 없는 품목**이 차지했다. 게다가 더미 기본 단가가 32,000 으로 **전기동
+#: (9,500)보다 3.4 배 비쌌다.**
+#:
+#:     1.3.0   전기동 0.8% · 금 0.1% · 황산 0.0% · 더미 99%
+#:
+#: 「이 산업은 이렇게 일한다」를 보이려는 키트인데 **산업이 1% 뿐**이었다. 현업에게
+#: 「매출 구성이 이렇습니다」라고 드린 숫자도 더미를 빼고 센 것이라 **데이터를 열면
+#: 맞지 않았다.**
+#:
+#: ⚠️ **더미를 안 팔 수는 없다.** 생산(MFG)은 BOM 을 따라 계속 만들므로, 팔지 않으면
+#:   재고가 끝없이 쌓인다. 그래서 **없애지 않고 비중을 낮춘다.**
+#:
+#: | | 값 | 왜 |
+#: |---|---|---|
+#: | 주력 반복 | **30** | 제조사는 주력 제품으로 번다. 부대 품목이 매출의 다수인 제조사는 없다 |
+#: | 더미 단가 | **1,200** | 부대 품목이 주력보다 비쌀 이유가 없다 |
+#:
+#: 그 결과 주력이 매출의 **89%**(제련) · **95%**(전지소재)가 되고, 건수로는 더미도
+#: 4 분의 1 이 남아 **볼륨은 그대로**다.
+#:
+#: ⚠️ 이 둘은 **산업 공통**이라 여기 둔다. 「주력이 몇 %인가」는 회사마다 다르지만
+#:   「주력이 대부분이다」는 제조업이면 그렇다. 회사 실제 비중은 현업이 플랫폼 안에서
+#:   채운다.
+_MAJOR_REPEAT = 30
+_FILLER_PRICE = 1200.0
+
+#: 생산 쪽 가중 — **판매보다 작다.** 총 배치 수가 고정이라 여기를 크게 주면 주력
+#: 재고가 터무니없이 쌓인다. `generate_plans_batches_events` 의 설명을 보라.
+_MAJOR_REPEAT_MFG = 3
+
+
 def generate_sales(profile: Profile, customers: Sequence[Mapping[str, Any]], products: Sequence[str],
                    start: date, end: date, rng: random.Random) -> List[Dict[str, Any]]:
     span = max(1, (end-start).days)
+    #: ★ 주력과 더미를 **품목 마스터가 아니라 사업 정의로** 가른다 — `MAT-` 접두사로
+    #:   가르면 사업이 그런 이름을 쓰는 순간 조용히 어긋난다.
+    _known = {m["code"] for m in business_defs.materials_of(BUSINESSES)}
+    major = [p for p in products if p in _known]
+    filler = [p for p in products if p not in _known]
+    #: 주력이 없으면(가능성은 낮지만) 원래대로 돈다 — 나누기 0 을 만들지 않는다
+    products = (major * _MAJOR_REPEAT + filler) if major else list(products)
     rows = []
     for i in range(profile.sales_lines):
         order_date = start + timedelta(days=(i*13 + i//9) % span)
@@ -723,9 +770,11 @@ def generate_sales(profile: Profile, customers: Sequence[Mapping[str, Any]], pro
         product = products[i % len(products)]
         #: 품목마다 거래 단위가 다르다 — 금을 전기동과 같은 수량으로 팔 수는 없다
         qty = round((8 + (i%17)*1.7) * business_defs.sale_qty_scale_of(BUSINESSES, product), 3)
-        #: ★ 단가는 사업이 줄 수 있다 — 부산물은 완제품과 **자릿수가 다르다**
-        #:   (황산은 싸고 많이, 금은 비싸고 조금).
-        _base = 24000 if product == "FG-NISO4" else 9500 if product == "FG-CATHODE" else 32000
+        #: ★ 단가는 **사업이 준다**(1.4.0). 1.3.0 까지는 여기서 품목 이름으로 분기해
+        #:   `FG-NISO4`·`FG-CATHODE` 만 알았고, **나머지 완제품은 더미 기본값으로
+        #:   떨어졌다** — `FG-LIOH` 가 그랬다. 사업이 품목을 늘릴 때마다 생성기를
+        #:   고쳐야 하는 구조였고, 고치지 않으면 조용히 틀렸다.
+        _base = _FILLER_PRICE
         price = round(business_defs.sale_price_of(BUSINESSES, product, _base) * (0.95 + (i%9)*0.012), 2)
         customer = customers[i % len(customers)]
         rows.append({"sales_line_id": f"SO-{i+1:06d}-10", "customer_id": customer["customer_id"],
@@ -745,6 +794,23 @@ def generate_plans_batches_events(profile: Profile, bom: Sequence[Mapping[str, A
                                   sales: Sequence[Mapping[str, Any]], start: date, end: date,
                                   rng: random.Random) -> tuple[List[Dict[str, Any]], List[Dict[str, Any]], List[Dict[str, Any]]]:
     products = sorted({str(b["output_material_id"]) for b in bom})
+    #: ★★★ **만든 것보다 많이 팔 수는 없다** (1.4.0).
+    #:
+    #: 생산은 품목을 **균등하게** 돌았고 판매와 아무 관계가 없었다. 1.3.0 까지는
+    #: 주력 판매가 워낙 적어(전기동 1,415 톤 vs 생산 6,972 톤) 드러나지 않았는데,
+    #: 판매를 주력 중심으로 고치자 **전기동을 6,972 톤 만들면서 12,980 톤 파는**
+    #: 데이터가 됐다.
+    #:
+    #: ⚠️ **재고 음수 검사가 이것을 못 잡았다.** 조정 이벤트(`MOV-ADJ`, 이동의 32%)가
+    #:   재고를 채워 잔고가 양수로 남기 때문이다 — 「없는 것을 판다」가 조정에 가렸다.
+    #:
+    #: 그래서 생산도 주력 쪽으로 기울인다. 판매(30)보다 작게 주는 이유는 **총 배치 수가
+    #: 고정**이라 너무 기울이면 주력 재고가 터무니없이 쌓이기 때문이다 — 생산이
+    #: 판매의 1.5 배쯤 되는 자리를 골랐다.
+    _known_mfg = {m["code"] for m in business_defs.materials_of(BUSINESSES)}
+    _major_mfg = [p for p in products if p in _known_mfg]
+    if _major_mfg:
+        products = _major_mfg * _MAJOR_REPEAT_MFG + [p for p in products if p not in _known_mfg]
     bom_by_product: Dict[str, List[Mapping[str, Any]]] = defaultdict(list)
     for b in bom:
         bom_by_product[str(b["output_material_id"])].append(b)
@@ -1459,6 +1525,8 @@ def build(clean: bool = True, force: bool = False, businesses=None,
         #:   LS MnM 사업부는 C24** 로 간다 — **법인 구조가 정하는 값**이지 키트 속성이
         #:   아니다. 분류와 잇는 열은 우리 좌표 `sector` 다.
         "sector": [b.sector for b in BUSINESSES],
+        #: ★ 이 키트가 **어느 사업 정의에서 나왔나**(1.4.0). 재현·검증의 근거다
+        "businesses": list(BUSINESS_CODES),
         "primary_use_case": USE_CASE,
         "profiles": {name: {k: v for k, v in vars(p).items()} for name, p in PROFILES.items()},
         "datasets": [{"dataset_id": ds, **DATASETS[ds], "required": ds not in {"KNW-01"}}

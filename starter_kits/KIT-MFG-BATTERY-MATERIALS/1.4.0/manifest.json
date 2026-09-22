@@ -1,0 +1,1412 @@
+{
+  "kit_id": "KIT-MFG-BATTERY-MATERIALS",
+  "version": "1.4.0",
+  "status": "VALIDATED_FOR_DEMO",
+  "kit_name": "전지소재(황산니켈) 업무키트",
+  "company_profile_id": "AFS-DEMO-MATERIALS-GROUP",
+  "company_name": "AFS 첨단소재 주식회사",
+  "entity_mode": "VIRTUAL",
+  "data_class": "SYNTHETIC",
+  "not_for_management_decision": true,
+  "sector": [
+    "B:전자·정밀>전지·전원부품>전지소재"
+  ],
+  "businesses": [
+    "battery_materials"
+  ],
+  "primary_use_case": "원료 확보에서 배터리급 품질·고객 인증까지",
+  "profiles": {
+    "quick": {
+      "name": "quick",
+      "months": 6,
+      "materials": 30,
+      "suppliers": 10,
+      "customers": 8,
+      "equipments": 12,
+      "contracts": 20,
+      "purchase_orders": 200,
+      "shipments": 120,
+      "production_plans": 500,
+      "production_batches": 650,
+      "sales_lines": 300,
+      "gl_documents": 900,
+      "users": 8,
+      "seed": 20260811
+    },
+    "full": {
+      "name": "full",
+      "months": 36,
+      "materials": 220,
+      "suppliers": 40,
+      "customers": 24,
+      "equipments": 48,
+      "contracts": 100,
+      "purchase_orders": 1800,
+      "shipments": 1200,
+      "production_plans": 6000,
+      "production_batches": 8000,
+      "sales_lines": 2500,
+      "gl_documents": 7500,
+      "users": 24,
+      "seed": 20260811
+    }
+  },
+  "datasets": [
+    {
+      "dataset_id": "FND-01",
+      "name": "기업·조직 계층",
+      "keys": [
+        "node_id"
+      ],
+      "deps": [],
+      "required": true
+    },
+    {
+      "dataset_id": "FND-02",
+      "name": "사용자·역할·권한",
+      "keys": [
+        "user_id",
+        "role_id",
+        "scope_node_id"
+      ],
+      "deps": [
+        "FND-01"
+      ],
+      "required": true
+    },
+    {
+      "dataset_id": "FND-03",
+      "name": "달력·통화·단위·환산",
+      "keys": [
+        "reference_type",
+        "reference_key",
+        "effective_date"
+      ],
+      "deps": [],
+      "required": true
+    },
+    {
+      "dataset_id": "MDM-01",
+      "name": "품목·제품·원료",
+      "keys": [
+        "material_id"
+      ],
+      "deps": [
+        "FND-01",
+        "FND-03"
+      ],
+      "required": true
+    },
+    {
+      "dataset_id": "MDM-02",
+      "name": "공급사·파트너",
+      "keys": [
+        "supplier_id"
+      ],
+      "deps": [
+        "FND-01",
+        "FND-03",
+        "MDM-01"
+      ],
+      "required": true
+    },
+    {
+      "dataset_id": "MDM-03",
+      "name": "고객·시장",
+      "keys": [
+        "customer_id"
+      ],
+      "deps": [
+        "FND-01",
+        "FND-03",
+        "MDM-01"
+      ],
+      "required": true
+    },
+    {
+      "dataset_id": "MDM-04",
+      "name": "공장·창고·저장 위치",
+      "keys": [
+        "location_id"
+      ],
+      "deps": [
+        "FND-01"
+      ],
+      "required": true
+    },
+    {
+      "dataset_id": "MDM-05",
+      "name": "BOM·수율·부산물",
+      "keys": [
+        "bom_id",
+        "line_no"
+      ],
+      "deps": [
+        "MDM-01"
+      ],
+      "required": true
+    },
+    {
+      "dataset_id": "MDM-06",
+      "name": "Routing·설비·생산능력",
+      "keys": [
+        "routing_id",
+        "operation_seq"
+      ],
+      "deps": [
+        "FND-01",
+        "MDM-01"
+      ],
+      "required": true
+    },
+    {
+      "dataset_id": "MDM-07",
+      "name": "계정·원가요소·원가센터",
+      "keys": [
+        "account_id",
+        "cost_center_id"
+      ],
+      "deps": [
+        "FND-01",
+        "FND-03"
+      ],
+      "required": true
+    },
+    {
+      "dataset_id": "MDM-08",
+      "name": "계약조건·Incoterms·항만·운송구간",
+      "keys": [
+        "reference_id"
+      ],
+      "deps": [
+        "FND-03"
+      ],
+      "required": true
+    },
+    {
+      "dataset_id": "PRC-01",
+      "name": "구매계약·가격조건",
+      "keys": [
+        "contract_id"
+      ],
+      "deps": [
+        "MDM-01",
+        "MDM-02",
+        "MDM-08",
+        "EXT-02"
+      ],
+      "required": true
+    },
+    {
+      "dataset_id": "PRC-02",
+      "name": "구매주문·납기 일정",
+      "keys": [
+        "po_line_id"
+      ],
+      "deps": [
+        "PRC-01"
+      ],
+      "required": true
+    },
+    {
+      "dataset_id": "LOG-01",
+      "name": "파트너 제출 상태",
+      "keys": [
+        "submission_id"
+      ],
+      "deps": [
+        "PRC-02",
+        "MDM-02"
+      ],
+      "required": true
+    },
+    {
+      "dataset_id": "LOG-02",
+      "name": "선적 헤더·운송편",
+      "keys": [
+        "shipment_id"
+      ],
+      "deps": [
+        "PRC-02",
+        "MDM-08"
+      ],
+      "required": true
+    },
+    {
+      "dataset_id": "LOG-03",
+      "name": "선적 Milestone",
+      "keys": [
+        "milestone_id"
+      ],
+      "deps": [
+        "LOG-02"
+      ],
+      "required": true
+    },
+    {
+      "dataset_id": "LOG-04",
+      "name": "통관·검사·관세",
+      "keys": [
+        "clearance_id"
+      ],
+      "deps": [
+        "LOG-02"
+      ],
+      "required": true
+    },
+    {
+      "dataset_id": "LOG-05",
+      "name": "내륙 운송 Milestone",
+      "keys": [
+        "transport_event_id"
+      ],
+      "deps": [
+        "LOG-02",
+        "MDM-04"
+      ],
+      "required": true
+    },
+    {
+      "dataset_id": "INV-01",
+      "name": "재고 스냅샷",
+      "keys": [
+        "snapshot_id"
+      ],
+      "deps": [
+        "INV-02",
+        "MDM-01",
+        "MDM-04"
+      ],
+      "required": true
+    },
+    {
+      "dataset_id": "INV-02",
+      "name": "재고 이동·Lot",
+      "keys": [
+        "movement_id"
+      ],
+      "deps": [
+        "LOG-05",
+        "MFG-02",
+        "SLS-01"
+      ],
+      "required": true
+    },
+    {
+      "dataset_id": "MFG-01",
+      "name": "생산계획·소요량",
+      "keys": [
+        "plan_line_id"
+      ],
+      "deps": [
+        "MDM-05",
+        "MDM-06",
+        "SLS-01"
+      ],
+      "required": true
+    },
+    {
+      "dataset_id": "MFG-02",
+      "name": "생산실적·수율",
+      "keys": [
+        "batch_id"
+      ],
+      "deps": [
+        "MFG-01",
+        "MFG-03",
+        "MDM-05"
+      ],
+      "required": true
+    },
+    {
+      "dataset_id": "MFG-03",
+      "name": "가동·고장·정비",
+      "keys": [
+        "equipment_event_id"
+      ],
+      "deps": [
+        "MDM-06"
+      ],
+      "required": true
+    },
+    {
+      "dataset_id": "QLT-01",
+      "name": "입고·공정·제품 품질",
+      "keys": [
+        "inspection_id"
+      ],
+      "deps": [
+        "LOG-05",
+        "MFG-02",
+        "MDM-01"
+      ],
+      "required": true
+    },
+    {
+      "dataset_id": "SLS-01",
+      "name": "판매계획·수주·출하",
+      "keys": [
+        "sales_line_id"
+      ],
+      "deps": [
+        "MDM-01",
+        "MDM-03"
+      ],
+      "required": true
+    },
+    {
+      "dataset_id": "FIN-01",
+      "name": "표준원가·실제원가",
+      "keys": [
+        "cost_record_id"
+      ],
+      "deps": [
+        "PRC-01",
+        "MFG-02",
+        "LOG-02"
+      ],
+      "required": true
+    },
+    {
+      "dataset_id": "FIN-02",
+      "name": "매입·미지급·매출채권",
+      "keys": [
+        "finance_document_id"
+      ],
+      "deps": [
+        "PRC-02",
+        "SLS-01"
+      ],
+      "required": true
+    },
+    {
+      "dataset_id": "FIN-03",
+      "name": "예산·회계실적·현금흐름",
+      "keys": [
+        "ledger_line_id"
+      ],
+      "deps": [
+        "FIN-01",
+        "FIN-02",
+        "MDM-07"
+      ],
+      "required": true
+    },
+    {
+      "dataset_id": "EXT-01",
+      "name": "환율·금리·물가",
+      "keys": [
+        "observation_id"
+      ],
+      "deps": [],
+      "required": true
+    },
+    {
+      "dataset_id": "EXT-02",
+      "name": "원자재·제품 기준가격",
+      "keys": [
+        "observation_id"
+      ],
+      "deps": [],
+      "required": true
+    },
+    {
+      "dataset_id": "EXT-03",
+      "name": "운임·에너지·기상·산업지표",
+      "keys": [
+        "observation_id"
+      ],
+      "deps": [],
+      "required": true
+    },
+    {
+      "dataset_id": "KNW-01",
+      "name": "표준서·계약·규정·연구자료",
+      "keys": [
+        "document_id"
+      ],
+      "deps": [
+        "FND-01"
+      ],
+      "required": false
+    },
+    {
+      "dataset_id": "SIM-01",
+      "name": "Driver·계산식·제약",
+      "keys": [
+        "driver_id"
+      ],
+      "deps": [
+        "EXT-01",
+        "EXT-02",
+        "EXT-03",
+        "FIN-03"
+      ],
+      "required": true
+    },
+    {
+      "dataset_id": "SIM-02",
+      "name": "기준·위험·대안 시나리오",
+      "keys": [
+        "scenario_id"
+      ],
+      "deps": [
+        "SIM-01"
+      ],
+      "required": true
+    },
+    {
+      "dataset_id": "DEC-01",
+      "name": "결정·실행과제·효과",
+      "keys": [
+        "decision_id"
+      ],
+      "deps": [
+        "SIM-02",
+        "FND-02"
+      ],
+      "required": true
+    }
+  ],
+  "dataset_count": 35,
+  "operational_baseline_count": 28,
+  "app_blueprints": [
+    {
+      "app_id": "APP-01",
+      "name": "원료 도입계획·추적",
+      "datasets": [
+        "PRC-01",
+        "PRC-02",
+        "LOG-01",
+        "LOG-02",
+        "LOG-03",
+        "LOG-04",
+        "LOG-05",
+        "EXT-01",
+        "EXT-02",
+        "EXT-03"
+      ]
+    },
+    {
+      "app_id": "APP-02",
+      "name": "물류 사건 확인·입력",
+      "datasets": [
+        "LOG-01",
+        "LOG-02",
+        "LOG-03",
+        "LOG-04",
+        "LOG-05",
+        "INV-02"
+      ]
+    },
+    {
+      "app_id": "APP-03",
+      "name": "재고·생산 영향 분석",
+      "datasets": [
+        "INV-01",
+        "INV-02",
+        "MFG-01",
+        "MFG-02",
+        "MFG-03",
+        "QLT-01"
+      ]
+    },
+    {
+      "app_id": "APP-04",
+      "name": "구매원가·현금 전망",
+      "datasets": [
+        "PRC-01",
+        "FIN-01",
+        "FIN-02",
+        "FIN-03",
+        "EXT-01",
+        "EXT-02"
+      ]
+    },
+    {
+      "app_id": "APP-05",
+      "name": "공급 위험·대체안",
+      "datasets": [
+        "MDM-02",
+        "PRC-01",
+        "PRC-02",
+        "EXT-02",
+        "EXT-03",
+        "SIM-02"
+      ]
+    },
+    {
+      "app_id": "APP-06",
+      "name": "판매·납기·매출 영향",
+      "datasets": [
+        "SLS-01",
+        "MFG-01",
+        "INV-01",
+        "FIN-02",
+        "FIN-03",
+        "EXT-01"
+      ]
+    },
+    {
+      "app_id": "APP-07",
+      "name": "전사 시나리오·실적 통합",
+      "datasets": [
+        "PRC-02",
+        "LOG-02",
+        "INV-01",
+        "MFG-01",
+        "SLS-01",
+        "FIN-01",
+        "FIN-02",
+        "FIN-03",
+        "EXT-01",
+        "EXT-02",
+        "SIM-01",
+        "SIM-02",
+        "DEC-01"
+      ]
+    }
+  ],
+  "report_templates": [
+    {
+      "report_id": "RPT-01",
+      "name": "원료 도입·재고 경영 현황"
+    },
+    {
+      "report_id": "RPT-02",
+      "name": "시나리오 비교 보고서"
+    },
+    {
+      "report_id": "RPT-03",
+      "name": "의사결정 요청 검토서"
+    },
+    {
+      "report_id": "RPT-04",
+      "name": "실행 효과 보고서"
+    },
+    {
+      "report_id": "RPT-05",
+      "name": "대내외 발간 초안"
+    }
+  ],
+  "company_profiles": [
+    {
+      "company_profile_id": "AFS-DEMO-MATERIALS-GROUP",
+      "company_name": "AFS 데모소재그룹",
+      "profile_role": "BASE_SAMPLE_COMPANY",
+      "industry_code": "C24"
+    },
+    {
+      "company_profile_id": "AFS-VIRTUAL-BATTERY-EXPANSION-2030",
+      "company_name": "AFS 배터리소재 제3공장 증설안",
+      "profile_role": "VIRTUAL_EXPANSION",
+      "industry_code": "C2013"
+    },
+    {
+      "company_profile_id": "AFS-VIRTUAL-CIRCULAR-METALS",
+      "company_name": "AFS 순환금속 리사이클링 신사업안",
+      "profile_role": "VIRTUAL_NEW_BUSINESS",
+      "industry_code": "C3832"
+    },
+    {
+      "company_profile_id": "AFS-VIRTUAL-GLOBAL-SMELTING",
+      "company_name": "AFS 글로벌 제련법인 진출안",
+      "profile_role": "VIRTUAL_OVERSEAS_ENTITY",
+      "industry_code": "C2412"
+    },
+    {
+      "company_profile_id": "AFS-VIRTUAL-SMART-POWER",
+      "company_name": "AFS 스마트 전력기기 신규법인안",
+      "profile_role": "VIRTUAL_ADJACENT_BUSINESS",
+      "industry_code": "C2812"
+    },
+    {
+      "company_profile_id": "AFS-VIRTUAL-SUBSEA-CABLE-NA",
+      "company_name": "AFS 북미 해저케이블 생산법인안",
+      "profile_role": "VIRTUAL_OVERSEAS_ENTITY",
+      "industry_code": "C2830"
+    }
+  ],
+  "company_profile_count": 6,
+  "scenario_ids": [
+    "SCN-01",
+    "SCN-02",
+    "SCN-03",
+    "SCN-04",
+    "SCN-05",
+    "SCN-06",
+    "SCN-07",
+    "SCN-08",
+    "SCN-09",
+    "SCN-10"
+  ],
+  "generator": {
+    "path": "scripts/generate_sample_company_starter_kit.py",
+    "version": "1.0.0"
+  },
+  "generated_at": "2026-09-22T04:45:42+00:00",
+  "file_index": [
+    {
+      "path": "samples/quick/FND-01.csv",
+      "sha256": "c31f8976b345da7cc692403b4b1102a1f4ef424e52c6fac1d1f857bdd04ebece",
+      "rows": 7,
+      "dataset_id": "FND-01",
+      "profile": "quick"
+    },
+    {
+      "path": "samples/quick/FND-02.csv",
+      "sha256": "1876b21aae6a00b2a2e3aa376f7a78e38dda65bbba8babf55780842d45ead8ef",
+      "rows": 8,
+      "dataset_id": "FND-02",
+      "profile": "quick"
+    },
+    {
+      "path": "samples/quick/FND-03.csv",
+      "sha256": "5204281109b9b6140f36b9f0f5550097b3520c083bf3f41ef5495c6c1dcc4555",
+      "rows": 186,
+      "dataset_id": "FND-03",
+      "profile": "quick"
+    },
+    {
+      "path": "samples/quick/MDM-01.csv",
+      "sha256": "e1f7c8a16d34822c19a38fcc016d8bf827a970769436337b25244d2643b49221",
+      "rows": 30,
+      "dataset_id": "MDM-01",
+      "profile": "quick"
+    },
+    {
+      "path": "samples/quick/MDM-02.csv",
+      "sha256": "95dee879941d26997e7fc56a8807867334a4d22c87a4ae5c8cb39efa2869ff1c",
+      "rows": 10,
+      "dataset_id": "MDM-02",
+      "profile": "quick"
+    },
+    {
+      "path": "samples/quick/MDM-03.csv",
+      "sha256": "ce19e475c5e795ffa764f851ed372bd566ff89ed89816a3f10cb7bbdbf8c7d74",
+      "rows": 8,
+      "dataset_id": "MDM-03",
+      "profile": "quick"
+    },
+    {
+      "path": "samples/quick/MDM-04.csv",
+      "sha256": "e6905618a1be5567cdba13f692c71e70f9e516e2cdf6be5d45f891535045f0f6",
+      "rows": 2,
+      "dataset_id": "MDM-04",
+      "profile": "quick"
+    },
+    {
+      "path": "samples/quick/MDM-05.csv",
+      "sha256": "489d036dcbb975c9cc684f156390f50920f9ea383706af52208c3a7b3b6ba35d",
+      "rows": 10,
+      "dataset_id": "MDM-05",
+      "profile": "quick"
+    },
+    {
+      "path": "samples/quick/MDM-06.csv",
+      "sha256": "b449a30acfc1b1ddbc5072f8facbf238f4c6b58b1fbc2f7b9517f58fc399d247",
+      "rows": 12,
+      "dataset_id": "MDM-06",
+      "profile": "quick"
+    },
+    {
+      "path": "samples/quick/MDM-07.csv",
+      "sha256": "e67e9642b44630886b2d37ad1bbbf20eb55e86a3de31b8da61be30b8565f0289",
+      "rows": 30,
+      "dataset_id": "MDM-07",
+      "profile": "quick"
+    },
+    {
+      "path": "samples/quick/MDM-08.csv",
+      "sha256": "e5566004050a04be2bc0021100b350b8533eb632669b04a7c7e2783a42c4644d",
+      "rows": 23,
+      "dataset_id": "MDM-08",
+      "profile": "quick"
+    },
+    {
+      "path": "samples/quick/PRC-01.csv",
+      "sha256": "2e7cc4507c303735cdeb5ad05a0910542ebf2383b37639d1989e3025a22ad140",
+      "rows": 20,
+      "dataset_id": "PRC-01",
+      "profile": "quick"
+    },
+    {
+      "path": "samples/quick/PRC-02.csv",
+      "sha256": "5b4ca96a7dd7810ef73582c1018c19c70d502230582d3d6ecb1f250a9b197a9a",
+      "rows": 200,
+      "dataset_id": "PRC-02",
+      "profile": "quick"
+    },
+    {
+      "path": "samples/quick/LOG-01.csv",
+      "sha256": "4fd44b5c55d470e3596fe086ec3b45dac77d47a625d5b001f130cfd09a587b53",
+      "rows": 200,
+      "dataset_id": "LOG-01",
+      "profile": "quick"
+    },
+    {
+      "path": "samples/quick/LOG-02.csv",
+      "sha256": "1062bc508bae8efaf33dcda15a88e5784496fb97b9b18dff1506bf3a85cc4cc1",
+      "rows": 120,
+      "dataset_id": "LOG-02",
+      "profile": "quick"
+    },
+    {
+      "path": "samples/quick/LOG-03.csv",
+      "sha256": "5558146cdf465ea394ef2bc6e0624f0d870c79a0c75a7c4712b6157988dc4da9",
+      "rows": 720,
+      "dataset_id": "LOG-03",
+      "profile": "quick"
+    },
+    {
+      "path": "samples/quick/LOG-04.csv",
+      "sha256": "23ddff2bb1cc9a7e071b4a4745741552bd5815441ab833e665b99a66ed45ef99",
+      "rows": 120,
+      "dataset_id": "LOG-04",
+      "profile": "quick"
+    },
+    {
+      "path": "samples/quick/LOG-05.csv",
+      "sha256": "74f5ca267fc5fdef0285c3cd5f3096f99798d7928281109dda5892a357afd6b0",
+      "rows": 240,
+      "dataset_id": "LOG-05",
+      "profile": "quick"
+    },
+    {
+      "path": "samples/quick/INV-01.csv",
+      "sha256": "b98d2479fc878c269a1bd83c0b0c03fd70892231364a3aa32e268ab3ed573fd9",
+      "rows": 360,
+      "dataset_id": "INV-01",
+      "profile": "quick"
+    },
+    {
+      "path": "samples/quick/INV-02.csv",
+      "sha256": "6a6d7a9335972b828fef8b47ce33e6a30fa70bce1fa0e18467dc620f4c1a149b",
+      "rows": 5000,
+      "dataset_id": "INV-02",
+      "profile": "quick"
+    },
+    {
+      "path": "samples/quick/MFG-01.csv",
+      "sha256": "106204e53d06526d7b71c57f13bb77d5e391cee4fa4d8f87497df6348815b6e0",
+      "rows": 500,
+      "dataset_id": "MFG-01",
+      "profile": "quick"
+    },
+    {
+      "path": "samples/quick/MFG-02.csv",
+      "sha256": "8dac10cf772a6d279814fd565bd5db795f51d4f5e652f1388832d92e65c53bde",
+      "rows": 650,
+      "dataset_id": "MFG-02",
+      "profile": "quick"
+    },
+    {
+      "path": "samples/quick/MFG-03.csv",
+      "sha256": "26aa3dbdb193813a9de5861eb085ed08acd8ccbdb06d1eaa6470f4b4d678f0b8",
+      "rows": 144,
+      "dataset_id": "MFG-03",
+      "profile": "quick"
+    },
+    {
+      "path": "samples/quick/QLT-01.csv",
+      "sha256": "9574db2fa69b0820be44f178b9cffc8fa5fea04c32b6936ee182bda7545ed773",
+      "rows": 1500,
+      "dataset_id": "QLT-01",
+      "profile": "quick"
+    },
+    {
+      "path": "samples/quick/SLS-01.csv",
+      "sha256": "a2ccb8158c99b61ba53af74817c4b8b1ab8bb039e0bb1b57d6a94125f807e028",
+      "rows": 300,
+      "dataset_id": "SLS-01",
+      "profile": "quick"
+    },
+    {
+      "path": "samples/quick/FIN-01.csv",
+      "sha256": "ebd82261b5bf8115e29f04871cfa5a9822136901a97588b6ad411e0ff83f15c1",
+      "rows": 144,
+      "dataset_id": "FIN-01",
+      "profile": "quick"
+    },
+    {
+      "path": "samples/quick/FIN-02.csv",
+      "sha256": "23dacf66ae71b4bf9821b5fb5c8839d8abab73d4181966a68d66c6c1f67a7ac8",
+      "rows": 420,
+      "dataset_id": "FIN-02",
+      "profile": "quick"
+    },
+    {
+      "path": "samples/quick/FIN-03.csv",
+      "sha256": "624251cda9f2e936b797739360ff3bbdf0b1524327d991883f187526e381882c",
+      "rows": 1800,
+      "dataset_id": "FIN-03",
+      "profile": "quick"
+    },
+    {
+      "path": "samples/quick/EXT-01.csv",
+      "sha256": "ab92aabb0c196ac6af11bd1e8fec93ea4c72a7b947aa9a55d6a0fb68f6152cdd",
+      "rows": 180,
+      "dataset_id": "EXT-01",
+      "profile": "quick"
+    },
+    {
+      "path": "samples/quick/EXT-02.csv",
+      "sha256": "c9fc0eb12c831b416ab620248508dbadd0bc31da390971fb3192d57118999b50",
+      "rows": 240,
+      "dataset_id": "EXT-02",
+      "profile": "quick"
+    },
+    {
+      "path": "samples/quick/EXT-03.csv",
+      "sha256": "37c84ba0099b3b53c269df1ee245e3b83366e473d0c5cdc043a63fc6dfdc8ab2",
+      "rows": 180,
+      "dataset_id": "EXT-03",
+      "profile": "quick"
+    },
+    {
+      "path": "samples/quick/KNW-01.csv",
+      "sha256": "af5512117eed617d8afcd1810de12fb35653c6e9fbb3626cbdbe977366e719df",
+      "rows": 10,
+      "dataset_id": "KNW-01",
+      "profile": "quick"
+    },
+    {
+      "path": "samples/quick/SIM-01.csv",
+      "sha256": "fcbff30b6d15fb91d4aa737d21bc92f243ee4155e6e2735153c1bd1ece0eb8e4",
+      "rows": 12,
+      "dataset_id": "SIM-01",
+      "profile": "quick"
+    },
+    {
+      "path": "samples/quick/SIM-02.csv",
+      "sha256": "9761ee19a1491b5e3644e3fb22698f23598837cc4fb5411ff77129b0783a66e2",
+      "rows": 10,
+      "dataset_id": "SIM-02",
+      "profile": "quick"
+    },
+    {
+      "path": "samples/quick/DEC-01.csv",
+      "sha256": "58e40605196e7b2243b3f294f9c3ef808e9d4b9ddc0a54bed38bea0c20f88868",
+      "rows": 3,
+      "dataset_id": "DEC-01",
+      "profile": "quick"
+    },
+    {
+      "path": "samples/full/FND-01.csv",
+      "sha256": "860a3f6724f3c99c9c9e5345fc98038713346398859101be0d1ddef048075853",
+      "rows": 11,
+      "dataset_id": "FND-01",
+      "profile": "full"
+    },
+    {
+      "path": "samples/full/FND-02.csv",
+      "sha256": "55ecc14bfff7279f79f3823e059a99e163bdf65b80661437f7004dfda30a501f",
+      "rows": 24,
+      "dataset_id": "FND-02",
+      "profile": "full"
+    },
+    {
+      "path": "samples/full/FND-03.csv",
+      "sha256": "be34491479a0e738c5e125d4ed45aac8a7b124edc0818d2e85f405bfc208c5a7",
+      "rows": 1101,
+      "dataset_id": "FND-03",
+      "profile": "full"
+    },
+    {
+      "path": "samples/full/MDM-01.csv",
+      "sha256": "180eab4f7b2f8942fac14e728f87c20d16e47d204e02702590515784384aa8be",
+      "rows": 220,
+      "dataset_id": "MDM-01",
+      "profile": "full"
+    },
+    {
+      "path": "samples/full/MDM-02.csv",
+      "sha256": "d2455b1b9634031201f7b7eb52bec47e7b6d8a06cabf53ba7f3f2b6d1d252db6",
+      "rows": 40,
+      "dataset_id": "MDM-02",
+      "profile": "full"
+    },
+    {
+      "path": "samples/full/MDM-03.csv",
+      "sha256": "46ce93dd5f4954f1fc6ac38af1a12f6489178a648a8bb40ca1f1e8ca5056aa0c",
+      "rows": 24,
+      "dataset_id": "MDM-03",
+      "profile": "full"
+    },
+    {
+      "path": "samples/full/MDM-04.csv",
+      "sha256": "498c9fa4d98afad78c3269e5ac41a7394eff369d61d2c8bd6d249274992eec7e",
+      "rows": 5,
+      "dataset_id": "MDM-04",
+      "profile": "full"
+    },
+    {
+      "path": "samples/full/MDM-05.csv",
+      "sha256": "83a749f19790f1477ebf49ace3f7daa19c9b376c3c49f0863e55d611e2ca771b",
+      "rows": 34,
+      "dataset_id": "MDM-05",
+      "profile": "full"
+    },
+    {
+      "path": "samples/full/MDM-06.csv",
+      "sha256": "6c5cbca613520d00bff478449f79c09c7e23fd24e8646cc055e94cda0729bcb8",
+      "rows": 48,
+      "dataset_id": "MDM-06",
+      "profile": "full"
+    },
+    {
+      "path": "samples/full/MDM-07.csv",
+      "sha256": "7dbcca1267869d9b0672fb8dbe6216ae304a005ab49969c809a5b30853c890c8",
+      "rows": 80,
+      "dataset_id": "MDM-07",
+      "profile": "full"
+    },
+    {
+      "path": "samples/full/MDM-08.csv",
+      "sha256": "263985f21b7cc0af7b696eab7b1ead15cdcee01a415ce69dfc0224c9bd0a3a8a",
+      "rows": 43,
+      "dataset_id": "MDM-08",
+      "profile": "full"
+    },
+    {
+      "path": "samples/full/PRC-01.csv",
+      "sha256": "f5f5d2e410516a0b6c6ce3f8029c2e0d32f6f8f60db7fcc8360fd43c6ed2504b",
+      "rows": 100,
+      "dataset_id": "PRC-01",
+      "profile": "full"
+    },
+    {
+      "path": "samples/full/PRC-02.csv",
+      "sha256": "d8d3ea3246c6cc00c2b19c7533d5a85b2b677f5ec5bc6c4b1b03f82440c539c3",
+      "rows": 1800,
+      "dataset_id": "PRC-02",
+      "profile": "full"
+    },
+    {
+      "path": "samples/full/LOG-01.csv",
+      "sha256": "fb2e38f6e30f9abf1f28843004e3f3cabac1c32d26d2d8d53637d1fc5cd530b7",
+      "rows": 1800,
+      "dataset_id": "LOG-01",
+      "profile": "full"
+    },
+    {
+      "path": "samples/full/LOG-02.csv",
+      "sha256": "ce58bbeee21b6e79db577588e3da312929a9011184fd7986706ca60993f13227",
+      "rows": 1200,
+      "dataset_id": "LOG-02",
+      "profile": "full"
+    },
+    {
+      "path": "samples/full/LOG-03.csv",
+      "sha256": "fa8e16901b1bf3e982828685087cedb79ad05a03279d30bbc56bd34a711df69a",
+      "rows": 7200,
+      "dataset_id": "LOG-03",
+      "profile": "full"
+    },
+    {
+      "path": "samples/full/LOG-04.csv",
+      "sha256": "b7fd9176ad1c710fcb1e3a001fc4976bef9688a76f0b108896ade67ff6d400c9",
+      "rows": 1200,
+      "dataset_id": "LOG-04",
+      "profile": "full"
+    },
+    {
+      "path": "samples/full/LOG-05.csv",
+      "sha256": "2ef292f0c393b2a15c6c029d2ad590e98726e55d8277beeaa8a8390b9664814e",
+      "rows": 2400,
+      "dataset_id": "LOG-05",
+      "profile": "full"
+    },
+    {
+      "path": "samples/full/INV-01.csv",
+      "sha256": "06c9a86b33480d68dd1e2749b1b92a9f0c7a6bffd351838cbb2fb10aa899c13b",
+      "rows": 31680,
+      "dataset_id": "INV-01",
+      "profile": "full"
+    },
+    {
+      "path": "samples/full/INV-02.csv",
+      "sha256": "1a2f7865b3e17dc7ac81755dfa558ce15aa62fcdaa13806780f19a3548a2aae9",
+      "rows": 30000,
+      "dataset_id": "INV-02",
+      "profile": "full"
+    },
+    {
+      "path": "samples/full/MFG-01.csv",
+      "sha256": "72c76844846a45896c90bd04c60ff3bceac51e875bd597b9b470ec4ed315d6d5",
+      "rows": 6000,
+      "dataset_id": "MFG-01",
+      "profile": "full"
+    },
+    {
+      "path": "samples/full/MFG-02.csv",
+      "sha256": "331973c8a6d754fa2ac8bf3675a812f421f9d26f826c32dddbbacae248bb4425",
+      "rows": 8000,
+      "dataset_id": "MFG-02",
+      "profile": "full"
+    },
+    {
+      "path": "samples/full/MFG-03.csv",
+      "sha256": "38949409b026ccd4a520b7b3c10b95c10a13abe5bc533491f02925761844f3ef",
+      "rows": 576,
+      "dataset_id": "MFG-03",
+      "profile": "full"
+    },
+    {
+      "path": "samples/full/QLT-01.csv",
+      "sha256": "666714e3bb1cbaaec6137fd7b09d9202dd5e35c4a1bd407e851669b6365feb81",
+      "rows": 12000,
+      "dataset_id": "QLT-01",
+      "profile": "full"
+    },
+    {
+      "path": "samples/full/SLS-01.csv",
+      "sha256": "45ef94630f8e1f2c56a85c1efb638c43e296e96d1acfdcd4e8b1a2b8ee21a231",
+      "rows": 2500,
+      "dataset_id": "SLS-01",
+      "profile": "full"
+    },
+    {
+      "path": "samples/full/FIN-01.csv",
+      "sha256": "e06af6d92458994ce8a73a6ef07eb7ae36b8af7e0da599822fd11004ef7dcb68",
+      "rows": 4320,
+      "dataset_id": "FIN-01",
+      "profile": "full"
+    },
+    {
+      "path": "samples/full/FIN-02.csv",
+      "sha256": "3b7d4789b934687828288e6bda277c9eb49416d6ff1b677be2da303a4b5e9661",
+      "rows": 3700,
+      "dataset_id": "FIN-02",
+      "profile": "full"
+    },
+    {
+      "path": "samples/full/FIN-03.csv",
+      "sha256": "16d4939cb5bfd859de99d5d1a9e09e560ce0efcbca359b8a01b149c10fe96617",
+      "rows": 15000,
+      "dataset_id": "FIN-03",
+      "profile": "full"
+    },
+    {
+      "path": "samples/full/EXT-01.csv",
+      "sha256": "67d9434a42cea4d891da26b292355b3e21667fee7ea873ef73fa0b7ae90e5dbb",
+      "rows": 180,
+      "dataset_id": "EXT-01",
+      "profile": "full"
+    },
+    {
+      "path": "samples/full/EXT-02.csv",
+      "sha256": "c1a09d0a2a8444f8e446c73c9fab9854d73192b22198848e727093ec9b1912fa",
+      "rows": 240,
+      "dataset_id": "EXT-02",
+      "profile": "full"
+    },
+    {
+      "path": "samples/full/EXT-03.csv",
+      "sha256": "c355ff0b1ecb7b5611e7901b65c368c71db7b071b8a772c880fea3b205ad92ec",
+      "rows": 180,
+      "dataset_id": "EXT-03",
+      "profile": "full"
+    },
+    {
+      "path": "samples/full/KNW-01.csv",
+      "sha256": "af5512117eed617d8afcd1810de12fb35653c6e9fbb3626cbdbe977366e719df",
+      "rows": 10,
+      "dataset_id": "KNW-01",
+      "profile": "full"
+    },
+    {
+      "path": "samples/full/SIM-01.csv",
+      "sha256": "fcbff30b6d15fb91d4aa737d21bc92f243ee4155e6e2735153c1bd1ece0eb8e4",
+      "rows": 12,
+      "dataset_id": "SIM-01",
+      "profile": "full"
+    },
+    {
+      "path": "samples/full/SIM-02.csv",
+      "sha256": "9761ee19a1491b5e3644e3fb22698f23598837cc4fb5411ff77129b0783a66e2",
+      "rows": 10,
+      "dataset_id": "SIM-02",
+      "profile": "full"
+    },
+    {
+      "path": "samples/full/DEC-01.csv",
+      "sha256": "58e40605196e7b2243b3f294f9c3ef808e9d4b9ddc0a54bed38bea0c20f88868",
+      "rows": 3,
+      "dataset_id": "DEC-01",
+      "profile": "full"
+    },
+    {
+      "path": "contracts/FND-01.contract.json",
+      "sha256": "eb0ef168c01fd0500667494aa9eda5cc6764638e43471875cbe1c0c86ba1a67b",
+      "dataset_id": "FND-01",
+      "profile": "contract"
+    },
+    {
+      "path": "contracts/FND-02.contract.json",
+      "sha256": "624d25edcf005b07dc1b59ef9839c91a9197f2dff33009b869cee70153f8fa03",
+      "dataset_id": "FND-02",
+      "profile": "contract"
+    },
+    {
+      "path": "contracts/FND-03.contract.json",
+      "sha256": "881b5589fc8bbc4536faffc6e02c1739949a22afe8ebc3092a9de9f7ef025d8b",
+      "dataset_id": "FND-03",
+      "profile": "contract"
+    },
+    {
+      "path": "contracts/MDM-01.contract.json",
+      "sha256": "8255e311f3391c91b184ff4e277da9c4b6139836366e15c58ff52f744508036d",
+      "dataset_id": "MDM-01",
+      "profile": "contract"
+    },
+    {
+      "path": "contracts/MDM-02.contract.json",
+      "sha256": "b55aabd3c1b82494039d9bb5d0cba4d753dcfcc3e580efe094c5d6daec138f3c",
+      "dataset_id": "MDM-02",
+      "profile": "contract"
+    },
+    {
+      "path": "contracts/MDM-03.contract.json",
+      "sha256": "a0a5d40ad02de2c3009c53328c089aaeb5e9eb4bb25548a76cee1f7efa7ca7d6",
+      "dataset_id": "MDM-03",
+      "profile": "contract"
+    },
+    {
+      "path": "contracts/MDM-04.contract.json",
+      "sha256": "8259600e6b0d96ada5383f40786116050e6fbfdd9383794abbcfcec12778f85b",
+      "dataset_id": "MDM-04",
+      "profile": "contract"
+    },
+    {
+      "path": "contracts/MDM-05.contract.json",
+      "sha256": "dfb3fda61cd7bcde14f53c76b1cac5291939ee60b26e6fa40806dd10e10f9a0d",
+      "dataset_id": "MDM-05",
+      "profile": "contract"
+    },
+    {
+      "path": "contracts/MDM-06.contract.json",
+      "sha256": "79a3882b8292b063f7cbe6f41c9f18fe69a15ca479292942cdf4567034925e74",
+      "dataset_id": "MDM-06",
+      "profile": "contract"
+    },
+    {
+      "path": "contracts/MDM-07.contract.json",
+      "sha256": "2a1eb5ba2fdad0747d24f5067d857604afa4ea89db057f197afa1802d4fc594a",
+      "dataset_id": "MDM-07",
+      "profile": "contract"
+    },
+    {
+      "path": "contracts/MDM-08.contract.json",
+      "sha256": "ea57c5e58186ab398447f549b1f22bdb989d389437f5ee141099589309c2f249",
+      "dataset_id": "MDM-08",
+      "profile": "contract"
+    },
+    {
+      "path": "contracts/PRC-01.contract.json",
+      "sha256": "ba08ec0c6c44a2385e13350aa7c721e3131e4249569446f29ea7f87084e27abe",
+      "dataset_id": "PRC-01",
+      "profile": "contract"
+    },
+    {
+      "path": "contracts/PRC-02.contract.json",
+      "sha256": "26b9836297844c18499bec539354d9be9c8197fa5e2e7397c953fede3df123ae",
+      "dataset_id": "PRC-02",
+      "profile": "contract"
+    },
+    {
+      "path": "contracts/LOG-01.contract.json",
+      "sha256": "733f4761bb70a575720fef73d748a2a7a0ea84364b25ef6a8f6394f58caa40e6",
+      "dataset_id": "LOG-01",
+      "profile": "contract"
+    },
+    {
+      "path": "contracts/LOG-02.contract.json",
+      "sha256": "734933e044fb65fc0678554dd870087491345a815a507b004a8632473bc0afc9",
+      "dataset_id": "LOG-02",
+      "profile": "contract"
+    },
+    {
+      "path": "contracts/LOG-03.contract.json",
+      "sha256": "f44252433419856fa4951621d19d1e45fad4a3ebd337dfc514dcbafe10394cbd",
+      "dataset_id": "LOG-03",
+      "profile": "contract"
+    },
+    {
+      "path": "contracts/LOG-04.contract.json",
+      "sha256": "ad91d69ab0cc19647db212cf3e0033a24dcf9b08bc2d83eb378ed2d34f4e083e",
+      "dataset_id": "LOG-04",
+      "profile": "contract"
+    },
+    {
+      "path": "contracts/LOG-05.contract.json",
+      "sha256": "40dcd37d0e4185b5ddc98781c2e98309296dba17512dc22b843fd274d67e9c26",
+      "dataset_id": "LOG-05",
+      "profile": "contract"
+    },
+    {
+      "path": "contracts/INV-01.contract.json",
+      "sha256": "a2dee2c26100af8735e90b39734fb7c98321d5c36aae1d95ffac46678323d9b7",
+      "dataset_id": "INV-01",
+      "profile": "contract"
+    },
+    {
+      "path": "contracts/INV-02.contract.json",
+      "sha256": "c9406f71662ad089cdf8333448ac5abb22739bb74984ee586b421b87960059ba",
+      "dataset_id": "INV-02",
+      "profile": "contract"
+    },
+    {
+      "path": "contracts/MFG-01.contract.json",
+      "sha256": "fe6e8da7e54ba5c8b97e5a027ce19eccc4cbbc3f1600fe69814fc4a6144e45cb",
+      "dataset_id": "MFG-01",
+      "profile": "contract"
+    },
+    {
+      "path": "contracts/MFG-02.contract.json",
+      "sha256": "1d84755fbdbaf7187b72c34e0f0f521f18b68e0db71fdf2550372f02414f5315",
+      "dataset_id": "MFG-02",
+      "profile": "contract"
+    },
+    {
+      "path": "contracts/MFG-03.contract.json",
+      "sha256": "0524b46061f969a710d756891edaac75a7e34d7cf7ac1c19531d97da8a69b966",
+      "dataset_id": "MFG-03",
+      "profile": "contract"
+    },
+    {
+      "path": "contracts/QLT-01.contract.json",
+      "sha256": "75fa0ab3f06fc24f44636dffd158806cc2567a90c0149b36d54101c765f2c5c2",
+      "dataset_id": "QLT-01",
+      "profile": "contract"
+    },
+    {
+      "path": "contracts/SLS-01.contract.json",
+      "sha256": "8bbded5bee782d4b5b73f868a48de1cbaf77c6b508b3770e4d88546a5d14fdca",
+      "dataset_id": "SLS-01",
+      "profile": "contract"
+    },
+    {
+      "path": "contracts/FIN-01.contract.json",
+      "sha256": "9c1e19931217adbbf7c8beb5208628e8916b6ce1bde802eab736f722ba1e99a8",
+      "dataset_id": "FIN-01",
+      "profile": "contract"
+    },
+    {
+      "path": "contracts/FIN-02.contract.json",
+      "sha256": "907ad76b103c0b656eebd3f80310c11d3d625e40d51f2d24e6ec737d0c0020e2",
+      "dataset_id": "FIN-02",
+      "profile": "contract"
+    },
+    {
+      "path": "contracts/FIN-03.contract.json",
+      "sha256": "329749e3498d4724eadad9c79b34aad5bdfdcdc90d1e9cc30f829878b2b7ddc3",
+      "dataset_id": "FIN-03",
+      "profile": "contract"
+    },
+    {
+      "path": "contracts/EXT-01.contract.json",
+      "sha256": "128df85cdff25f4a98cca064438f51c48dd3e23ebb3a49bc0ad3d19bd5e0dc22",
+      "dataset_id": "EXT-01",
+      "profile": "contract"
+    },
+    {
+      "path": "contracts/EXT-02.contract.json",
+      "sha256": "1e2661574ae4eded3c44c721be4a76039d28d42da662a0c5775332b0ae870d53",
+      "dataset_id": "EXT-02",
+      "profile": "contract"
+    },
+    {
+      "path": "contracts/EXT-03.contract.json",
+      "sha256": "73c08a9700dcba723f2a61297db8b480be966b5d96f81a909c6f31e01a1f49ab",
+      "dataset_id": "EXT-03",
+      "profile": "contract"
+    },
+    {
+      "path": "contracts/KNW-01.contract.json",
+      "sha256": "6110264122fcb5a025aeef537c2684342f2a108cd5e6790f68a95ab30bb53e04",
+      "dataset_id": "KNW-01",
+      "profile": "contract"
+    },
+    {
+      "path": "contracts/SIM-01.contract.json",
+      "sha256": "73658c1ff69599b9dd58bb099c8342b7aee22169cf4d6c410dc15f6d771108c5",
+      "dataset_id": "SIM-01",
+      "profile": "contract"
+    },
+    {
+      "path": "contracts/SIM-02.contract.json",
+      "sha256": "a3c473817eabd06df45390d4664953631f14b0089e4e0edd23f52f3b2ddd3c1b",
+      "dataset_id": "SIM-02",
+      "profile": "contract"
+    },
+    {
+      "path": "contracts/DEC-01.contract.json",
+      "sha256": "8d7421bd16b97ebc742d7edafb6033bda2049c7a6b0b393e9b6ee7ab7565aebf",
+      "dataset_id": "DEC-01",
+      "profile": "contract"
+    },
+    {
+      "path": "company_profiles/AFS-DEMO-MATERIALS-GROUP.json",
+      "sha256": "cb884b6a09acbf6fb7661c2e033cabfa65f031e58574137c7d5c0923af19f0bc",
+      "rows": 1,
+      "dataset_id": "COMPANY-PROFILE",
+      "profile": "company-profile"
+    },
+    {
+      "path": "company_profiles/AFS-VIRTUAL-BATTERY-EXPANSION-2030.json",
+      "sha256": "7bfb483b0f8a88b7848ca13c1c8ff01c94f0212930333a2b0eff5c74e0ee5f51",
+      "rows": 1,
+      "dataset_id": "COMPANY-PROFILE",
+      "profile": "company-profile"
+    },
+    {
+      "path": "company_profiles/AFS-VIRTUAL-CIRCULAR-METALS.json",
+      "sha256": "b2f7280f971598159e159b96b4f0e7120fd93a8bc70c9023afccbde0fcdf6ce8",
+      "rows": 1,
+      "dataset_id": "COMPANY-PROFILE",
+      "profile": "company-profile"
+    },
+    {
+      "path": "company_profiles/AFS-VIRTUAL-GLOBAL-SMELTING.json",
+      "sha256": "591d6eb2160b553cd37833466fb0045ce4c0c0e9418e1327dd919c51b5e1a8b7",
+      "rows": 1,
+      "dataset_id": "COMPANY-PROFILE",
+      "profile": "company-profile"
+    },
+    {
+      "path": "company_profiles/AFS-VIRTUAL-SMART-POWER.json",
+      "sha256": "eb8066c1e507d1fc5ff3ca56ad866aeb75dbc63c47d33f6e8c0f02f8b7c1ceb7",
+      "rows": 1,
+      "dataset_id": "COMPANY-PROFILE",
+      "profile": "company-profile"
+    },
+    {
+      "path": "company_profiles/AFS-VIRTUAL-SUBSEA-CABLE-NA.json",
+      "sha256": "81c9b0b616ae68d88b99aa7cabf4d09821c3dab78395e2be5b4e4a06281a923e",
+      "rows": 1,
+      "dataset_id": "COMPANY-PROFILE",
+      "profile": "company-profile"
+    },
+    {
+      "path": "samples/full/quarantine/candidates.csv",
+      "sha256": "e9377d0f4cceb9cccc90efd9fed92280a172dec8c79ca4fe1260633f41b5dd02",
+      "rows": 50,
+      "dataset_id": "QUARANTINE-CANDIDATES",
+      "profile": "full-quarantine"
+    },
+    {
+      "path": "samples/full/quarantine/expected_quarantine_manifest.json",
+      "sha256": "56b373b58a9889a03714fc127514e6b73604cadef73cdc8248d81aab7cbc0be1",
+      "rows": 8,
+      "dataset_id": "QUARANTINE-MANIFEST",
+      "profile": "full-quarantine"
+    }
+  ],
+  "validation": {
+    "status": "PASS",
+    "report_path": "validations/validation_report.json",
+    "checks": 424,
+    "validated_at": "2026-09-22T04:46:03+00:00"
+  }
+}

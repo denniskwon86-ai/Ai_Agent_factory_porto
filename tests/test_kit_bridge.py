@@ -16,7 +16,7 @@ sys.path.insert(0, os.path.join(REPO, "scripts"))
 
 import kit_bridge as kb  # noqa: E402
 
-KIT = os.path.join(REPO, "starter_kits", "KIT-MFG-SMELTING-NONFERROUS", "1.3.0")
+KIT = os.path.join(REPO, "starter_kits", "KIT-MFG-SMELTING-NONFERROUS", "1.4.0")
 
 
 def _rows(dataset, profile="quick"):
@@ -231,7 +231,7 @@ def test_사업이_달라도_같은_동인만_나온다():
     got = {}
     for kit in ("KIT-MFG-SMELTING-NONFERROUS", "KIT-MFG-BATTERY-MATERIALS",
                 "KIT-MFG-NONFERROUS-PROCUREMENT"):
-        path = os.path.join(REPO, "starter_kits", kit, "1.3.0", "samples", "full", "SIM-01.csv")
+        path = os.path.join(REPO, "starter_kits", kit, "1.4.0", "samples", "full", "SIM-01.csv")
         with io.open(path, encoding="utf-8-sig", newline="") as f:
             fake = FakeDrivers()
             kb.seed_plan_drivers(list(csv.DictReader(f)), drivers=fake)

@@ -18,7 +18,7 @@ import business_defs as B  # noqa: E402
 
 SMELT = "smelting_nonferrous"
 BATTERY = "battery_materials"
-KIT = os.path.join(REPO, "starter_kits", "KIT-MFG-NONFERROUS-PROCUREMENT", "1.3.0")
+KIT = os.path.join(REPO, "starter_kits", "KIT-MFG-NONFERROUS-PROCUREMENT", "1.4.0")
 
 
 # ── 로더
@@ -99,10 +99,10 @@ def _generate(tmp_path, businesses):
     out = tmp_path / ("-".join(businesses) or "none")
     before = gen.KIT_ROOT
     try:
-        gen.use_version("1.3.0", out)
+        gen.use_version("1.4.0", out)
         gen.build(clean=True, businesses=businesses)
     finally:
-        gen.use_version("1.3.0", before)
+        gen.use_version("1.4.0", before)
     return str(out)
 
 
@@ -304,3 +304,138 @@ def test_사업_하나면_그_키트가_나온다(tmp_path):
     assert m["sector"] == ["B:금속>비철금속>제련·정련"]
     #: ⚠️ KSIC 는 **법인 구조가 정한다** — 켐코 C2820 vs LS MnM C24. 키트 속성이 아니다
     assert "industry_codes" not in m
+
+
+# ── 주력이 매출을 만드는가 (1.4.0)
+
+def _sales_share(kit_id: str, codes):
+    """매출을 **주력과 더미로** 가른다. 주력 = 사업 정의가 아는 품목."""
+    path = os.path.join(REPO, "starter_kits", kit_id, "1.4.0", "samples", "full", "SLS-01.csv")
+    known = {m["code"] for m in B.materials_of(B.load(list(codes)))}
+    major = rest = 0.0
+    with io.open(path, encoding="utf-8-sig") as f:
+        for r in csv.DictReader(f):
+            try:
+                a = float(r["shipped_quantity"] or 0) * float(r["unit_price"] or 0)
+            except (TypeError, ValueError):
+                continue
+            if r["product_id"] in known:
+                major += a
+            else:
+                rest += a
+    return major / (major + rest) if (major + rest) else 0.0
+
+
+@pytest.mark.parametrize("kit_id,codes", [
+    ("KIT-MFG-SMELTING-NONFERROUS", [SMELT]),
+    ("KIT-MFG-BATTERY-MATERIALS", [BATTERY]),
+    ("KIT-MFG-NONFERROUS-PROCUREMENT", [SMELT, BATTERY]),
+])
+def test_주력이_매출의_대부분이다(kit_id, codes):
+    """★★★ 1.3.0 까지 매출의 **99% 를 볼륨용 더미**(「완제품 011」)가 차지했다.
+
+    「이 산업은 이렇게 일한다」를 보이려는 키트인데 **산업이 1% 뿐**이었고, 검사
+    420 건이 그것을 못 잡았다. 현업에 드린 문서의 매출 구성도 **더미를 빼고 센 값**
+    이라 데이터와 맞지 않았다(2026-09-22 전수 재검수).
+
+    하한만 본다 — 정확한 비중은 사업마다 다르지만 **주력이 과반도 안 되는 제조사는
+    없다.**
+    """
+    share = _sales_share(kit_id, codes)
+    assert share >= 0.70, f"{kit_id}: 주력이 매출의 {share:.1%} 뿐이다"
+
+
+def test_팔_수_있는_완제품은_단가를_갖는다():
+    """★★★ **단가를 빠뜨리면 더미 단가로 조용히 떨어진다.**
+
+    1.3.0 까지 생성기가 `if product == "FG-NISO4" ... elif "FG-CATHODE"` 로 분기했고,
+    거기 없는 완제품은 더미 기본값(32,000)을 썼다. `FG-LIOH` 가 실제로 그랬는데
+    **그 값이 마침 그럴듯해 아무도 몰랐다.** 더미 기본값을 1,200 으로 낮추자
+    수산화리튬 매출이 **57% 에서 4.5% 로 무너지면서** 드러났다.
+
+    ⚠️ 부산물은 `sale_prices` 에 있어야 하고, 완제품도 그렇다 — **사업이 품목을 늘릴
+      때 생성기를 고쳐야 하는 구조**를 없앴으므로, 빠뜨리면 여기서 걸린다.
+    """
+    missing = []
+    for code in (SMELT, BATTERY):
+        d = B.load([code])[0]
+        for mat in d.materials:
+            mid, _name, typ = mat[0], mat[1], mat[2]
+            if typ != "FINISHED":
+                continue
+            if mid not in d.sale_prices:
+                missing.append(f"{code}:{mid}")
+        for extra in d.sellable_extra:
+            if extra not in d.sale_prices:
+                missing.append(f"{code}:{extra}(부산물)")
+    assert not missing, "단가 없는 판매 품목: " + ", ".join(missing)
+
+
+def test_주력_단가가_더미보다_비싸다():
+    """부대 품목이 주력보다 비쌀 이유가 없다 — 1.3.0 에서는 **3.4 배 비쌌다**
+    (더미 32,000 vs 전기동 9,500)."""
+    import generate_sample_company_starter_kit as gen
+    for code in (SMELT, BATTERY):
+        d = B.load([code])[0]
+        for mid, price in d.sale_prices.items():
+            if mid.startswith("FG-"):
+                assert price > gen._FILLER_PRICE, f"{mid} 단가 {price} ≤ 더미 {gen._FILLER_PRICE}"
+
+
+# ── 만든 것보다 많이 팔지 않는가 (1.4.0)
+
+def _made_and_sold(kit_id: str):
+    """품목별 **산출**과 **판매**. 부산물은 배치가 아니라 부산물 입고로 들어온다."""
+    root = os.path.join(REPO, "starter_kits", kit_id, "1.4.0", "samples", "full")
+    made, sold = {}, {}
+    with io.open(os.path.join(root, "MFG-02.csv"), encoding="utf-8-sig") as f:
+        for r in csv.DictReader(f):
+            made[r["output_material_id"]] = made.get(r["output_material_id"], 0.0) + float(r["output_quantity"] or 0)
+    with io.open(os.path.join(root, "INV-02.csv"), encoding="utf-8-sig") as f:
+        for r in csv.DictReader(f):
+            if r["movement_id"].startswith("MOV-BP-"):
+                made[r["material_id"]] = made.get(r["material_id"], 0.0) + float(r["quantity"] or 0)
+    with io.open(os.path.join(root, "SLS-01.csv"), encoding="utf-8-sig") as f:
+        for r in csv.DictReader(f):
+            sold[r["product_id"]] = sold.get(r["product_id"], 0.0) + float(r["shipped_quantity"] or 0)
+    return made, sold
+
+
+@pytest.mark.parametrize("kit_id,codes", [
+    ("KIT-MFG-SMELTING-NONFERROUS", [SMELT]),
+    ("KIT-MFG-BATTERY-MATERIALS", [BATTERY]),
+    ("KIT-MFG-NONFERROUS-PROCUREMENT", [SMELT, BATTERY]),
+])
+def test_만든_것보다_많이_팔지_않는다(kit_id, codes):
+    """★★★ **재고 음수 검사가 이것을 못 잡는다.**
+
+    조정 이벤트(`MOV-ADJ`, 이동의 32%)가 재고를 채워 잔고가 양수로 남기 때문이다.
+    실제로 1.4.0 을 만들다 **전기동을 6,972 톤 만들면서 12,980 톤 파는** 데이터를
+    냈는데 검사 422 건이 전부 통과했다. 금도 그랬다 — 산출 197 kg, 판매 259 kg.
+
+    ★ 그래서 현업 문서의 「금이 매출의 13.8%」가 **과잉 판매가 만든 값**이었다.
+      산출대로 팔면 7% 안팎이다.
+    """
+    made, sold = _made_and_sold(kit_id)
+    known = {m["code"] for m in B.materials_of(B.load(list(codes)))}
+    over = [f"{m}: 산출 {made.get(m, 0):,.0f} < 판매 {q:,.0f}"
+            for m, q in sold.items() if m in known and q > made.get(m, 0.0)]
+    assert not over, "; ".join(over)
+
+
+def test_그_검사가_거짓초록이_아니다():
+    """산출을 **일부러 줄여** 검사가 우는지 본다 — 비교가 언제나 참이면 소용없다."""
+    made, sold = _made_and_sold("KIT-MFG-SMELTING-NONFERROUS")
+    assert made.get("FG-CATHODE", 0) > 0 and sold.get("FG-CATHODE", 0) > 0, "잴 것이 없다"
+    broken = dict(made, **{"FG-CATHODE": sold["FG-CATHODE"] * 0.5})
+    over = [m for m, q in sold.items() if q > broken.get(m, 0.0) and m == "FG-CATHODE"]
+    assert over == ["FG-CATHODE"], "산출을 절반으로 줄여도 안 잡힌다 — 비교가 헛돈다"
+
+
+def test_부산물도_만든_만큼만_판다():
+    """부산물은 `MFG-02` 에 배치가 없다. **부산물 입고(`MOV-BP-`)를 산출로 봐야**
+    한다 — 안 그러면 「산출 0 인데 판다」로 잘못 걸리거나, 반대로 검사에서 빠진다."""
+    made, sold = _made_and_sold("KIT-MFG-SMELTING-NONFERROUS")
+    for bp in ("BP-GOLD", "BP-H2SO4"):
+        assert made.get(bp, 0) > 0, f"{bp} 산출이 0 이다 — 부산물 입고를 못 읽었다"
+        assert sold.get(bp, 0) <= made[bp], f"{bp}: 산출 {made[bp]:,.1f} < 판매 {sold[bp]:,.1f}"
