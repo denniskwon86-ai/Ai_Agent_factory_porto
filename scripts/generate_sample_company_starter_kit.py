@@ -99,7 +99,7 @@ def company_name() -> str:
 #: **판본은 `--version` 으로 받는다** (P2). 예전에는 여기에 "1.0.0" 이 박혀 있어서,
 #: 1.1.0 을 내려면 이 줄을 고쳐야 했고 고치는 순간 1.0.0 을 재현할 수 없게 됐다.
 #: `main()`/`build()` 이 아래 셋을 판본에 맞게 다시 세운다.
-KIT_VERSION = "1.6.0"
+KIT_VERSION = "1.7.0"
 KIT_ROOT = ROOT / "starter_kits" / KIT_ID / KIT_VERSION
 OVERLAY: kit_defs.KitOverlay = kit_defs.KitOverlay()
 
@@ -1089,19 +1089,45 @@ def generate_movements_and_snapshots(profile: Profile, logistics: Sequence[Mappi
     # Add controlled transfer/adjustment events so Full has operational density without breaking conservation.
     target = 5000 if profile.name == "quick" else 30000
     i = 0
+    _mat_by_id = {m["material_id"]: m for m in materials}
     while len(movements) < target:
-        mat = material_ids[i % len(material_ids)]
-        #: ★ 그 품목이 속한 사업의 창고에서 고른다 — 예전에는 전체 창고를 순환해서
-        #:   **동정광이 전지소재 창고에 조정 입고**됐다(5,047 건).
-        _mine = [l for l in active_locations
-                 if business_defs.by_location(BUSINESSES, l["location_id"]).plant_id == scope_of(mat)]
-        _pool = _mine or active_locations
-        loc = _pool[i % len(_pool)]["location_id"]
+        #: 몇 바퀴째 · 그 안에서 몇 번째 품목인가 — 부호와 크기가 여기서 나온다
+        _k = i % len(material_ids)
+        _round = i // len(material_ids)
+        mat = material_ids[_k]
+        #: ★★★ **그 품목이 실제로 있는 창고**에만 조정한다 (1.7.0).
+        #:
+        #: 예전에는 그 사업의 창고를 **순환**해서, 완제품이 원료 창고에 조정 입고되는
+        #: 일이 생겼다(1.6.0 까지는 전부 양수라 「완제품이 원료 창고에 조금 있다」로
+        #: 남았고, **음수 조정을 넣자마자 재고가 −6,430 행**이 됐다 — 애초에 없는
+        #: 재고를 줄였기 때문이다).
+        #:
+        #: 기초재고가 들어가는 창고와 **같은 곳**을 고른다. 실사는 재고가 있는 데서 한다.
+        _mrow = _mat_by_id.get(mat)
+        _bd = business_defs.by_plant(BUSINESSES, scope_of(mat))
+        _avail_adj = [l["location_id"] for l in active_locations
+                      if business_defs.by_location(BUSINESSES, l["location_id"]).plant_id == scope_of(mat)]
+        loc = _bd.opening_location(str(_mrow["material_type"]) if _mrow else "RAW", _avail_adj)
         d = start + timedelta(days=(i*7) % max(1,(end-start).days))
-        qty = round(0.05 + (i%9)*0.03, 3)
+        #: ★★★ **실사 조정은 양방향이다** (1.7.0).
+        #:
+        #: 장부보다 많을 때도 있고 적을 때도 있다. 1.6.0 까지 **전부 입고(양수)** 라서
+        #: **재고가 저절로 늘었다** — 제련 키트에서 순증 +326 톤. 그것이 「없는 것을
+        #: 판다·쓴다」를 재고 음수로 드러나지 않게 가렸다(9.5~9.7 의 세 결함이 모두
+        #: 그래서 늦게 발견됐다).
+        #:
+        #: ★ `i%2`(부호)와 `i%9`(크기)는 서로소라 **18 주기마다 정확히 상쇄**된다 —
+        #:   각 크기가 `+` 한 번, `−` 한 번 나온다.
+        #: ⚠️ 부호를 `i%2` 로 잡으면 **품목 수가 짝수일 때 같은 품목이 늘 같은 부호**를
+        #:   받는다(품목 210 개). `_k + _round` 로 잡으면 품목마다도, 바퀴마다도
+        #:   번갈아 나온다.
+        _sign = 1 if (_k + _round) % 2 == 0 else -1
+        qty = round((0.05 + (_k % 9)*0.03) * _sign, 3)
         movements.append({"movement_id": f"MOV-ADJ-{i+1:07d}", "movement_date": iso(d),
                           "movement_type": "CYCLE_COUNT_ADJUSTMENT", "material_id": mat, "lot_id": f"LOT-ADJ-{i+1:07d}",
-                          "from_location_id": "ADJUSTMENT", "to_location_id": loc, "quantity": qty,
+                          #: 재고가 **나가는** 조정이면 창고가 출발지다
+                          "from_location_id": "ADJUSTMENT" if _sign > 0 else loc,
+                          "to_location_id": loc if _sign > 0 else "ADJUSTMENT", "quantity": qty,
                           "quantity_uom": business_defs.uom_of(BUSINESSES, mat),
                           "reference_type": "CYCLE_COUNT", "reference_id": f"CC-{i+1:07d}",
                           "_scope": business_defs.by_location(BUSINESSES, loc).plant_id})
@@ -1119,10 +1145,14 @@ def generate_movements_and_snapshots(profile: Profile, logistics: Sequence[Mappi
         while idx < len(stamped_movements) and date.fromisoformat(str(stamped_movements[idx]["movement_date"])[:10]) <= cutoff:
             m = stamped_movements[idx]
             qty = float(m["quantity"])
-            if m["movement_type"] == "PRODUCTION_ISSUE" or m["movement_type"] == "SALES_SHIPMENT":
-                loc = m["from_location_id"]
-            else:
-                loc = m["to_location_id"]
+            #: ★ **부호가 방향을 정한다** (1.7.0). 예전에는 이동 유형을 나열했는데
+            #:   (`PRODUCTION_ISSUE`·`SALES_SHIPMENT` 면 출발지), 유형이 늘 때마다
+            #:   여기를 고쳐야 했고 **빠뜨리면 조용히 반대쪽에 쌓인다.** 실제로
+            #:   음수 조정을 넣자마자 그렇게 될 뻔했다.
+            #:
+            #: ⚠️ 바꾸기 전에 대조했다 — 기존 데이터 30,000 행에서 **두 방식의 판정이
+            #:   한 건도 다르지 않다.** 나가는 이동은 전부 음수였기 때문이다.
+            loc = m["from_location_id"] if qty < 0 else m["to_location_id"]
             if loc not in {"", "PRODUCTION", "CUSTOMER", "IN_TRANSIT", "ADJUSTMENT"}:
                 current[(m["material_id"], loc)] += qty
             idx += 1

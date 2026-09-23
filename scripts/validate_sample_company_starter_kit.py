@@ -27,7 +27,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from core.data_preparation import kit_freeze  # noqa: E402
 KIT_ID = "KIT-MFG-NONFERROUS-PROCUREMENT"
-KIT_VERSION = "1.6.0"
+KIT_VERSION = "1.7.0"
 KIT_ROOT = ROOT / "starter_kits" / KIT_ID / KIT_VERSION
 COMMON = {"record_id", "tenant_id", "scope_node_id", "data_class", "business_data_kind",
           "data_origin", "quality_status", "certification_status", "as_of_date", "lineage_id"}
@@ -223,6 +223,20 @@ def validate_profile(profile: str, dataset_ids: Sequence[str], v: Validation) ->
         v.check(f"{profile}:쌓아둔_것이_아니라_사서_쓴다", _cover >= 0.80,
                 f"입고가 소비의 {_cover:.0%} (하한 80%) — 나머지는 기초재고가 댄다")
 
+        #: ★★★ **조정이 재고를 만들지 않는가** (1.7.0).
+        #:
+        #: 실사 조정은 양방향이어야 한다 — 장부보다 많을 때도 적을 때도 있다.
+        #: 1.6.0 까지 **전부 입고(양수)** 라서 재고가 저절로 늘었고(제련 +326 톤),
+        #: 그것이 「없는 것을 판다·쓴다」를 **재고 음수로 드러나지 않게 가렸다.**
+        #: 이 저장소가 늦게 발견한 결함 셋이 모두 그 뒤에 숨어 있었다.
+        _adj = [float(r.get("quantity") or 0) for r in (data.get("INV-02") or [])
+                if str(r.get("movement_id") or "").startswith("MOV-ADJ")]
+        _net = sum(_adj)
+        _gross = sum(abs(x) for x in _adj)
+        v.check(f"{profile}:조정이_재고를_만들지_않는다", abs(_net) <= _gross * 0.05,
+                f"조정 {len(_adj)}건 · 순증 {_net:+,.1f} / 총량 {_gross:,.1f}"
+                f" ({abs(_net)/_gross:.0%} · 한계 5%)" if _gross else "조정 없음")
+
         #: ★★★ **배합대로 원료가 나가는가** (1.5.0).
         #:
         #: ⚠️ 1.4.0 까지 배치가 **BOM 첫 줄만** 출고했다. 「수산화리튬 = Black Mass
@@ -314,7 +328,10 @@ def validate_profile(profile: str, dataset_ids: Sequence[str], v: Validation) ->
     for snap_date in sorted(snapshots_by_date):
         while idx < len(movements) and movements[idx]["movement_date"] <= snap_date:
             m = movements[idx]
-            loc = m["from_location_id"] if m["movement_type"] in {"PRODUCTION_ISSUE", "SALES_SHIPMENT"} else m["to_location_id"]
+            #: ★ **부호가 방향을 정한다** (1.7.0). 생성기와 같은 규칙이어야 한다 —
+            #:   예전에는 양쪽이 이동 유형을 나열했고, 유형이 늘 때 **한쪽만 고치면
+            #:   대사가 깨진다.** 실제로 음수 조정을 넣자마자 그렇게 됐다.
+            loc = m["from_location_id"] if f(m["quantity"]) < 0 else m["to_location_id"]
             if loc not in excluded:
                 balance[(m["material_id"], loc)] += f(m["quantity"])
             idx += 1

@@ -1,0 +1,42 @@
+{
+  "data_class": "SYNTHETIC",
+  "data_origin": "SYNTHETIC",
+  "entity_mode": "VIRTUAL",
+  "certification_status": "CERTIFIED_FOR_DEMO",
+  "not_for_management_decision": true,
+  "currency": "KRW",
+  "timezone": "Asia/Seoul",
+  "company_profile_id": "AFS-VIRTUAL-GLOBAL-SMELTING",
+  "company_name": "AFS 글로벌 제련법인 진출안",
+  "profile_role": "VIRTUAL_OVERSEAS_ENTITY",
+  "source_profile_id": "AFS-DEMO-MATERIALS-GROUP",
+  "industry_code": "C2412",
+  "industry_name": "비철금속 제련·정련",
+  "purpose": "해외 원료 산지 인접 제련법인의 물류·환율·투자·연결손익 검증",
+  "valid_until": "2032-12-31",
+  "organization_blueprint": [
+    "해외 제련법인",
+    "제련사업부",
+    "현지 제1공장",
+    "수출물류센터"
+  ],
+  "products": [
+    "전기동",
+    "동 아노드",
+    "황산",
+    "금·은 부산물"
+  ],
+  "recommended_apps": [
+    "APP-01",
+    "APP-02",
+    "APP-04",
+    "APP-05"
+  ],
+  "default_assumptions": {
+    "capacity_ton_per_year": 300000,
+    "capex_krw_billion": 650.0,
+    "usd_krw": 1380.0,
+    "ocean_lead_time_days": 21,
+    "local_tax_rate_pct": 22.0
+  }
+}
