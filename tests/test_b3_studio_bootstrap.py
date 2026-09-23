@@ -169,6 +169,33 @@ def test_unit_initial_state_write_failure_leaves_incomplete_metadata_and_no_ledg
     assert _bootstrap(env, approved)["project_id"] == failed["project_id"]
 
 
+def test_unit_initial_state_does_not_overwrite_a_writer_that_arrived_after_verification(unit_bootstrap):
+    """★★ [CR §12] 초기 기록의 기준은 **소유를 검증한 그 읽기의 판본**이다.
+
+    앞 판은 쓰기 직전에 다시 읽어 **내용은 버리고 digest 만** 받았다. 그러면 검증과 쓰기
+    사이에 남이 다른 소유로 바꿔 놓아도 그 새 digest 를 받아들여 초기 상태로 덮었다.
+    `provision()` 은 `project_meta.json`·marker 만 쓰고 이 파일은 쓰지 않으므로, 그 사이에
+    생긴 `latest_state.json` 은 곧 **다른 writer** 다.
+    """
+    from core.paths import workspace_path
+    env = unit_bootstrap
+    approved = _decide(env, _save(env))
+    intruder = {"project_id": "INTRUDER", "tenant_id": "other-tenant", "value": "다른 writer 가 확정한 값"}
+
+    def provision_then_intrude(project_id, template_id, **kwargs):
+        result = env.provision(project_id, template_id, **kwargs)
+        (Path(workspace_path(project_id)) / "latest_state.json").write_text(
+            json.dumps(intruder, ensure_ascii=False), encoding="utf-8")
+        return result
+
+    env.bootstrap.provision = provision_then_intrude
+    _error(lambda: _bootstrap(env, approved), "STUDIO_SETUP_IO_FAILED", 503)
+    folder = _workspace(env, _operation(env))
+    assert json.loads((folder / "latest_state.json").read_text(encoding="utf-8")) == intruder, \
+        "검증 뒤 끼어든 writer 의 정본을 초기 상태로 덮었다"
+    assert not _events(env), "초기 기록이 막혔는데 원장 사건이 남았다"
+
+
 def test_unit_ledger_ack_then_ready_state_write_failure_recovers_without_new_event(unit_bootstrap, monkeypatch):
     import core.studio_bootstrap as module
     env = unit_bootstrap

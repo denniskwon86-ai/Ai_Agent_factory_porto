@@ -113,10 +113,19 @@ class StudioBootstrapService:
                     operation = self._advance(operation, "PROVISIONING")
                 if operation["stage"] == "PROVISIONING":
                     # 메타와 상태 모두 성공적으로 다시 읽은 뒤에만 다음 단계로 간다.
-                    for name in ("project_meta.json", "latest_state.json"):
-                        saved_path = workspace / name
-                        if saved_path.exists() and projection(read_json(saved_path)) != projection(expected):
-                            raise RevisionStoreError("STUDIO_PROJECT_CONTEXT_CONFLICT", "부분 프로젝트의 고정 참조가 다릅니다. 덮어쓰지 않습니다.")
+                    #: ★★★ [CR §12] 상태 파일은 **소유를 검증한 그 읽기**에서 판본까지 받아 둔다.
+                    #:   아래 쓰기의 기준이 바로 이것이다 — 앞 판은 쓰기 직전에 다시 읽어 **내용은
+                    #:   버리고 digest 만** 기준으로 삼았다. 그러면 검증과 쓰기 사이에 남이 다른
+                    #:   소유로 바꿔 놓아도 그 새 digest 를 받아들여 초기 상태로 덮는다.
+                    #:   사이에 있는 `provision()` 은 `project_meta.json`·marker 만 쓰고 이 파일은
+                    #:   쓰지 않으므로, 정상 흐름에서는 검증한 판본이 그대로 유지된다.
+                    state_path = workspace / "latest_state.json"
+                    meta_path = workspace / "project_meta.json"
+                    if meta_path.exists() and projection(read_json(meta_path)) != projection(expected):
+                        raise RevisionStoreError("STUDIO_PROJECT_CONTEXT_CONFLICT", "부분 프로젝트의 고정 참조가 다릅니다. 덮어쓰지 않습니다.")
+                    verified_state, verified_state_digest = read_json_with_digest(state_path)
+                    if verified_state is not None and projection(verified_state) != projection(expected):
+                        raise RevisionStoreError("STUDIO_PROJECT_CONTEXT_CONFLICT", "부분 프로젝트의 고정 참조가 다릅니다. 덮어쓰지 않습니다.")
                     self.provision(operation["project_id"], template_id,
                         owner_dept_id="", owner_user_id=expected["owner_user_id"],
                         tenant_id=expected["tenant_id"], enterprise_scope_id=expected["enterprise_scope_id"],
@@ -132,12 +141,11 @@ class StudioBootstrapService:
                     #:   막지 못한다.** 그래서 저장 수준의 보장은 조건부 저장으로 세운다 —
                     #:   잠금 하나에 두 가지 다른 일을 시키지 않는다.
                     #:
-                    #: ⚠️ 기준은 **이 조작이 읽은 판본**이다. 단계가 재시도되면 앞선 부분
-                    #:   시도가 남긴 판본을 읽어 이어간다(이 조작은 `operation_lock` 아래에서
-                    #:   자기 작업공간을 소유한다). 남이 그 사이에 바꿨으면 거절된다.
-                    state_path = workspace / "latest_state.json"
-                    _, state_digest = read_json_with_digest(state_path)
-                    write_json(state_path, state, expected_digest=state_digest)
+                    #: ⚠️ 기준은 **이 조작이 읽고 검증한 판본**이다. 단계가 재시도되면 앞선 부분
+                    #:   시도가 남긴 판본을 위에서 읽어 소유를 확인한 뒤 이어간다(이 조작은
+                    #:   `operation_lock` 아래에서 자기 작업공간을 소유한다). 남이 그 사이에
+                    #:   바꿨으면 거절된다.
+                    write_json(state_path, state, expected_digest=verified_state_digest)
                     operation = self._advance(operation, "CONTEXT_WRITTEN", **verify_files(workspace, expected))
                 if operation["stage"] == "CONTEXT_WRITTEN":
                     verify_files(workspace, expected)
