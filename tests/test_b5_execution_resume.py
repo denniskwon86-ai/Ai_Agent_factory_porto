@@ -236,6 +236,16 @@ def test_current_failed_node_checkpoint_can_retry_without_reset_or_new_planning(
 def test_quota_mode_write_followed_by_read_failure_is_unknown_not_false(execution):
     h = execution
     h.engine.values.update(factory_mode="SUSPENDED_QUOTA", pre_suspend_mode="PLANNING")
+    #: ⚠️ [대역 보정 2026-09-23 — CR §12-P1②] **기대(assert)는 바꾸지 않았다.**
+    #:   동결은 checkpoint 와 정본을 **함께** 기록한 상태다(`_suspend_for_quota` 가 둘 다
+    #:   쓴다). 이 fixture 의 `latest_state.json` 은 checkpoint 와 무관한 표식이라, 쿼터
+    #:   재개가 이제 「동결 checkpoint 가 지금 정본과 이어져 있는가」를 모드 복구 **전에**
+    #:   묻자 409(동결 사이 정본이 바뀌었다)로 먼저 막혔다 — 이 시험이 보려는 「모드를 쓴
+    #:   뒤 읽기가 실패하면 503」까지 가지 못한 것이다. 이 시험 안에서만 동결 상태를
+    #:   실제대로 맞춘다(fixture 를 공유하는 다른 시험은 건드리지 않는다).
+    import json
+    (h.root / "latest_state.json").write_text(json.dumps(h.engine.values, ensure_ascii=False),
+                                              encoding="utf-8")
     def failed_read():
         if h.engine.updates:
             raise OSError("합성: 모드 변경 뒤 조회 실패")

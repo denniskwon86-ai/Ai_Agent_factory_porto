@@ -52,7 +52,17 @@ def _patch(monkeypatch, engine, orch):
     async def noop(*a, **k):
         return None
     monkeypatch.setattr(ao.factory_broadcaster, "broadcast", noop)
-    monkeypatch.setattr(orch, "_save_latest_state", noop)
+
+    async def saved(*a, **k):
+        #: ⚠️ [대역 보정 2026-09-23 — CR §12] **기대(assert)는 바꾸지 않았다.**
+        #:   `_save_latest_state` 는 [CR-W03-2C] 이후 **결과를 돌려준다**(`{"saved": …}`).
+        #:   호출자가 그것으로 「계산은 됐지만 정본 저장은 안 됐다」를 가른다. 종전 대역은
+        #:   `None` 을 돌려줘 `saved.get(...)` 에서 AttributeError 가 났고, 그 결과
+        #:   `test_suspend_*` 두 건은 **이 브랜치 HEAD 에서도 이미 실패**하고 있었다(A/B 로
+        #:   확인 — 인계서의 회귀 목록에 이 파일이 없어 드러나지 않았다). 계약이 바뀌었는데
+        #:   대역이 따라가지 않은 것이라 대역을 맞춘다.
+        return {"saved": True, "project_id": "", "error": ""}
+    monkeypatch.setattr(orch, "_save_latest_state", saved)
 
 
 async def _drain(orch):

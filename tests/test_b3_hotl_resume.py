@@ -330,7 +330,18 @@ def test_correct_tokens_empty_feedback_update_once_resume_once_and_reject_repeat
             assert h.initial.writes == h.bound.writes == [] and h.persona_calls == []
             assert len(h.quality_calls) == 1
             assert h.quality_calls[0][1] == {"gate_name": "HOTL", "accepted": True, "feedback": ""}
-            assert h.stream_calls == [((_config(), TASK, h.workspace, TEMPLATE, CONFIG_FP), {})]
+            #: ⚠️ [기대 수정 2026-09-23 — CR §12-P1②, **약화가 아니라 강화**]
+            #:   종전 단언은 kwargs 를 `{}` 로 못박았다. 재개가 이제 **손대기 전 checkpoint** 를
+            #:   재개 기준(`checkpoint_basis`)으로 넘기므로 그 단언은 새 계약과 맞지 않는다.
+            #:   위치 인자는 그대로 확인하고, 새 인자는 **값까지** 확인한다: 대역의 원래 값은
+            #:   `needs_revision=True` 이고 이 라운드(빈 피드백)가 `False` 로 쓴다. 기준이 쓴
+            #:   **뒤의** 값이면 정본과 달라 정상 HOTL 재개가 거절된다 — 이 단언이 그것을 잡는다.
+            assert len(h.stream_calls) == 1
+            stream_args, stream_kwargs = h.stream_calls[0]
+            assert stream_args == (_config(), TASK, h.workspace, TEMPLATE, CONFIG_FP)
+            assert set(stream_kwargs) == {"checkpoint_basis"}
+            assert stream_kwargs["checkpoint_basis"]["needs_revision"] is True, \
+                "재개 기준이 손대기 전이 아니라 쓴 뒤의 checkpoint 다"
             calls = copy.deepcopy((h.bound_calls, h.runtime_calls, h.final.reads))
             assert await h.orch.resume_hotl(TASK, "", PROJECT, **tokens) is False
             assert (h.bound_calls, h.runtime_calls, h.final.reads) == calls

@@ -86,11 +86,29 @@ def test_product_loop_preserves_revision_contract(tmp_path, monkeypatch, resume)
     events = []
 
     class Engine:
+        #: ⚠️ [대역 보정 2026-09-23 — 사용자 승인, CR §12-P1②] **기대(assert)는 바꾸지 않았다.**
+        #:   바꾼 것은 이 대역이 「재개 직전 checkpoint」에 답하는 값 하나다.
+        #:
+        #:   종전 대역은 `aget_state` 가 스트림 전후를 가리지 않고 **언제나 결과**를 돌려줬다.
+        #:   제품이 재개 전에 checkpoint 를 물어보지 않던 때 만든 대역이라 그래도 됐다.
+        #:   이제 재개는 「checkpoint 가 지금 정본과 이어져 있는가」를 **스트림 전에** 묻는다
+        #:   (낡은 checkpoint 가 새 정본을 덮는 반례 — 아래 `resume-older-checkpoint`). 그 질문에
+        #:   종전 대역은 아직 계산하지 않은 결과를 답하므로, 정본과 다르다고 판정돼 **정상
+        #:   재개가 거절**된다. 실제 엔진에서는 노드마다 checkpoint 와 정본을 함께 저장하므로
+        #:   아무도 끼어들지 않은 재개 직전 checkpoint 는 정본과 **같다.** 대역을 그 사실에
+        #:   맞췄다 — 스트림 전에는 정본과 이어진 checkpoint, 스트림 뒤에는 결과.
+        #:
+        #:   이 시험이 지키려던 뜻(「정상 재개는 저장할 수 있어야 한다」)은 그대로이고,
+        #:   `resume-older-checkpoint` 가 반대쪽(끼어든 뒤의 재개는 거절)을 지킨다.
+        def __init__(self):
+            self.values = json.loads(path.read_text(encoding="utf-8"))
+
         async def astream(self, state, *, config):
+            self.values = outcome
             yield {"review_node": outcome}
 
         async def aget_state(self, config):
-            return SimpleNamespace(values=outcome)
+            return SimpleNamespace(values=self.values)
 
     async def runtime(*args):
         return Engine()
