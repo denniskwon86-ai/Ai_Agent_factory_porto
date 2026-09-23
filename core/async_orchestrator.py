@@ -310,6 +310,15 @@ class AsyncFactoryOrchestrator:
         # ★ 지우는 것은 **판정**뿐이다. `build_error_log` 같은 **근거는 남긴다** —
         #   자가복구가 직전 실패 원인을 프롬프트에 실어야 하기 때문이다([자가복구 P1]).
         #   판정은 매번 새로 내려야 하고, 근거는 물려받아야 한다.
+        #
+        # ★★★ [CR §12-P1①] **아래 초기화보다 먼저** 「무엇을 읽고 왔는가」를 떠 둔다.
+        #   종전에는 초기화한 뒤의 payload 로 파일과 견주었다 — 파일을 정확히 읽어 보낸
+        #   정상 요청도 방금 내가 지운 `terminal_*` 두 칸 때문에 「입력이 파일과 다르다」가
+        #   됐고, 계산이 다 끝난 뒤 저장이 거절됐다. **자기 가공을 남의 변경으로 오인한 것이다.**
+        #   기준은 가공 **전**의 것이고, 가공된 payload 는 실행에만 쓴다. 비교에서 뺄 칸을
+        #   하나씩 늘리는 방식으로 풀지 않는다 — 가공이 하나 늘 때마다 같은 구멍이 난다.
+        started_from = (jsonable_encoder(project_state_payload)
+                        if isinstance(project_state_payload, dict) else _UNSET)
         if isinstance(project_state_payload, dict):
             project_state_payload["terminal_status"] = ""
             project_state_payload["terminal_reason"] = ""
@@ -361,7 +370,8 @@ class AsyncFactoryOrchestrator:
             print(f"⚠️ [Orchestrator] Task {task_id} (project={pid}) 는 이미 실행 중 - 중복 가동 요청 무시.")
             return False
         config = {"configurable": {"thread_id": _thread(pid, task_id)}}
-        task = asyncio.create_task(self._run_sprint_loop(config, project_state_payload, task_id, workspace_root))
+        task = asyncio.create_task(self._run_sprint_loop(config, project_state_payload, task_id, workspace_root,
+                                                         started_from=started_from))
         self._register_task(pid, task_id, task)
         return True
 
@@ -872,14 +882,22 @@ class AsyncFactoryOrchestrator:
             print(f"⚠️ [Orchestrator] 계약 결정 상태 반영 실패({project_id}/{task_id}): {e}")
             return False
 
-    async def _run_sprint_loop(self, config: dict, state_dict: dict, task_id: str, workspace_root: str):
+    async def _run_sprint_loop(self, config: dict, state_dict: dict, task_id: str, workspace_root: str,
+                               *, started_from: Any = _UNSET):
         pid = _pid(workspace_root)
         #: ★★ [10.2-A] 시작은 **자기 입력이 지금 파일에서 나왔음을 보여야** 인수한다.
         #:   다르면 인수하지 않고, 이후 저장이 거절된다 — 낡은 바탕에서 나온 결과가
         #:   남이 확정한 값을 덮지 않게.
+        #: ★★ [CR §12-P1①] 견주는 것은 **가공 전의 읽기**(`started_from`)다. `state_dict` 는
+        #:   `start_sprint` 가 `terminal_*` 를 지운 **실행용** payload 라 그것으로 견주면
+        #:   정상 요청이 자기 가공 때문에 거절된다. 기준을 주지 않은 호출(가공이 없는
+        #:   경로)만 `state_dict` 를 그대로 쓴다.
+        #: ⚠️ 인수는 **아카이브 뒤**인 여기서 한다. PLANNING 은 `start_sprint` 가
+        #:   `latest_state.json` 을 `.archive/` 로 옮기므로, 그 전에 인수하면 곧 사라질
+        #:   판본을 기준으로 잡게 된다.
         execution_key = _skey(pid, task_id)
         self.claim_project_state(workspace_root, execution_key=execution_key,
-                                 started_from=state_dict)
+                                 started_from=state_dict if started_from is _UNSET else started_from)
         # T2-b: 이 프로젝트의 워크플로우 템플릿 그래프로 실행(스킬/토폴로지/HOTL 게이트가 템플릿별)
         tid = (state_dict or {}).get("template_id", "default")
         expected_fp = (state_dict or {}).get("config_fingerprint", "")
@@ -1003,6 +1021,13 @@ class AsyncFactoryOrchestrator:
                 if not isinstance(current_state, dict) or any(current_state.get(k) != expected_studio_context[k] for k in fixed):
                     raise ProcessError("HOTL_CONTEXT_CONFLICT", "질문의 승인 업무 문맥이 바뀌었습니다.", 409)
 
+        #: ★★★ [CR §12-P1②] **손대기 전의 checkpoint** 를 떠 둔다 — 재개가 「이 checkpoint 가
+        #:   지금 정본과 이어져 있는가」를 이것으로 판단한다.
+        #: ⚠️⚠️ 반드시 **아래 `queue.append` 보다 먼저**, 그리고 **복사본으로** 뜬다.
+        #:   `queue` 는 `current_state` 안의 리스트를 그대로 가리키므로 append 가
+        #:   `current_state` 자체를 바꾼다. 참조를 넘기면 피드백이 섞인 값이 기준이 되고,
+        #:   그러면 정본과 달라 **정상 HOTL 재개가 전부 거절된다.**
+        checkpoint_basis = jsonable_encoder(current_state)
         try:
             if feedback:
                 if isinstance(current_state, dict):
@@ -1037,19 +1062,37 @@ class AsyncFactoryOrchestrator:
 
         skey = _skey(_pid(workspace_root), task_id)
         task = asyncio.create_task(self._resume_stream(
-            config, task_id, workspace_root, tid, expected_fp))
+            config, task_id, workspace_root, tid, expected_fp, checkpoint_basis=checkpoint_basis))
         self._register_task(_pid(workspace_root), task_id, task)
         return True
 
     async def _resume_stream(self, config: dict, task_id: str, workspace_root: str,
-                             template_id: str = "default", expected_fingerprint: str = ""):
+                             template_id: str = "default", expected_fingerprint: str = "",
+                             *, checkpoint_basis: Any = _UNSET):
         pid = _pid(workspace_root)
         #: ★★ [10.2-A] 재개도 **인수를 거친다.** 앞 판은 여기 인수가 없어 새 프로세스의
-        #:   **정상 저장까지 막혔다.** 재개는 엔진 checkpoint 에서 이어받으므로 경쟁하는
-        #:   다른 판본에서 파생된 것이 아니다 — 현재 판본을 기준으로 삼는다.
+        #:   **정상 저장까지 막혔다.**
+        #:
+        #: ★★★ [CR §12-P1②] 그러나 **무조건 인수하지 않는다.** 앞 판의 주석은 「checkpoint
+        #:   에서 이어받으므로 경쟁 판본에서 파생된 것이 아니다」였는데 **근거가 아니라
+        #:   주장이었다.** 옛 checkpoint 가 남은 채 다른 writer 가 정본만 갱신하면, 재개
+        #:   결과가 그 새 정본을 덮고 `state_saved=true` 가 됐다(반례로 재현).
+        #:
+        #:   판단 기준은 **checkpoint 가 지금 정본과 이어져 있는가**다. 노드마다 checkpoint 와
+        #:   정본을 함께 저장하므로, 아무도 끼어들지 않았다면 재개 직전 checkpoint 는 정본과
+        #:   **같다.** 다르면 그 사이 누군가 정본을 바꿨다 — 인수하지 않고, 저장은 거절된다.
+        #:
+        #:   ⚠️ 기준은 **사람·시스템이 손대기 전의** checkpoint 다. `resume_hotl` 은 피드백을,
+        #:     `resume_from_suspend` 는 모드 복구를 `aupdate_state` 로 넣은 뒤 여기로 온다.
+        #:     그 뒤의 checkpoint 는 **실행용 변경**이라 정본과 다른 게 정상이다 — 그것으로
+        #:     견주면 정상 재개가 전부 거절된다. 그래서 호출자가 손대기 전 값을 넘긴다
+        #:     (`checkpoint_basis`). 넘기지 않으면(손대지 않은 경로) 지금 것을 읽는다.
         execution_key = _skey(pid, task_id)
-        self.claim_project_state(workspace_root, execution_key=execution_key)
         langgraph_engine = await get_runtime_app(template_id, expected_fingerprint)
+        if checkpoint_basis is _UNSET:
+            checkpoint_basis = (await langgraph_engine.aget_state(config)).values
+        self.claim_project_state(workspace_root, execution_key=execution_key,
+                                 started_from=checkpoint_basis)
         try:
             async for event in langgraph_engine.astream(None, config=config):
                 for node_name, state_data in event.items():
@@ -1101,7 +1144,11 @@ class AsyncFactoryOrchestrator:
             snapshot = await langgraph_engine.aget_state(config)
             #: ★ [CR-W03-2C] 반환값을 무시하지 않는다 — 중단 상태를 정본에 못 적었으면
             #:   재개를 판단할 근거가 없다. 실행을 멈추지는 않되 화면이 알 수 있게 싣는다.
-            saved = await self._save_latest_state(snapshot.values, workspace_root)
+            #: ★★ [CR §12·키 통일] **이 실행의 키**로 저장한다. 앞 판은 키 없이 불러
+            #:   기준을 `project_id` 로 찾았는데, 이 실행은 `_skey(pid, task_id)` 로
+            #:   인수했으므로 기준을 못 찾아 **파일이 있으면 늘 거절**됐다.
+            saved = await self._save_latest_state(snapshot.values, workspace_root,
+                                                  execution_key=_skey(pid, task_id))
         except Exception as e:
             saved = {"saved": False, "error": f"{type(e).__name__}: {e}"}
             print(f"⚠️ [Orchestrator] SUSPENDED_QUOTA 상태 기록 실패: {e}")
@@ -1134,23 +1181,47 @@ class AsyncFactoryOrchestrator:
         tid = vals.get("template_id", "default")
         expected_fp = vals.get("config_fingerprint", "")
         restored_mode = vals.get("pre_suspend_mode") or "EXECUTION"
+        pid = _pid(workspace_root)
+        skey = _skey(pid, task_id)
+        #: ★★★ [CR §12-P1②·키 통일] **모드를 복구하기 전에** 이 checkpoint 가 지금 정본과
+        #:   이어져 있는지 본다. 동결된 사이 다른 writer 가 정본을 바꿨다면, 동결 시점의
+        #:   checkpoint 에서 이어 계산한 결과는 **그 새 정본을 덮는다.**
+        #: ⚠️ 다르면 checkpoint 를 건드리기 **전에** 멈춘다. 모드를 먼저 복구하고 나서 거절하면
+        #:   「재개 가능」으로 바뀐 checkpoint 만 남고 실행은 안 된 어중간한 상태가 된다.
+        #: ⚠️ 앞 판은 아래 저장을 **실행 키 없이** 불러 기준을 `project_id` 로 찾았다. 인수는
+        #:   `_skey(pid, task_id)` 로 하므로 **기준을 영영 못 찾아** 파일이 있으면 항상 거절됐고,
+        #:   반환값도 버려 아무도 몰랐다. 저장 함수와 호출자가 같은 키를 쓴다.
+        claim = self.claim_project_state(workspace_root, execution_key=skey,
+                                         started_from=jsonable_encoder(vals))
+        if not claim.get("claimed"):
+            from core.enterprise_context.process_schema import ProcessError
+            raise ProcessError("STUDIO_QUOTA_RESUME_CONFLICT",
+                "동결된 사이 작업 상태가 다른 곳에서 바뀌어 이어서 실행하지 않습니다. "
+                "현재 상태를 다시 조회하십시오.", 409)
         # T2-b: 재개도 이 프로젝트의 템플릿 그래프로(초기 스프린트와 동일 토폴로지여야 체크포인트 정합)
         langgraph_engine = await get_runtime_app(tid, expected_fp)
         try:
             # factory_mode 복구 + 보존값 초기화. 이 복구가 있어야 재개 후 HOTL 게이트 감지가 정상화된다.
             await langgraph_engine.aupdate_state(config, {"factory_mode": restored_mode, "pre_suspend_mode": ""})
             snapshot = await langgraph_engine.aget_state(config)
-            await self._save_latest_state(snapshot.values, workspace_root)
+            saved = await self._save_latest_state(snapshot.values, workspace_root, execution_key=skey)
         except Exception as e:
             print(f"⚠️ [Orchestrator] 쿼터 재개 모드 복구 실패: {e}")
             from core.enterprise_context.process_schema import ProcessError
             raise ProcessError("STUDIO_QUOTA_RESUME_UNKNOWN",
                 "쿼터 재개 상태 변경을 시도한 뒤 결과를 확인하지 못했습니다. 원요청을 조회하십시오.", 503) from e
+        if not saved.get("saved"):
+            #: 인수는 됐는데 기록이 안 됐다(교체 실패 등). 이어서 실행하면 정본은 동결
+            #: 상태인데 계산은 도는 어긋난 상태가 된다 — 알리고 멈춘다.
+            from core.enterprise_context.process_schema import ProcessError
+            raise ProcessError("STUDIO_QUOTA_RESUME_UNKNOWN",
+                "쿼터 재개 상태를 기록하지 못했습니다. 원요청을 조회하십시오.", 503)
 
-        pid = _pid(workspace_root)
-        skey = _skey(pid, task_id)
+        #: 방금 기록한 checkpoint 가 곧 정본이므로 그것을 재개 기준으로 넘긴다 — 모드를
+        #: 복구한 뒤의 값이라, 복구 **전** 값을 넘기면 방금 내 기록을 남의 변경으로 오인한다.
         task = asyncio.create_task(self._resume_stream(
-            config, task_id, workspace_root, tid, expected_fp))
+            config, task_id, workspace_root, tid, expected_fp,
+            checkpoint_basis=jsonable_encoder(snapshot.values)))
         self._register_task(pid, task_id, task)
         print(f"▶️ [Orchestrator] 쿼터 회복 재개: {task_id} (project={pid}, mode={restored_mode})")
         return True
