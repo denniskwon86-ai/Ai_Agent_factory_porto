@@ -103,10 +103,6 @@ class BatteryMaterials(BusinessDef):
     #:   (`docs/decisions/DOMAIN_REVIEW_BATTERY_2026-09-22.md` 2.3).
     sale_prices = {"FG-NISO4": 24000.0, "FG-LIOH": 32000.0}
 
-    #: MHP 와 Black Mass 는 **주원료**라 많이 쓴다(수산화리튬 1 톤에 Black Mass
-    #: 5.2 톤). 황산·소석회는 부재료다
-    purchase_qty_scale = {"RM-MHP": 5.5, "RM-BLACKMASS": 5.5,
-                          "RM-H2SO4": 4.5, "RM-LIME": 2.5}
 
     grades = {
         "RM-MHP": "NI_40PCT",            # 니켈 MHP — Ni 35~40% 가 통상

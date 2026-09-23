@@ -112,10 +112,6 @@ class BusinessDef:
     #: {material_id: 판매 1 건당 수량 배율}. 금은 kg 이고 양이 적다
     sale_qty_scale: Dict[str, float] = {}
 
-    #: ★ **원료를 한 번에 얼마나 사는가**(1.5.0). 정광은 선적 단위로 수천 톤씩 사고
-    #:   소석회는 조금씩 산다 — 그 차이가 없으면 발주가 전부 같은 크기가 된다.
-    #:   기본값 1.0. 사업이 원료를 여럿 쓰면 소비가 큰 쪽을 크게 준다.
-    purchase_qty_scale: Dict[str, float] = {}
 
     # ── 편의
 
@@ -348,15 +344,6 @@ def grade_of(defs: Sequence[BusinessDef], material_id: str) -> str:
         if d.owns(material_id):
             return d.grade_of(material_id)
     return "DEMO_STANDARD"
-
-
-def purchase_qty_scale_of(defs: Sequence[BusinessDef], material_id: str, default: float = 1.0) -> float:
-    """발주 한 건의 크기. **소비량과 맞아야 한다** — 적으면 「사지 않고 쓰는」
-    데이터가 되고, 많으면 원료가 창고에 쌓이기만 한다."""
-    for d in defs:
-        if material_id in d.purchase_qty_scale:
-            return d.purchase_qty_scale[material_id]
-    return default
 
 
 def sale_price_of(defs: Sequence[BusinessDef], material_id: str, default: float) -> float:

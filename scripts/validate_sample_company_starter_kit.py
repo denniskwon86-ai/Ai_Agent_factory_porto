@@ -27,7 +27,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from core.data_preparation import kit_freeze  # noqa: E402
 KIT_ID = "KIT-MFG-NONFERROUS-PROCUREMENT"
-KIT_VERSION = "1.5.0"
+KIT_VERSION = "1.6.0"
 KIT_ROOT = ROOT / "starter_kits" / KIT_ID / KIT_VERSION
 COMMON = {"record_id", "tenant_id", "scope_node_id", "data_class", "business_data_kind",
           "data_origin", "quality_status", "certification_status", "as_of_date", "lineage_id"}
@@ -196,6 +196,32 @@ def validate_profile(profile: str, dataset_ids: Sequence[str], v: Validation) ->
         short = [f"{m}: 조달 {_in.get(m, 0):,.0f} < 소비 {q:,.0f}"
                  for m, q in _out.items() if m in _known and q > _in.get(m, 0.0)]
         v.check(f"{profile}:산_것보다_많이_쓰지_않는다", not short, "; ".join(short[:3]))
+
+        #: ★★★ **사서 쓰는가, 쌓아둔 것을 쓰는가** (1.6.0).
+        #:
+        #: 「산 것보다 많이 쓰지 않는다」는 **기초재고를 넣어서** 보므로, 기초재고만
+        #: 크면 구매가 0 이어도 통과한다. 실제로 1.5.0 까지 그랬다 — 입고가 소비의
+        #: **51~57%** 뿐이고 나머지를 기초재고(소비의 1.15 배)가 댔다.
+        #:
+        #: ★ 이 키트의 용도는 **「원료 구매·도입계획」**이다. 사서 쓰는 것이 보여야 한다.
+        _recv = defaultdict(float)
+        _open = defaultdict(float)
+        for r in (data.get("INV-02") or []):
+            mv = str(r.get("movement_id") or "")
+            try:
+                q = float(r.get("quantity") or 0)
+            except (TypeError, ValueError):
+                continue
+            if mv.startswith("MOV-IN"):
+                _recv[r.get("material_id")] += q
+            elif mv.startswith("MOV-OPEN"):
+                _open[r.get("material_id")] += q
+        _raw_used = {m: q for m, q in _out.items() if m in _known and q > 0}
+        _tot_used = sum(_raw_used.values())
+        _tot_recv = sum(_recv.get(m, 0.0) for m in _raw_used)
+        _cover = _tot_recv / _tot_used if _tot_used else 1.0
+        v.check(f"{profile}:쌓아둔_것이_아니라_사서_쓴다", _cover >= 0.80,
+                f"입고가 소비의 {_cover:.0%} (하한 80%) — 나머지는 기초재고가 댄다")
 
         #: ★★★ **배합대로 원료가 나가는가** (1.5.0).
         #:

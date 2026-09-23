@@ -24,6 +24,7 @@ from collections import defaultdict
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
+from types import MappingProxyType
 from typing import Any, Dict, Iterable, List, Mapping, Sequence, Tuple
 
 
@@ -98,7 +99,7 @@ def company_name() -> str:
 #: **판본은 `--version` 으로 받는다** (P2). 예전에는 여기에 "1.0.0" 이 박혀 있어서,
 #: 1.1.0 을 내려면 이 줄을 고쳐야 했고 고치는 순간 1.0.0 을 재현할 수 없게 됐다.
 #: `main()`/`build()` 이 아래 셋을 판본에 맞게 다시 세운다.
-KIT_VERSION = "1.5.0"
+KIT_VERSION = "1.6.0"
 KIT_ROOT = ROOT / "starter_kits" / KIT_ID / KIT_VERSION
 OVERLAY: kit_defs.KitOverlay = kit_defs.KitOverlay()
 
@@ -620,7 +621,8 @@ def latest_indicator(rows: Sequence[Mapping[str, Any]], code_field: str) -> Dict
 
 
 def generate_contracts(profile: Profile, suppliers: Sequence[Mapping[str, Any]], materials: Sequence[Mapping[str, Any]],
-                       ext2: Sequence[Mapping[str, Any]], rng: random.Random) -> List[Dict[str, Any]]:
+                       ext2: Sequence[Mapping[str, Any]], rng: random.Random,
+                       need: Mapping[str, float] = MappingProxyType({})) -> List[Dict[str, Any]]:
     raw = [m for m in materials if m["material_type"] in {"RAW", "CONSUMABLE"} and m["active"]]
     #: ★ **사는 장면이 보여야 한다**(1.5.0). 위 `_PRC_CYCLE` 설명을 보라.
     _known_raw = {m["code"] for m in business_defs.materials_of(BUSINESSES)}
@@ -639,8 +641,11 @@ def generate_contracts(profile: Profile, suppliers: Sequence[Mapping[str, Any]],
         if benchmark not in prices:
             benchmark = "NICKEL"
         scope = mat["scope_node_id"]
+        #: ★ 계약 수량이 발주 합계보다 작으면 **발주가 잘린다**(`remaining`). 주력
+        #:   원료는 소비 전체를 덮을 만큼 잡는다 — 계약은 「살 수 있는 상한」이다
+        _cq = round(max(10000 + (i % 10)*2500, need.get(mat["material_id"], 0.0) * 1.5), 3)
         rows.append({"contract_id": f"CTR-{i+1:05d}", "supplier_id": supplier["supplier_id"],
-                     "material_id": mat["material_id"], "contract_quantity": round(10000 + (i % 10)*2500, 3),
+                     "material_id": mat["material_id"], "contract_quantity": _cq,
                      "ordered_quantity": 0.0, "quantity_uom": mat["base_uom"], "benchmark_code": benchmark,
                      "benchmark_price": round(prices[benchmark], 2), "premium_rate": round(-0.02 + (i%9)*0.008, 4),
                      "currency": supplier["currency"], "incoterm": ["CIF", "FOB", "CFR"][i%3],
@@ -650,9 +655,26 @@ def generate_contracts(profile: Profile, suppliers: Sequence[Mapping[str, Any]],
 
 
 def generate_purchase_and_logistics(profile: Profile, contracts: List[Dict[str, Any]], suppliers: Sequence[Mapping[str, Any]],
-                                    start: date, end: date, rng: random.Random) -> tuple[List[Dict[str, Any]], ...]:
+                                    start: date, end: date, rng: random.Random,
+                                    need: Mapping[str, float] = MappingProxyType({})) -> tuple[List[Dict[str, Any]], ...]:
     po_rows, submission_rows, shipment_rows, milestone_rows, customs_rows, transport_rows = [], [], [], [], [], []
     span = max(1, (end - start).days)
+    #: ★★★ **소비에서 역산한다** (1.6.0). `material_need` 의 설명을 보라.
+    #:
+    #: ⚠️ 발주가 전부 입고되지는 않는다 — `shipments`(1,200) 만 배송되고 나머지는
+    #:   `OPEN` 으로 남는다(발주 1,800 중 **3 분의 2**). 그만큼 더 주문해야 실제
+    #:   입고가 소비를 댄다. 이것을 빼면 발주는 맞는데 **재고가 음수로 간다.**
+    _deliver = min(1.0, profile.shipments / max(1, profile.purchase_orders))
+    _po_per_contract = defaultdict(int)
+    for _i in range(profile.purchase_orders):
+        _po_per_contract[contracts[_i % len(contracts)]["contract_id"]] += 1
+    #: 그 원료를 파는 계약이 몇 건이고 각 계약에 발주가 몇 건 붙는가 — 한 건이 얼마를
+    #: 주문해야 하는지가 거기서 나온다
+    _po_count: Dict[str, int] = defaultdict(int)
+    for _c in contracts:
+        _po_count[str(_c["material_id"])] += _po_per_contract[_c["contract_id"]]
+    _target = {m: (q * _BUY_MARGIN / _deliver / _po_count[m]) for m, q in need.items()
+               if _po_count.get(m)}
     shipment_po_indexes = set(rng.sample(range(profile.purchase_orders), min(profile.shipments, profile.purchase_orders)))
     contract_ordered: Dict[str, float] = defaultdict(float)
     supplier_by_id = {s["supplier_id"]: s for s in suppliers}
@@ -661,9 +683,10 @@ def generate_purchase_and_logistics(profile: Profile, contracts: List[Dict[str, 
         order_date = start + timedelta(days=(i * 17 + i//7) % span)
         lead = int(supplier_by_id[c["supplier_id"]]["lead_time_days"])
         due_date = order_date + timedelta(days=lead)
-        #: ★ 원료마다 거래 단위가 다르다(1.5.0) — 정광은 선적 단위, 소석회는 조금씩
-        quantity = round((15 + (i % 11) * 4.5)
-                         * business_defs.purchase_qty_scale_of(BUSINESSES, c["material_id"]), 3)
+        #: ★ 주력 원료는 **소비에서 역산한 양**을, 나머지는 예전대로. 변동은 주되
+        #:   평균이 목표가 되게 한다(0.85 + 0~0.30 → 평균 1.0)
+        _t = _target.get(str(c["material_id"]))
+        quantity = round(_t * (0.85 + (i % 7) * 0.05) if _t else 15 + (i % 11) * 4.5, 3)
         remaining = float(c["contract_quantity"]) - contract_ordered[c["contract_id"]]
         if remaining < quantity:
             quantity = max(1.0, remaining)
@@ -785,6 +808,14 @@ _MAJOR_BATCH_SCALE = 0.45
 #:   발주 100% 가 나왔다. 그래서 **주기**로 정한다: 개수와 무관하게 비율이 지켜진다.
 _PRC_CYCLE, _PRC_MAJOR = 4, 1
 
+#: 소비보다 얼마나 더 사는가. 딱 맞춰 사면 **시점이 조금만 어긋나도 음수**가 난다.
+_BUY_MARGIN = 1.25
+
+#: 기초재고를 **몇 달치**로 둘 것인가 (주력 원료만). 구매가 나머지를 댄다.
+#: ⚠️ 첫 몇 달은 발주가 아직 도착하지 않는다 — 리드타임과 배송 지연이 있다.
+#:   그 구간을 이 재고가 버텨야 한다.
+_OPEN_STOCK_MONTHS = 5.0
+
 
 def generate_sales(profile: Profile, customers: Sequence[Mapping[str, Any]], products: Sequence[str],
                    start: date, end: date, rng: random.Random) -> List[Dict[str, Any]]:
@@ -895,6 +926,32 @@ def generate_plans_batches_events(profile: Profile, bom: Sequence[Mapping[str, A
             stamp("MFG-03", events, kind="ACTUAL"))
 
 
+def material_need(batches: Sequence[Mapping[str, Any]],
+                  bom: Sequence[Mapping[str, Any]]) -> Dict[str, float]:
+    """★★★ **생산이 원료를 얼마나 쓰는가** (1.6.0).
+
+    1.5.0 까지 구매가 이것을 몰랐다. 발주량은 `purchase_qty_scale` 이라는 **손으로
+    맞춘 상수**로 정했고, 사업·판본이 바뀔 때마다 다시 맞춰야 했다 — 실제로 1.5.0 을
+    내면서 네 번 고쳤다. 그래도 **구매/소비가 0.66~0.75** 에 머물렀다.
+
+    이제 **생산을 먼저 만들고 그 소비량으로 구매를 낸다.** 상수를 맞출 일이 없다.
+
+    ⚠️ 부재료까지 센다 — BOM 첫 줄(주원료)은 배치가 수율을 반영해 이미 갖고 있고,
+      나머지는 `출력량 × 소요량`이다(1.5.0 에서 출고를 그렇게 만들었다).
+    """
+    by_out: Dict[str, List[Mapping[str, Any]]] = defaultdict(list)
+    for line in bom:
+        if str(line.get("component_role") or "") == "INPUT":
+            by_out[str(line["output_material_id"])].append(line)
+    need: Dict[str, float] = defaultdict(float)
+    for b in batches:
+        need[str(b["input_material_id"])] += abs(float(b["input_quantity"]))
+        for line in by_out.get(str(b["output_material_id"]), ())[1:]:
+            need[str(line["input_material_id"])] += abs(
+                float(b["output_quantity"]) * float(line["quantity_per_output"]))
+    return dict(need)
+
+
 def generate_movements_and_snapshots(profile: Profile, logistics: Sequence[Mapping[str, Any]], shipments: Sequence[Mapping[str, Any]],
                                      purchase_orders: Sequence[Mapping[str, Any]], batches: Sequence[Mapping[str, Any]],
                                      sales: Sequence[Mapping[str, Any]], materials: Sequence[Mapping[str, Any]],
@@ -946,20 +1003,23 @@ def generate_movements_and_snapshots(profile: Profile, logistics: Sequence[Mappi
         #:   원료는 기초재고가 모자라 **재고가 마이너스로 갔다**(1.1.0 에서 1,082 행,
         #:   가장 깊은 곳 −5,276). 없는 것을 투입해 만든 데이터는 분석에 쓸 수 없다.
         _base = 2000.0 if m["material_type"] == "RAW" else 800.0 if m["material_type"] == "FINISHED" else 100.0
-        #: ⚠️⚠️ **1.15 배는 36 개월치다 — 살 이유를 없앤다.**
+        #: ★★★ **주력 원료는 몇 달치만 둔다** (1.6.0).
         #:
-        #: 1.4.0 에서 동정광을 20,176 톤 쓰면서 612 톤만 산 것이 그래서였다. 재고
-        #: 음수가 나지 않으니 검사도 통과했다. 현실의 원료 재고는 **몇 달치**다.
+        #: 1.15 배는 **36 개월치**이고, 그러면 살 이유가 없어진다 — 1.4.0 에서
+        #: 동정광을 20,176 톤 쓰면서 612 톤만 산 것이 그래서였다. 재고 음수가 나지
+        #: 않으니 검사도 통과했다. 현실의 원료 재고는 몇 달치다.
         #:
-        #: ⚠️ 1.5.0 에서 0.20 으로 내려 봤다가 되돌렸다. 이 값은 **모든 품목**에
-        #:   걸리는데 더미 소모품은 구매가 따라오지 않아 **음수 842 행**이 터졌다
-        #:   (주력 원료만 낮추려 해도 조합 키트에서는 원료 5 종이 발주를 나눠 가져
-        #:   종당 구매가 소비를 못 댄다).
-        #:
-        #: ★ 제대로 고치려면 **발주량을 소비 예상에서 역산**해야 한다 — 지금은 구매가
-        #:   생산보다 먼저 생성되므로 순서를 바꾸거나 BOM 으로 예측해야 한다.
-        #:   1.6.0 의 과제다.
-        qty = round(max(_base, _issue_need[m["material_id"]] * 1.15), 3)
+        #: ⚠️ 1.5.0 에서 **모든 품목**을 0.20 으로 내렸다가 되돌렸다 — 더미 소모품은
+        #:   구매가 따라오지 않아 **음수 842 행**이 터졌다. 이제 구매가 소비를 보고
+        #:   들어오므로 **주력만** 낮춘다. 더미는 그대로 1.15 다.
+        #: ⚠️ **비율이 아니라 개월치로 잡아야 한다.** `_issue_need` 는 **전 기간**
+        #:   소비라, 같은 비율이어도 quick(6 개월)과 full(36 개월)에서 뜻이 전혀
+        #:   다르다. 0.25 로 고정했더니 full 은 9 개월치인데 quick 은 1.5 개월치가
+        #:   되어 **quick 에서만 음수**가 났다(2 행).
+        _known_open = {mm["code"] for mm in business_defs.materials_of(BUSINESSES)}
+        _open_ratio = (min(1.15, _OPEN_STOCK_MONTHS / max(1, profile.months))
+                       if m["material_id"] in _known_open else 1.15)
+        qty = round(max(_base, _issue_need[m["material_id"]] * _open_ratio), 3)
         balances[(m["material_id"], loc)] += qty
         movements.append({"movement_id": f"MOV-OPEN-{idx+1:05d}", "movement_date": iso(start),
                           "movement_type": "OPENING", "material_id": m["material_id"], "lot_id": f"LOT-OPEN-{idx+1:05d}",
@@ -1273,13 +1333,24 @@ def generate_profile(profile: Profile) -> Dict[str, List[Dict[str, Any]]]:
     datasets["MDM-07"] = generate_accounts(profile)
     datasets["MDM-08"] = generate_trade_refs(profile)
     datasets["EXT-01"], datasets["EXT-02"], datasets["EXT-03"] = generate_external(profile, start, rng)
-    datasets["PRC-01"] = generate_contracts(profile, datasets["MDM-02"], datasets["MDM-01"], datasets["EXT-02"], rng)
-    (datasets["PRC-02"], datasets["LOG-01"], datasets["LOG-02"], datasets["LOG-03"],
-     datasets["LOG-04"], datasets["LOG-05"]) = generate_purchase_and_logistics(
-        profile, datasets["PRC-01"], datasets["MDM-02"], start, end, rng)
+    #: ★★★ **파는 것 → 만드는 것 → 사는 것** 순으로 낸다 (1.6.0).
+    #:
+    #: 1.5.0 까지는 구매가 **맨 앞**이었다. 그래서 「얼마나 쓸지」를 모른 채 발주를
+    #: 만들었고, 발주량은 `purchase_qty_scale` 이라는 손으로 맞춘 상수로 정했다 —
+    #: 사업·판본이 바뀔 때마다 다시 맞춰야 했고(1.5.0 에서 네 번 고쳤다) 그래도
+    #: **구매/소비가 0.66~0.75** 에 머물렀다.
+    #:
+    #: 의존은 그대로다 — 구매는 품목·공급사·지표만 보고, 그 셋은 여전히 앞에 있다.
     datasets["SLS-01"] = generate_sales(profile, datasets["MDM-03"], products, start, end, rng)
     datasets["MFG-01"], datasets["MFG-02"], datasets["MFG-03"] = generate_plans_batches_events(
         profile, datasets["MDM-05"], datasets["MDM-06"], datasets["SLS-01"], start, end, rng)
+    #: 이제 **얼마나 쓸지 안다**
+    _need = material_need(datasets["MFG-02"], datasets["MDM-05"])
+    datasets["PRC-01"] = generate_contracts(profile, datasets["MDM-02"], datasets["MDM-01"],
+                                            datasets["EXT-02"], rng, _need)
+    (datasets["PRC-02"], datasets["LOG-01"], datasets["LOG-02"], datasets["LOG-03"],
+     datasets["LOG-04"], datasets["LOG-05"]) = generate_purchase_and_logistics(
+        profile, datasets["PRC-01"], datasets["MDM-02"], start, end, rng, _need)
     datasets["INV-02"], datasets["INV-01"] = generate_movements_and_snapshots(
         profile, datasets["LOG-05"], datasets["LOG-02"], datasets["PRC-02"], datasets["MFG-02"],
         datasets["SLS-01"], datasets["MDM-01"], datasets["MDM-04"], start, end, rng,
