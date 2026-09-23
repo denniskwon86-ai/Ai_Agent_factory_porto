@@ -72,8 +72,11 @@ interface FactoryStore {
   wbsErrorCount: number;
   completed_agents: string[];
   /** ★ [CR-W03-2C] 마지막 «정본 저장» 실패. 계산 완료와 저장 완료는 다른 사건이다.
-   *  값이 있으면 화면이 보고 있는 판본이 서버 정본이 아닐 수 있다는 뜻이다. */
-  lastStateSaveError: { node: string; error: string; stale: boolean } | null;
+   *  값이 있으면 화면이 보고 있는 판본이 서버 정본이 아닐 수 있다는 뜻이다.
+   *  ★★ [CR §12-P1③] `task_id` 는 **어느 실행의 결과가 저장 안 됐는가**다. 회복은 그 실행의
+   *    다음 저장 성공으로만 확인한다 — 다른 실행은 다른 checkpoint 라 그 성공이 이 결과를
+   *    되살리지 않는다. 비어 있으면(이전 형식) 식별이 안 되므로 어느 성공이든 회복으로 본다. */
+  lastStateSaveError: { node: string; error: string; stale: boolean; task_id?: string } | null;
   currentActivity: any | null;
   // 빌드 자가복구(3회) 소진 등 스프린트 최종 실패 정보 - ControlPanel 실패 배너/재시도 UI 용
   lastSprintFailure: { taskId: string; error: string; detail?: string } | null;
@@ -1050,10 +1053,14 @@ export const useFactoryStore = create<FactoryStore>()((set, get) => ({
       if (!isCurrent()) return;
       if (result.status === "success" && result.data) {
         // 머지(...prev.state) 금지 — 전체 교체. 빈 누적 필드가 이전 프로젝트 값으로 남는 stale 누수 차단.
-        // ★★ [10.2-C] **재조회가 성공했으면 저장 실패 안내를 해제한다.**
-        //   서버가 준 것이 지금 정본이므로 화면은 더 이상 «미확정» 이 아니다.
-        //   안내를 걸기만 하고 내리지 않으면 그 안내는 곧 소음이 된다.
-        set({ state: { ...result.data } as ProjectState, lastStateSaveError: null });
+        // ★★★ [CR §12-P1③] **저장 실패 안내를 여기서 내리지 않는다.**
+        //   앞 판은 「재조회가 성공했으면 정본이니 안내를 내린다」였다. 그런데 **저장이 실패해도
+        //   예전 정본 GET 은 성공한다** — 그것은 미저장 결과가 되살아났다는 뜻이 아니라, 저장되지
+        //   못한 결과 대신 **옛 판본을 보여 주고 있다**는 뜻이다. 게다가 저장 실패 직후 이 함수가
+        //   자동으로 불리므로(`NODE_COMPLETED`·`SPRINT_COMPLETED`) 경고가 곧바로 사라졌다.
+        //   **읽기 성공과 실패한 쓰기의 회복은 별개다.** 여기서는 보여 줄 판본만 바꾸고, 안내는
+        //   회복이 확인되는 자리(같은 실행의 저장 성공)·프로젝트 전환에서만 내린다.
+        set({ state: { ...result.data } as ProjectState });
         const execution = result.data.studio_execution_state;
         if (execution && execution.task_id === result.data.current_sprint_task_id && typeof execution.running === 'boolean') {
           if (execution.running) set({ activeSprintId: execution.task_id });
@@ -1207,14 +1214,21 @@ export const useFactoryStore = create<FactoryStore>()((set, get) => ({
             //   네트워크를 기다리면 뒤따르는 이벤트 처리가 밀린다.
             void useFactoryStore.getState().fetchLatestState();
           }
+          // ★★ [CR §12-P1③] 회복은 **그 실행의** 저장 성공으로만 확인한다. 다른 실행은 다른
+          //   checkpoint 라, 그쪽 저장이 성공해도 이 결과가 되살아난 것이 아니다.
+          //   같은 실행이면 다음 저장이 누적 상태 전체를 쓰므로 앞에서 못 쓴 결과까지 들어간다.
+          const nodeTaskId = String(data.payload?.task_id || '');
+          const pending = prev.lastStateSaveError;
+          const recovers = !pending || !pending.task_id || pending.task_id === nodeTaskId;
           return {
             logs,
             // 계산은 끝났다 — 그건 그대로 센다. 저장 실패는 «따로» 남긴다.
             completed_agents: [...prev.completed_agents, data.payload.node],
-            lastStateSaveError: saveOk ? null : {
+            lastStateSaveError: saveOk ? (recovers ? null : pending) : {
               node: String(data.payload?.node || ''),
               error: String(data.payload?.state_save_error || ''),
               stale: Boolean(data.payload?.state_save_stale),
+              task_id: nodeTaskId,
             },
           };
         }
@@ -1256,6 +1270,7 @@ export const useFactoryStore = create<FactoryStore>()((set, get) => ({
             logs,
             lastStateSaveError: quotaSaved ? prev.lastStateSaveError : {
               node: 'QUOTA_EXHAUSTED', error: '중단 상태를 저장하지 못했습니다', stale: false,
+              task_id: String(data.payload?.task_id || ''),
             },
             isSuspendedQuota: true,
             suspendedTaskId: data.payload?.task_id || prev.suspendedTaskId,
@@ -1282,6 +1297,7 @@ export const useFactoryStore = create<FactoryStore>()((set, get) => ({
               node: 'SPRINT_COMPLETED',
               error: String(data.payload?.state_save_error || ''),
               stale: false,
+              task_id: String(data.payload?.task_id || ''),
             },
           };
         }

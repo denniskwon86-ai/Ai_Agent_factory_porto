@@ -2747,6 +2747,62 @@ await test('W03 저장 실패 후 옛 정본 GET 성공은 저장 회복이 아�
   }
 });
 
+// ★★ [CR §12-P1③] 위 시험은 한쪽(옛 GET 은 회복이 아니다)만 본다. §12.3-4 는 **양쪽**을
+//   **같은 실제 store 흐름**에서 보라고 했다: 저장 실패 → 옛 GET → 안내 유지 → 정상 저장
+//   확인 → 해제. 그래서 실제 `connectSSE` 를 태워 **실제 `onmessage`** 로 이벤트를 넣는다.
+//   (EventSource 만 대역이다. 네트워크는 메모리 대역, 브라우저 수용 아님.)
+//   ⚠️ 정리는 `onerror` 로 하지 않는다 — 그것은 5초 재연결 타이머를 건다.
+await test('W03 저장 실패→옛 GET→안내 유지→같은 실행 저장 성공→해제 (실제 SSE store 흐름)', async () => {
+  const savedState = factory.useFactoryStore.getState();
+  const savedReply = reply;
+  const savedEventSource = globalThis.EventSource;
+  const sources = [];
+  const flush = async () => { for (let i = 0; i < 8; i++) await new Promise(r => setTimeout(r, 0)); };
+  try {
+    globalThis.EventSource = class { constructor(url) { this.url = url; sources.push(this); } close() { this.closed = true; } };
+    factory.useFactoryStore.setState({ currentProjectId: 'W03_FLOW', state: { value: 'old-canonical' },
+      lastStateSaveError: null, completed_agents: [], logs: [] });
+    calls = [];
+    reply = async url => {
+      const u = String(url);
+      if (u.endsWith('/api/v1/auth/sse-ticket')) return { ok: true, json: async () => ({ data: { ticket: 'SYNTHETIC_TICKET' } }) };
+      if (u.endsWith('/state/latest')) return {
+        ok: true, json: async () => ({ status: 'success', data: { value: 'old-canonical' } }),
+      };
+      if (u.includes('/templates/')) return { ok: false };
+      throw new Error('허용하지 않은 합성 요청: ' + url);
+    };
+    await factory.useFactoryStore.getState().connectSSE();
+    const source = sources.at(-1);
+    assert.ok(source?.onmessage, '실제 connectSSE 가 이벤트 수신기를 달지 않았다');
+    const emit = payload => source.onmessage({ data: JSON.stringify({
+      type: 'NODE_COMPLETED', timestamp: 'T', payload: { project_id: 'W03_FLOW', ...payload } }) });
+    const now = () => factory.useFactoryStore.getState();
+
+    // ① 계산은 끝났는데 저장이 실패했다 — 어느 실행의 결과인지 함께 남아야 한다.
+    emit({ task_id: 'TASK_A', node: 'n1', state_saved: false, state_save_error: '합성 저장 실패', state_version: 'v1' });
+    assert.equal(now().lastStateSaveError?.task_id, 'TASK_A', '저장 실패를 실행과 함께 남기지 않았다');
+    // ② 저장 실패가 자동 재조회를 부른다. 서버는 옛 정본을 준다 — 읽기는 성공한다.
+    await flush();
+    assert.ok(calls.some(c => String(c.url).endsWith('/state/latest')), '저장 실패 뒤 재조회가 일어나지 않았다');
+    assert.equal(now().state.value, 'old-canonical');
+    assert.equal(now().lastStateSaveError?.task_id, 'TASK_A', '옛 정본 GET 이 저장 실패 안내를 지웠다');
+    // ③ **다른 실행**의 저장 성공은 이 결과의 회복이 아니다 — 다른 checkpoint 다.
+    emit({ task_id: 'TASK_B', node: 'm1', state_saved: true, state_version: 'v2' });
+    await flush();
+    assert.equal(now().lastStateSaveError?.task_id, 'TASK_A', '다른 실행의 저장 성공이 이 실행의 미저장 안내를 지웠다');
+    // ④ **같은 실행**의 다음 저장이 성공하면 누적 상태 전체가 써졌다 — 회복이 확인됐다.
+    emit({ task_id: 'TASK_A', node: 'n2', state_saved: true, state_version: 'v3' });
+    await flush();
+    assert.equal(now().lastStateSaveError, null, '같은 실행이 저장에 성공했는데 안내가 남았다');
+  } finally {
+    for (const s of sources) { s.onmessage = null; s.close?.(); }
+    globalThis.EventSource = savedEventSource;
+    reply = savedReply;
+    factory.useFactoryStore.setState(savedState);
+  }
+});
+
 const after = hashes();
 await test('검사 중 제품 소스 불변', () => assert.deepEqual(after, before));
 const report = { passed: results.filter(x => x.result === 'PASS').length, failed: results.filter(x => x.result === 'FAIL').length,
