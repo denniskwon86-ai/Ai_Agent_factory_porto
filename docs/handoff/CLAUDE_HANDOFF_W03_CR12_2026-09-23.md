@@ -5,6 +5,8 @@
 > 17스위트 **356 passed / exit 0**. §4 설계 충돌은 사용자 승인으로 `restart-resume` 의 **대역만**
 > 보정해 풀었다(기대 불변, 변이로 뜻 보존 확인). 결과 정본은 `CLAUDE_REVIEW_REQUEST_W03_R01_2026-09-22.md`
 > **§13**. 이 문서의 나머지는 착수 당시의 기록으로 남긴다 — **현재 상태로 읽지 말 것.**
+> 이후 §13.10 보강으로 반례 파일이 13건이 되어 반례+조건부는 **33 PASS** 다. 최신 인계:
+> `CLAUDE_BRANCH_HANDOFF_W03_CR12_RESULT_2026-09-23.md`.
 
 작성: Claude Code (이 PC 세션) · 대상: **다른 PC·다른 계정의 Claude Code 세션**
 브랜치: **`claude/w03-atomic-save-20260922`** · 마지막 푸시 `c246b49fa`

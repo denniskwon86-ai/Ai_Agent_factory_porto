@@ -713,3 +713,29 @@ fixture 없음)로 보이고, `test_contract_review_api` 는 `_resume()` 대역�
 - **제품 코드 변경 없음**(시험만). §13.7 의 356 passed 회귀는 제품 해시가 같아 그대로 유효하다.
 
 반례 파일은 7 → **13건**이다.
+
+### 13.11 인계 시점 재확인 — 푸시한 HEAD 에서 (2026-09-23 오후)
+
+`bdbba5664`(원격과 같음)에서 소스를 바꾸지 않고 다시 돌렸다.
+
+| 대상 | 결과 | 증거 |
+|---|---|---|
+| 반례 + 조건부 저장 | **33 passed / exit 0**(반례 13 + 조건부 20) | `output/usage-holds-lff_8o02/` |
+| 재개 경로 6스위트 | **112 passed / exit 0** | `output/usage-holds-8bbc10x0/` |
+| bootstrap + 원자 저장 | **64 passed / skip 0 / exit 0** | `output/usage-holds-_in7xwy4/` |
+| 프런트 하네스 | **159 PASS / 0 FAIL** | `output/studio-contracts-9823ee86-230e-47f0-9b50-f343e8172329/report.json` |
+
+러너 세 번 모두 `sources_unchanged`·`protected_assets_unchanged` true · `blocked_file_writes: []` · conftest 미적재.
+
+★ **이 PC 에서는 파일 심볼릭 링크 거절 시험 3건이 skip 없이 실행·통과한다** —
+`test_w03_atomic_save::test_a_linked_target_is_rejected` ·
+`test_b3_studio_bootstrap::test_real_factory_untrusted_marker_tmp_is_preserved_and_blocked[symlink]` ·
+`…[dangling-symlink]`. junit(`tests.xml`)에서 `<skipped>` 0건을 확인했다. §11.6 의 skip 3건은 원래 PC 에
+링크를 만들 권한이 없어서였고, 같은 코드가 링크를 만들 수 있는 환경에서는 거절한다는 실측이 이 PC 에서 나온
+셈이다. §13.7 의 17스위트 회귀도 `356 passed, 2 warnings` 로 skip 이 없었는데 그때 이 차이를 적지 못했다.
+설정은 바꾸지 않았고, 이 PC 에서 링크가 만들어지는 이유(개발자 모드 등)는 확인하지 않았다.
+
+**기록 위치를 바로잡았다.** `CLAUDE_CURRENT_WORK_ORDER.md` §6-1·§7 은 결과를 `CLAUDE_P03_EXECUTION_RESULT.md` 에
+누적하고 수신·상태를 상태 파일에 갱신하라고 하는데, 이 §13 을 요청서에만 적었다. 같은 내용을 결과 문서 §13 에
+누적하고 `CLAUDE_CODE_EXECUTION_STATUS.md` 에 수신·상태를 적었다. 세션 인계는
+`CLAUDE_BRANCH_HANDOFF_W03_CR12_RESULT_2026-09-23.md`.

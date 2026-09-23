@@ -2584,3 +2584,205 @@ tests/test_b3_studio_bootstrap::test_real_factory_untrusted_marker_tmp_is_preser
 
 ⚠️ 111건 계열(`test_app_data_runtime`·`test_provider_dispatch`·`test_advisor_bootstrap`)은
 이번에도 넣지 않았습니다 — 기존 실패라 귀속이 섞입니다.
+
+---
+
+## 13. Claude 보완 회신 — §12 단일 흐름 (2026-09-23, 다른 PC 세션)
+
+> 요청서 `CLAUDE_REVIEW_REQUEST_W03_R01_2026-09-22.md` §13 과 같은 내용을 누적한다(`CLAUDE_CURRENT_WORK_ORDER.md` §6-1). 절 번호는 요청서 기준이다 — §12 는 요청서의 Codex 재검토 절이다.
+
+**수신·착수 기록**: 다른 PC 의 Claude Code 세션이 `563290377` 을 받아 §12 를 수행했다.
+착수 시 실측이 인계서와 일치함을 확인했다 — 백엔드 **25 PASS / 2 FAIL**, 프런트 **157 PASS / 1 FAIL**.
+커밋 4개(`cc5a0f3de` · `51e5d366d` · `5cbe7335a` · `7e190aa55`), 새 요청서 없음.
+
+### 13.1 §12.3 의 「하나의 흐름」을 다섯 경로에 적용했다
+
+`변경 전 읽기/검증된 checkpoint → 기준 토큰 → 실행용 변경 → 같은 실행의 조건부 저장 → 저장 확인 → 안내 해제`
+
+| 경로 | 변경 전 기준 | 실행용 변경 | 이전 문제 → 처리 |
+|---|---|---|---|
+| `start_sprint` | 초기화 **전** payload | `terminal_*` 초기화 | 초기화 **후** 로 비교 → 전에 떠서 루프로 전달 (**P1-①**) |
+| `resume_hotl` | `aupdate_state` **전** checkpoint | 피드백 추가 | 무조건 인수 → 손대기 전 값을 `checkpoint_basis` 로 (**P1-②**) |
+| `resume_from_suspend` | `aupdate_state` **전** checkpoint | 모드 복구 | 무조건 인수 + **저장에 실행 키 없음** → 인수를 앞당기고 키 통일 |
+| 일시정지 재개(:596) | 재개 직전 checkpoint | 없음 | 무조건 인수 → 재개 직전 값으로 판정 |
+| `_suspend_for_quota` | (진행 중 실행) | 모드=SUSPENDED | **저장에 실행 키 없음** → 키 통일 |
+
+**재개의 판단 기준** — 노드마다 checkpoint 와 정본을 함께 저장하므로, 아무도 끼어들지 않았다면
+재개 직전 checkpoint 는 정본과 **같다.** 다르면 그 사이 누군가 정본을 바꿨다 → 인수하지 않고
+저장이 거절된다. 기준은 **사람·시스템이 손대기 전**의 값이다 — 손댄 뒤의 checkpoint 는 실행용
+변경이라 정본과 다른 게 정상이고, 그것으로 견주면 정상 재개가 전부 거절된다.
+
+### 13.2 코드를 읽다가 잡은 것 — 지시에 없던 셋
+
+1. **`resume_hotl` 의 제자리 변경.** `queue = current_state.get(...)` 뒤 `queue.append(...)` 가
+   `current_state` 자체를 바꾼다. 참조를 기준으로 넘기면 피드백이 섞인 값이 기준이 되어 **정상 HOTL
+   재개가 전부 거절**된다. `jsonable_encoder` 로 복사본을 **append 전에** 뜬다.
+2. **쿼터 경로의 실행 키 불일치.** `resume_from_suspend` 의 재개 전 저장과 `_suspend_for_quota` 의
+   저장이 `execution_key` 없이 불려 기준을 `project_id` 로 찾았다. 인수는 `_skey(pid, task_id)` 로
+   하므로 **기준을 영영 못 찾아 파일이 있으면 늘 거절**됐고, 앞쪽은 반환값도 버렸다. §12.3-2 의
+   「저장 함수의 키와 호출자의 실행 키를 통일한다」가 이것이었다.
+3. **쿼터 재개의 순서.** 인수 확인을 **모드 복구 전**으로 옮겨, 충돌이면 checkpoint 를 건드리기 전에
+   `STUDIO_QUOTA_RESUME_CONFLICT`(409)로 멈춘다. 복구 뒤에 거절하면 「재개 가능」으로 바뀐
+   checkpoint 만 남는다. 기록 실패(교체 거절 등)도 반환값을 보고 멈춘다.
+
+### 13.3 §4 설계 충돌 — 사용자 승인으로 대역을 보정했다
+
+인계서 §4 의 두 시험(`restart-resume` 기대 성공 / `resume-older-checkpoint` 기대 거절)은 둘 다 재개
+직전 엔진 값이 파일과 다르다. 가르는 사실은 **뒤쪽에서만 다른 writer 가 끼어들었다**는 것이다.
+「재개 직전 checkpoint == 정본일 때만 인수」가 실제 엔진에 맞는 규칙인데, 앞쪽 대역은 `aget_state`
+가 스트림 전후 구분 없이 **언제나 결과**를 돌려줘(제품이 재개 전 checkpoint 를 묻지 않던 때의 대역)
+그 규칙에서 정상 재개가 거절된다.
+
+**사용자에게 두 안(대역만 보정 / Codex 확인 먼저)을 올려 「대역만 보정」 승인을 받았다.**
+`restart-resume` 의 대역만 스트림 전에는 정본과 이어진 checkpoint, 뒤에는 결과를 주도록 고쳤고
+**기대(assert)는 한 줄도 바꾸지 않았다.** 변이로 「재개를 전부 거절」을 넣자 **이 시험이 잡았다** —
+시험의 뜻(「정상 재개는 저장할 수 있어야 한다」)이 보존됐다.
+
+### 13.4 제가 깨뜨린 기존 시험 4건 — A/B 로 귀속 확정 후 수정
+
+`core/async_orchestrator.py` 를 HEAD 판본으로 바꿔 같은 스위트를 돌려 귀속을 갈랐다.
+
+| 시험 | HEAD | 변경 후 | 수정 |
+|---|---|---|---|
+| `test_quota_resume` suspend ×2 | **FAIL** | FAIL | ⚠️ **기존 실패** — 대역 보정 |
+| `test_quota_resume` resume ×2 | PASS | FAIL | 대역 보정 |
+| `test_b5_execution_resume` quota_mode_write | PASS | FAIL | 대역 보정 |
+| `test_b3_hotl_resume` correct_tokens | PASS | FAIL | ⚠️ **기대 수정(강화)** |
+
+- `test_quota_resume` 의 `_save_latest_state` 대역이 `None` 을 돌려줘 `saved.get` 에서
+  AttributeError. 계약은 이미 결과 dict 를 돌려주는데 대역이 따라가지 않았다. **suspend 두 건은
+  이 브랜치 HEAD 에서도 이미 실패**하고 있었다 — 인계서의 회귀 목록에 이 파일이 없어 드러나지 않았다.
+- `test_b5_execution_resume` 은 fixture 의 `latest_state.json` 이 checkpoint 와 무관한 표식이라
+  쿼터 재개의 인수 확인이 409 로 먼저 막았다. 동결은 checkpoint 와 정본을 함께 쓴 상태이므로
+  이 시험 안에서만 실제대로 맞췄다(fixture 공유 시험 무접촉).
+- ⚠️ **`test_b3_hotl_resume` 은 기대를 바꿨다 — 사용자 승인 범위(대역만)를 넘는다.** kwargs `{}`
+  단언이 새 계약(`checkpoint_basis`)과 맞지 않아 불가피했다. **약화하지 않고 강화했다** — 위치
+  인자는 그대로 두고 새 인자는 **값까지**(손대기 전 `needs_revision=True`, 이 라운드가 `False` 로
+  쓴다) 본다. 변이로 「쓴 뒤 값」을 넘기자 이 단언이 잡았다. **이 판단의 수용 여부를 Codex 가
+  확인해 주십시오.**
+
+### 13.5 P1-③ store — 읽기 성공과 회복을 가른다
+
+- `fetchLatestState` 는 **보여 줄 판본만** 바꾸고 안내를 내리지 않는다.
+- 해제는 **같은 실행의 다음 저장 성공**과 프로젝트 전환에서만 한다. 같은 실행이면 다음 저장이 누적
+  상태 전체를 쓰므로 앞에서 못 쓴 결과까지 들어간다. **다른 실행은 다른 checkpoint 라 그 성공이 이
+  결과를 되살리지 않는다** — 그래서 미저장 안내에 `task_id` 를 실었다(§12.3-4 「미저장 결과의 식별
+  정보를 유지한다」). `task_id` 가 없는 이전 형식은 식별이 안 되므로 어느 성공이든 회복으로 본다.
+- **명시 결정(닫기) 경로는 만들지 않았다** — 새 UI 이고 §12 가 요구한 것은 「그 때만 정리」이지
+  경로 신설이 아니다. 따라서 마지막 노드가 저장 실패한 채 스프린트가 끝나면 **재시도 성공 또는
+  프로젝트 전환 전까지 안내가 남는다.** 실제로 저장이 안 됐으므로 그것이 맞다고 판단했다.
+- 하네스: Codex 의 한쪽 시험 옆에 **양쪽 흐름 시험**을 더했다. `EventSource` 만 대역으로 두고
+  **실제 `connectSSE` → 실제 `onmessage`** 로 `NODE_COMPLETED` 를 넣는다 — 저장 실패 → 자동
+  재조회(옛 정본) → 안내 유지 → 다른 실행 성공엔 유지 → 같은 실행 성공에 해제. 변이로 「같은
+  실행」 규칙을 빼자 이 시험이 잡았다. **브라우저 수용은 아니다.**
+
+### 13.6 bootstrap 초기 기록
+
+소유를 검증하는 읽기에서 **판본까지** 받아 두고 그것으로 조건부 저장한다. 사이의 `provision()` 은
+`project_meta.json`·marker 만 쓰고 `latest_state.json` 은 쓰지 않으므로(`provision_project` 확인)
+그 사이 생긴 변경은 곧 다른 writer 다. READY 경로와 기존 실패 주입 회귀 44건은 그대로 통과한다.
+
+새 반례 `test_unit_initial_state_does_not_overwrite_a_writer_that_arrived_after_verification` —
+provision 직후 다른 writer 가 다른 소유로 써 넣으면 `STUDIO_SETUP_IO_FAILED`(503)로 막히고 그
+writer 의 정본이 보존되며 원장 사건이 남지 않는다. **앞 판(HEAD)으로 바꿔 돌리면 정확히 이 반례만
+실패**했다(1 failed / 44 passed) — 반례가 결함을 실제로 잡는다.
+
+⚠️ 관찰: 이 충돌은 `FAILED_RETRYABLE`(「같은 요청으로 재개」)로 분류된다. 재시도하면 검증 단계에서
+소유 불일치로 막혀 덮지는 않지만, 원인이 충돌인데 재시도 가능으로 안내되는 것은 어색하다. 분류
+정책 변경은 범위 밖이라 손대지 않았다.
+
+kit 진입 시점 CAS 는 **변경하지 않았다** — §12 가 「Claude 가 명시한 한계 유지, 별도 제품 권한
+정책은 만들지 않는다」라고 했다.
+
+### 13.7 검증 — 직접 실행
+
+| 대상 | 결과 |
+|---|---|
+| 반례 + 조건부 저장 | **27 PASS**(25 → 27, 실패하던 2건 해소) |
+| 재개 경로 6스위트(반례 포함) | **106 passed / exit 0** |
+| 프런트 하네스 | **159 PASS / 0 FAIL**(157 + Codex 1 + 양쪽 흐름 1) · `tsc -b --force` 0 |
+| **최종 관련 회귀 17스위트** | **356 passed / exit 0** · 24분 29초 |
+| 격리 | `sources_unchanged`·`protected_assets_unchanged` **true** · `blocked_file_writes: []` · conftest 미적재 |
+| 변이(4곳) | 재개 전부 거절 → `restart-resume` / 쓴 뒤 값 → hotl / 다른 실행 해제 → 하네스 / 앞 판 bootstrap → 새 반례. **전부 원복 해시 일치** |
+
+**넓은 회귀의 기존 실패 29건 — A/B 로 무관 확정.** 오케스트레이터를 쓰는 나머지 시험을 돌리자
+29건이 실패했다(`test_contract_review_api` 15 · 401 인증 계열 14). HEAD 판본으로 같은 스위트를 돌려
+**실패 집합이 동일**함을 확인했다 — 새로 깨진 것 0, 고친 것 0. 401 계열은 conftest 미적재(인증
+fixture 없음)로 보이고, `test_contract_review_api` 는 `_resume()` 대역의 키워드 인자 문제로 보이나
+**원인은 확정하지 않았다**(범위 밖). 최종 회귀에서 이 두 계열과 111건 계열은 뺐다.
+
+### 13.8 주장하지 않는 것
+
+- 실제 두 노드 공유 저장 증거가 아니다. 모든 증거가 단일 PC 다.
+- 브라우저 실측 없음. store 는 하네스(메모리 네트워크) 까지다.
+- 실제 LangGraph checkpoint 저장소 수용이 아니다 — 엔진은 합성 대역이다. 「노드마다 checkpoint 와
+  정본을 함께 저장한다」는 전제는 코드 경로(`_run_sprint_loop`·`_resume_stream`)에서 확인한 것이다.
+- 환경: **Python 3.12.10**(원래 PC 3.14.3 아님). 위 결과는 3.12 에서만 확인했다.
+
+### 13.9 Codex 판단을 부탁드리는 것
+
+1. **§13.4 의 hotl 기대 수정** — 승인 범위 밖이었다. 강화로 받을지.
+2. **§13.5 의 명시 해제 경로 부재** — 마지막 노드 저장 실패 시 안내가 남는다. 그대로 둘지, 닫기
+   경로를 둘지(새 UI 라 Codex 영역일 수 있다).
+3. **§13.6 의 충돌 분류** — `FAILED_RETRYABLE` 을 유지할지.
+
+진척 **1855/5300 = 35.0% 유지**(계산기 기준). 이번 보완으로 가산을 주장하지 않는다.
+
+### 13.10 제출 전 자가 점검에서 찾아 막은 것 — 재개 **진입점** 반례
+
+위 §13.1~13.7 을 커밋한 뒤 넘기기 전에 스스로 다시 공격했다. 낡은 재개를 거절하는지 보는 반례가
+**`_resume_stream` 을 직접 부르는 것 하나뿐**이었다. 재개 진입점은 셋인데:
+
+| 진입점 | checkpoint 가공 | 보강 전 | 보강 후 |
+|---|---|---|---|
+| `resume_hotl` | `aupdate_state`(피드백) | 기준 값만 확인(§13.4 기대 강화), **낡은 재개 거절 미확인** | 정상·낡은 반례 |
+| `resume_from_suspend` | `aupdate_state`(모드 복구) | ⚠️ **새로 만든 409 분기를 지키는 시험 없음** | 정상·충돌(409) 반례 |
+| `resume_existing` | **없음** | 직접 호출 반례가 같은 경로를 덮음 | 정상·낡은 반례 + 「가공 없음」 단언 |
+
+§12.1 이 `start_sprint` 진입을 요구한 이유가 「진입점이 payload 를 가공한다」였고, 앞의 두 진입점도
+들어오면서 checkpoint 를 손댄다. 손대기 전 값을 넘기는 **배선이 맞는지는 진입점을 지나야만 보인다.**
+특히 `resume_from_suspend` 의 409 는 §13.2-3 에서 **제가 새로 만든 분기인데 그걸 지키는 시험이
+없었다** — 만든 것을 잇지 않는 실수를 시험 쪽에서 반복한 것이다.
+
+`resume_existing` 은 가공이 없어 기존 반례로 충분하다고 봤지만, **가공이 없다는 사실 자체를 시험이
+확인해 두어야** 나중에 누가 가공을 넣으면 걸린다고 판단해 따로 뒀다(`engine.updates == []` 단언).
+
+- 반례 틀: 엔진·통지만 대역, 서비스·재개 루프·인수·파일 저장은 **실제**. `_ResumeEngine` 은 스트림
+  전에는 checkpoint, 뒤에는 결과를 주고 `aupdate_state` 는 checkpoint 를 실제로 바꾼다.
+- ⚠️ `resume_existing` 은 재개 **근거** 판정(`_pause_evidence`·`_failed_retry`·`pauses.read`)을 대역으로
+  통과시켰다 — 그 판정은 W03.2 관심사가 아니고 `test_b5_execution_resume` 이 따로 지킨다. 진입점
+  함수 본체와 인수·저장은 실제를 탄다. 기존 `execution` fixture 는 스트림이 노드를 내놓지 않고 저장을
+  `pytest.fail` 로 막아 저장 거절을 볼 수 없어 쓰지 않았다.
+- **변이**: 재개 인수를 무조건으로 되돌리자 `resume-older`·`hotl-older`·`existing-older` **셋 다 실패**,
+  쿼터 재개의 409 사전 거절을 빼자 `quota-changed-while-suspended` 가 실패. 전부 원복 해시 일치.
+- **누수**: 새 시험이 클래스 속성(`_failed_retry`)·모듈 속성(`pauses.read`)을 바꾸므로 재개 경로 6스위트와
+  섞어 돌렸다 — **112 passed / exit 0**(106 + 6), 격리 정상.
+- **제품 코드 변경 없음**(시험만). §13.7 의 356 passed 회귀는 제품 해시가 같아 그대로 유효하다.
+
+반례 파일은 7 → **13건**이다.
+
+### 13.11 인계 시점 재확인 — 푸시한 HEAD 에서 (2026-09-23 오후)
+
+`bdbba5664`(원격과 같음)에서 소스를 바꾸지 않고 다시 돌렸다.
+
+| 대상 | 결과 | 증거 |
+|---|---|---|
+| 반례 + 조건부 저장 | **33 passed / exit 0**(반례 13 + 조건부 20) | `output/usage-holds-lff_8o02/` |
+| 재개 경로 6스위트 | **112 passed / exit 0** | `output/usage-holds-8bbc10x0/` |
+| bootstrap + 원자 저장 | **64 passed / skip 0 / exit 0** | `output/usage-holds-_in7xwy4/` |
+| 프런트 하네스 | **159 PASS / 0 FAIL** | `output/studio-contracts-9823ee86-230e-47f0-9b50-f343e8172329/report.json` |
+
+러너 세 번 모두 `sources_unchanged`·`protected_assets_unchanged` true · `blocked_file_writes: []` · conftest 미적재.
+
+★ **이 PC 에서는 파일 심볼릭 링크 거절 시험 3건이 skip 없이 실행·통과한다** —
+`test_w03_atomic_save::test_a_linked_target_is_rejected` ·
+`test_b3_studio_bootstrap::test_real_factory_untrusted_marker_tmp_is_preserved_and_blocked[symlink]` ·
+`…[dangling-symlink]`. junit(`tests.xml`)에서 `<skipped>` 0건을 확인했다. §11.6 의 skip 3건은 원래 PC 에
+링크를 만들 권한이 없어서였고, 같은 코드가 링크를 만들 수 있는 환경에서는 거절한다는 실측이 이 PC 에서 나온
+셈이다. §13.7 의 17스위트 회귀도 `356 passed, 2 warnings` 로 skip 이 없었는데 그때 이 차이를 적지 못했다.
+설정은 바꾸지 않았고, 이 PC 에서 링크가 만들어지는 이유(개발자 모드 등)는 확인하지 않았다.
+
+**기록 위치를 바로잡았다.** `CLAUDE_CURRENT_WORK_ORDER.md` §6-1·§7 은 결과를 `CLAUDE_P03_EXECUTION_RESULT.md` 에
+누적하고 수신·상태를 상태 파일에 갱신하라고 하는데, 이 §13 을 요청서에만 적었다. 같은 내용을 결과 문서 §13 에
+누적하고 `CLAUDE_CODE_EXECUTION_STATUS.md` 에 수신·상태를 적었다. 세션 인계는
+`CLAUDE_BRANCH_HANDOFF_W03_CR12_RESULT_2026-09-23.md`.
