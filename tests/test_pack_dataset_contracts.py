@@ -9,7 +9,6 @@
 """
 from __future__ import annotations
 
-import hashlib
 import json
 import shutil
 
@@ -50,9 +49,11 @@ def test_each_profile_dataset_has_exactly_the_starter_kit_contract():
         d["dataset_contract_key"] for d in bundle["profile"]["datasets"]]
     for contract in contracts:
         key = contract["dataset_contract_key"]
-        raw = (KIT / "contracts" / f"{key}.contract.json").read_bytes()
-        assert contract["source"]["sha256"] == hashlib.sha256(raw).hexdigest() == recorded[f"contracts/{key}.contract.json"]
-        source = json.loads(raw.decode("utf-8-sig"))
+        #: 원본 지문은 스타터 키트 매니페스트의 **기록**과 대조한다. ⚠️ 파일 바이트로 다시 재지 않는다 —
+        #:   키트 파일은 `text=auto` 라 체크아웃 환경의 줄바꿈에 따라 바이트가 달라진다(이 PC 는 CRLF).
+        #:   내용이 같은지는 아래에서 파싱한 값으로 본다.
+        assert contract["source"]["sha256"] == recorded[f"contracts/{key}.contract.json"]
+        source = json.loads((KIT / "contracts" / f"{key}.contract.json").read_text(encoding="utf-8-sig"))
         assert contract["contract_version"] == source["contract_version"]
         assert contract["business_keys"] == source["business_keys"]
         assert contract["schema"]["fields"] == [
