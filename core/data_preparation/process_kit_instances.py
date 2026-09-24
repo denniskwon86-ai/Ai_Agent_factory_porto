@@ -62,18 +62,40 @@ def create_or_get(store, *, operation_id, bundle, boundary, actor, label=""):
         return {**row, "artifact_digest": fixed["artifact_digest"], "context_root_id": boundary.context_root_id}
 
 
-def binding_for_instance(store, instance):
+def _link(conn, instance):
     import json
-    with store.transaction() as conn:
-        if not conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='kit_process_instances'").fetchone():
-            return None
-        link = conn.execute("SELECT * FROM kit_process_instances WHERE instance_id=?", (instance["instance_id"],)).fetchone()
+    if not conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='kit_process_instances'").fetchone():
+        return None
+    link = conn.execute("SELECT * FROM kit_process_instances WHERE instance_id=?", (instance["instance_id"],)).fetchone()
     if not link:
         return None
     expected = json.loads(link["identity_json"])
     if fingerprint(expected) != link["identity_digest"] or any(instance.get(k) != v for k, v in expected.items()):
         raise ProcessError("PROCESS_INSTANCE_CONFLICT", "인스턴스 문맥의 고정 지문이 다릅니다.", 503)
     return dict(link)
+
+
+def binding_for_instance(store, instance):
+    with store.transaction() as conn:
+        return _link(conn, instance)
+
+
+def pinned_dataset_contract(conn, instance, dataset_contract_key):
+    """설치가 고정한 **데이터셋 계약** 하나. 없으면 `None` — 막는 것은 호출자(인증)다.
+
+    ★ 레지스트리(`kit_registry_versions`)는 보지 않는다. 그쪽은 같은 판번을 내용으로 덮는
+      mutable 등록부라, 거기서 읽은 계약은 «설치에 고정된 계약» 이 아니다.
+    ⚠️ 계약을 싣지 않은 판(1.1.0)의 설치본도 `None` 이다 — 추측으로 다른 판을 찾지 않는다."""
+    link = _link(conn, instance)
+    if not link:
+        return None
+    from core.data_preparation.process_pack_artifacts import stored_bundle
+    bundle = stored_bundle(conn, link["artifact_digest"])
+    if (bundle is None or instance["kit_id"] != bundle["kit_id"] or instance["version"] != bundle["version"]
+            or instance["kit_fingerprint"] != bundle["artifact_digest"]):
+        raise ProcessError("PROCESS_ARTIFACT_UNAVAILABLE", "인스턴스의 원본 지문이 다릅니다.", 503)
+    contracts = (bundle.get("dataset_contracts") or {}).get("contracts") or []
+    return next((dict(c) for c in contracts if c["dataset_contract_key"] == dataset_contract_key), None)
 
 
 def profile_for_instance(store, instance):

@@ -1,0 +1,36 @@
+{
+  "schema_version": 2,
+  "artifact_kind": "PROCESS_REFERENCE_CANDIDATE",
+  "kit_id": "KIT-MFG-NONFERROUS-PROCUREMENT",
+  "version": "1.2.0",
+  "name": "비철금속 L2 업무 골격 참조 후보",
+  "status": "DOMAIN_REVIEW_REQUIRED",
+  "setup_only": true,
+  "data_class": "NO_DATA",
+  "source_refs": [
+    "docs/design_business_kit_l2_process_setup_2026-09-12.md#4",
+    "docs/design_business_kit_l2_process_setup_2026-09-12.md#5.1",
+    "starter_kits/KIT-MFG-NONFERROUS-PROCUREMENT/1.0.0/manifest.json (계약명·앱 후보 식별자, 데이터셋 계약의 필드·필수·업무키 참조; 회사·데이터·서명 복제 없음)"
+  ],
+  "profile": {
+    "path": "profile.json",
+    "sha256": "ee3ca392577de31b07d467dde1d7c5a42b7b4a1c6ba79136c05c28b0566a1dc2"
+  },
+  "process_pack": {
+    "pack_id": "afs.manufacturing.materials-processes",
+    "version": "1.0.1",
+    "schema_version": 1,
+    "path": "processes/l2-process-pack.json",
+    "sha256": "e106b6106adbc7b51617ac36cb5ffe60e08e0cbe00a64dc174e39a96fae72881",
+    "requires_process_profile_schema": 2,
+    "setup_policy": "INCLUDED_REVIEW_REQUIRED"
+  },
+  "blueprints": {
+    "path": "blueprints.json",
+    "sha256": "47ef3669303ee2dfb861be2f4732e488ef840080b03678bbabb06363596b2d76"
+  },
+  "dataset_contracts": {
+    "path": "dataset_contracts.json",
+    "sha256": "d4ded68bbf16dbf50a6d52ac9bea633a7829d501956c7ff2b6363e4afcc214d0"
+  }
+}

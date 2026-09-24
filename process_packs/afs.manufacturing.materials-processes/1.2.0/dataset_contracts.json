@@ -1,0 +1,4088 @@
+{
+  "schema_version": 1,
+  "kit_id": "KIT-MFG-NONFERROUS-PROCUREMENT",
+  "version": "1.2.0",
+  "review_status": "DOMAIN_REVIEW_REQUIRED",
+  "source_refs": [
+    "starter_kits/KIT-MFG-NONFERROUS-PROCUREMENT/1.0.0/manifest.json (데이터셋 계약의 필드 이름·형·필수·업무키만 옮김; 회사·데이터·서명 복제 없음)"
+  ],
+  "contracts": [
+    {
+      "dataset_contract_key": "FND-01",
+      "contract_version": "1.0.0",
+      "source": {
+        "path": "starter_kits/KIT-MFG-NONFERROUS-PROCUREMENT/1.0.0/contracts/FND-01.contract.json",
+        "sha256": "0aed0185729b6c809dc967e021a007e268998d55e22444217f1b34cbf809412d"
+      },
+      "schema": {
+        "fields": [
+          {
+            "name": "record_id",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "tenant_id",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "scope_node_id",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "data_class",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "business_data_kind",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "data_origin",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "quality_status",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "certification_status",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "as_of_date",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "lineage_id",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "node_id",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "node_type",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "code",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "name",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "parent_id",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "entity_mode",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "industry_code",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "effective_from",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "effective_to",
+            "type": "string",
+            "required": false
+          }
+        ]
+      },
+      "business_keys": [
+        "node_id"
+      ]
+    },
+    {
+      "dataset_contract_key": "FND-02",
+      "contract_version": "1.0.0",
+      "source": {
+        "path": "starter_kits/KIT-MFG-NONFERROUS-PROCUREMENT/1.0.0/contracts/FND-02.contract.json",
+        "sha256": "21c945d10812f134d32b4e8d03278e26fc635647cd43fc4bfc3f950c854741f8"
+      },
+      "schema": {
+        "fields": [
+          {
+            "name": "record_id",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "tenant_id",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "scope_node_id",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "data_class",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "business_data_kind",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "data_origin",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "quality_status",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "certification_status",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "as_of_date",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "lineage_id",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "user_id",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "display_name",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "department_id",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "role_id",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "scope_node_id_grant",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "capabilities",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "effect",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "effective_from",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "effective_to",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "is_example",
+            "type": "boolean",
+            "required": false
+          }
+        ]
+      },
+      "business_keys": [
+        "user_id",
+        "role_id",
+        "scope_node_id"
+      ]
+    },
+    {
+      "dataset_contract_key": "FND-03",
+      "contract_version": "1.0.0",
+      "source": {
+        "path": "starter_kits/KIT-MFG-NONFERROUS-PROCUREMENT/1.0.0/contracts/FND-03.contract.json",
+        "sha256": "b9589c8bd65fa9d70d87cccc71fad23e9b326eb36780c94b7298bc82869646f6"
+      },
+      "schema": {
+        "fields": [
+          {
+            "name": "record_id",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "tenant_id",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "scope_node_id",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "data_class",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "business_data_kind",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "data_origin",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "quality_status",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "certification_status",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "as_of_date",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "lineage_id",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "reference_type",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "reference_key",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "effective_date",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "value",
+            "type": "integer",
+            "required": false
+          },
+          {
+            "name": "unit",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "fiscal_year",
+            "type": "integer",
+            "required": false
+          },
+          {
+            "name": "fiscal_period",
+            "type": "integer",
+            "required": false
+          },
+          {
+            "name": "is_workday",
+            "type": "boolean",
+            "required": false
+          }
+        ]
+      },
+      "business_keys": [
+        "reference_type",
+        "reference_key",
+        "effective_date"
+      ]
+    },
+    {
+      "dataset_contract_key": "MDM-01",
+      "contract_version": "1.0.0",
+      "source": {
+        "path": "starter_kits/KIT-MFG-NONFERROUS-PROCUREMENT/1.0.0/contracts/MDM-01.contract.json",
+        "sha256": "e0f7d71058f5e7460e1a16d3bb173ef101e17d83da067a2820cbbd6b031db304"
+      },
+      "schema": {
+        "fields": [
+          {
+            "name": "record_id",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "tenant_id",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "scope_node_id",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "data_class",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "business_data_kind",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "data_origin",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "quality_status",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "certification_status",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "as_of_date",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "lineage_id",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "material_id",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "material_code",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "material_name",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "aliases",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "material_type",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "grade",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "base_uom",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "valuation_class",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "benchmark_code",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "active",
+            "type": "boolean",
+            "required": false
+          }
+        ]
+      },
+      "business_keys": [
+        "material_id"
+      ]
+    },
+    {
+      "dataset_contract_key": "MDM-02",
+      "contract_version": "1.0.0",
+      "source": {
+        "path": "starter_kits/KIT-MFG-NONFERROUS-PROCUREMENT/1.0.0/contracts/MDM-02.contract.json",
+        "sha256": "4a19c79c7ae83db4ccf848a22c7b95f2a63faca5cfbcc1901f61871036509a7f"
+      },
+      "schema": {
+        "fields": [
+          {
+            "name": "record_id",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "tenant_id",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "scope_node_id",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "data_class",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "business_data_kind",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "data_origin",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "quality_status",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "certification_status",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "as_of_date",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "lineage_id",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "supplier_id",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "supplier_name",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "country_code",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "currency",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "lead_time_days",
+            "type": "integer",
+            "required": false
+          },
+          {
+            "name": "payment_terms",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "risk_grade",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "material_ids",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "active",
+            "type": "boolean",
+            "required": false
+          }
+        ]
+      },
+      "business_keys": [
+        "supplier_id"
+      ]
+    },
+    {
+      "dataset_contract_key": "MDM-03",
+      "contract_version": "1.0.0",
+      "source": {
+        "path": "starter_kits/KIT-MFG-NONFERROUS-PROCUREMENT/1.0.0/contracts/MDM-03.contract.json",
+        "sha256": "e36aa33b92ed2a84149e1a5572aa4ef04f04160d6a7c777d22baea1ef289df19"
+      },
+      "schema": {
+        "fields": [
+          {
+            "name": "record_id",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "tenant_id",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "scope_node_id",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "data_class",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "business_data_kind",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "data_origin",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "quality_status",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "certification_status",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "as_of_date",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "lineage_id",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "customer_id",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "customer_name",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "market",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "country_code",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "currency",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "credit_terms",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "product_ids",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "active",
+            "type": "boolean",
+            "required": false
+          }
+        ]
+      },
+      "business_keys": [
+        "customer_id"
+      ]
+    },
+    {
+      "dataset_contract_key": "MDM-04",
+      "contract_version": "1.0.0",
+      "source": {
+        "path": "starter_kits/KIT-MFG-NONFERROUS-PROCUREMENT/1.0.0/contracts/MDM-04.contract.json",
+        "sha256": "5515323ccb2f3cf6bf657da602420a64474b02e09303723d56adeeddec1fd500"
+      },
+      "schema": {
+        "fields": [
+          {
+            "name": "record_id",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "tenant_id",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "scope_node_id",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "data_class",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "business_data_kind",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "data_origin",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "quality_status",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "certification_status",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "as_of_date",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "lineage_id",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "location_id",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "site_id",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "location_name",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "storage_type",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "capacity_quantity",
+            "type": "integer",
+            "required": false
+          },
+          {
+            "name": "capacity_uom",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "active",
+            "type": "boolean",
+            "required": false
+          }
+        ]
+      },
+      "business_keys": [
+        "location_id"
+      ]
+    },
+    {
+      "dataset_contract_key": "MDM-05",
+      "contract_version": "1.0.0",
+      "source": {
+        "path": "starter_kits/KIT-MFG-NONFERROUS-PROCUREMENT/1.0.0/contracts/MDM-05.contract.json",
+        "sha256": "d4179ff0f8521ab767ada789db48bf617a15b0805a4fae6f01dffd52e305a104"
+      },
+      "schema": {
+        "fields": [
+          {
+            "name": "record_id",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "tenant_id",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "scope_node_id",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "data_class",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "business_data_kind",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "data_origin",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "quality_status",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "certification_status",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "as_of_date",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "lineage_id",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "bom_id",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "line_no",
+            "type": "integer",
+            "required": true
+          },
+          {
+            "name": "output_material_id",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "input_material_id",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "component_role",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "quantity_per_output",
+            "type": "number",
+            "required": false
+          },
+          {
+            "name": "input_uom",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "output_uom",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "standard_yield",
+            "type": "number",
+            "required": false
+          },
+          {
+            "name": "byproduct_material_id",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "effective_from",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "effective_to",
+            "type": "string",
+            "required": false
+          }
+        ]
+      },
+      "business_keys": [
+        "bom_id",
+        "line_no"
+      ]
+    },
+    {
+      "dataset_contract_key": "MDM-06",
+      "contract_version": "1.0.0",
+      "source": {
+        "path": "starter_kits/KIT-MFG-NONFERROUS-PROCUREMENT/1.0.0/contracts/MDM-06.contract.json",
+        "sha256": "4bd550275e93878f9ca83487037b8e9ff21c7182dcd39fd74c698342bc865224"
+      },
+      "schema": {
+        "fields": [
+          {
+            "name": "record_id",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "tenant_id",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "scope_node_id",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "data_class",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "business_data_kind",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "data_origin",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "quality_status",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "certification_status",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "as_of_date",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "lineage_id",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "routing_id",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "operation_seq",
+            "type": "integer",
+            "required": true
+          },
+          {
+            "name": "operation_name",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "equipment_id",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "equipment_name",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "product_id",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "rate_per_hour",
+            "type": "number",
+            "required": false
+          },
+          {
+            "name": "rate_uom",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "setup_hours",
+            "type": "number",
+            "required": false
+          },
+          {
+            "name": "rated_oee",
+            "type": "number",
+            "required": false
+          },
+          {
+            "name": "calendar_hours_month",
+            "type": "integer",
+            "required": false
+          }
+        ]
+      },
+      "business_keys": [
+        "routing_id",
+        "operation_seq"
+      ]
+    },
+    {
+      "dataset_contract_key": "MDM-07",
+      "contract_version": "1.0.0",
+      "source": {
+        "path": "starter_kits/KIT-MFG-NONFERROUS-PROCUREMENT/1.0.0/contracts/MDM-07.contract.json",
+        "sha256": "4144bfb023369a5bf372fe5e8d71a08f6ef35889ee9a96cce46befc7da3ec699"
+      },
+      "schema": {
+        "fields": [
+          {
+            "name": "record_id",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "tenant_id",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "scope_node_id",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "data_class",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "business_data_kind",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "data_origin",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "quality_status",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "certification_status",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "as_of_date",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "lineage_id",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "account_id",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "account_name",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "account_type",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "cost_element",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "cost_center_id",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "cost_center_name",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "pnl_line",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "cashflow_line",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "currency",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "active",
+            "type": "boolean",
+            "required": false
+          }
+        ]
+      },
+      "business_keys": [
+        "account_id",
+        "cost_center_id"
+      ]
+    },
+    {
+      "dataset_contract_key": "MDM-08",
+      "contract_version": "1.0.0",
+      "source": {
+        "path": "starter_kits/KIT-MFG-NONFERROUS-PROCUREMENT/1.0.0/contracts/MDM-08.contract.json",
+        "sha256": "fa9cecb4f9441da02934c17a715a7407502cd29cd0942ec65a59277bfe05d62e"
+      },
+      "schema": {
+        "fields": [
+          {
+            "name": "record_id",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "tenant_id",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "scope_node_id",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "data_class",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "business_data_kind",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "data_origin",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "quality_status",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "certification_status",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "as_of_date",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "lineage_id",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "reference_id",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "reference_type",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "code",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "name",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "origin",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "destination",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "mode",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "lead_time_days",
+            "type": "integer",
+            "required": false
+          },
+          {
+            "name": "currency",
+            "type": "string",
+            "required": false
+          }
+        ]
+      },
+      "business_keys": [
+        "reference_id"
+      ]
+    },
+    {
+      "dataset_contract_key": "PRC-01",
+      "contract_version": "1.0.0",
+      "source": {
+        "path": "starter_kits/KIT-MFG-NONFERROUS-PROCUREMENT/1.0.0/contracts/PRC-01.contract.json",
+        "sha256": "3d8ed85a65da6b9a18f9677cc09bf389ff6eec491ffea51b2af0d34d590438d7"
+      },
+      "schema": {
+        "fields": [
+          {
+            "name": "record_id",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "tenant_id",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "scope_node_id",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "data_class",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "business_data_kind",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "data_origin",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "quality_status",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "certification_status",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "as_of_date",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "lineage_id",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "contract_id",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "supplier_id",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "material_id",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "contract_quantity",
+            "type": "integer",
+            "required": false
+          },
+          {
+            "name": "ordered_quantity",
+            "type": "number",
+            "required": false
+          },
+          {
+            "name": "quantity_uom",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "benchmark_code",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "benchmark_price",
+            "type": "number",
+            "required": false
+          },
+          {
+            "name": "premium_rate",
+            "type": "number",
+            "required": false
+          },
+          {
+            "name": "currency",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "incoterm",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "payment_terms",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "valid_from",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "valid_to",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "price_formula",
+            "type": "string",
+            "required": false
+          }
+        ]
+      },
+      "business_keys": [
+        "contract_id"
+      ]
+    },
+    {
+      "dataset_contract_key": "PRC-02",
+      "contract_version": "1.0.0",
+      "source": {
+        "path": "starter_kits/KIT-MFG-NONFERROUS-PROCUREMENT/1.0.0/contracts/PRC-02.contract.json",
+        "sha256": "ec2c40a188ef845cbef5bcb94528a708cadd5ecabbcc9c0159a9e0c115be6999"
+      },
+      "schema": {
+        "fields": [
+          {
+            "name": "record_id",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "tenant_id",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "scope_node_id",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "data_class",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "business_data_kind",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "data_origin",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "quality_status",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "certification_status",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "as_of_date",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "lineage_id",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "po_id",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "po_line_id",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "contract_id",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "supplier_id",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "material_id",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "order_date",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "due_date",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "order_quantity",
+            "type": "number",
+            "required": false
+          },
+          {
+            "name": "quantity_uom",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "unit_price",
+            "type": "number",
+            "required": false
+          },
+          {
+            "name": "currency",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "status",
+            "type": "string",
+            "required": false
+          }
+        ]
+      },
+      "business_keys": [
+        "po_line_id"
+      ]
+    },
+    {
+      "dataset_contract_key": "LOG-01",
+      "contract_version": "1.0.0",
+      "source": {
+        "path": "starter_kits/KIT-MFG-NONFERROUS-PROCUREMENT/1.0.0/contracts/LOG-01.contract.json",
+        "sha256": "ac2d8b6c2a10b8a5776275d21503adae74da92f0e4c990db9789ac02ffe2ff45"
+      },
+      "schema": {
+        "fields": [
+          {
+            "name": "record_id",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "tenant_id",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "scope_node_id",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "data_class",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "business_data_kind",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "data_origin",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "quality_status",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "certification_status",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "as_of_date",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "lineage_id",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "submission_id",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "source_system_id",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "partner_id",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "business_ref",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "submission_status",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "submitted_at",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "revised_at",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "source_version",
+            "type": "integer",
+            "required": false
+          }
+        ]
+      },
+      "business_keys": [
+        "submission_id"
+      ]
+    },
+    {
+      "dataset_contract_key": "LOG-02",
+      "contract_version": "1.0.0",
+      "source": {
+        "path": "starter_kits/KIT-MFG-NONFERROUS-PROCUREMENT/1.0.0/contracts/LOG-02.contract.json",
+        "sha256": "c5911aa1e0f2d73b39aeb8e0f1f63b7f4d2e91cb6af8ff9e06a1d9c05639e573"
+      },
+      "schema": {
+        "fields": [
+          {
+            "name": "record_id",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "tenant_id",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "scope_node_id",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "data_class",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "business_data_kind",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "data_origin",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "quality_status",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "certification_status",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "as_of_date",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "lineage_id",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "shipment_id",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "po_line_id",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "vessel_or_mode",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "origin_port",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "destination_port",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "lane_id",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "shipment_quantity",
+            "type": "number",
+            "required": false
+          },
+          {
+            "name": "quantity_uom",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "freight_amount",
+            "type": "number",
+            "required": false
+          },
+          {
+            "name": "freight_currency",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "etd",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "eta",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "status",
+            "type": "string",
+            "required": false
+          }
+        ]
+      },
+      "business_keys": [
+        "shipment_id"
+      ]
+    },
+    {
+      "dataset_contract_key": "LOG-03",
+      "contract_version": "1.0.0",
+      "source": {
+        "path": "starter_kits/KIT-MFG-NONFERROUS-PROCUREMENT/1.0.0/contracts/LOG-03.contract.json",
+        "sha256": "73e5c7b5df8ef6d8c7431630f1a32158b7c964d171dddaeb70f3d87ac72c67c7"
+      },
+      "schema": {
+        "fields": [
+          {
+            "name": "record_id",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "tenant_id",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "scope_node_id",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "data_class",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "business_data_kind",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "data_origin",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "quality_status",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "certification_status",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "as_of_date",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "lineage_id",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "milestone_id",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "shipment_id",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "event_type",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "planned_at",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "actual_at",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "location",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "status",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "source_version",
+            "type": "integer",
+            "required": false
+          }
+        ]
+      },
+      "business_keys": [
+        "milestone_id"
+      ]
+    },
+    {
+      "dataset_contract_key": "LOG-04",
+      "contract_version": "1.0.0",
+      "source": {
+        "path": "starter_kits/KIT-MFG-NONFERROUS-PROCUREMENT/1.0.0/contracts/LOG-04.contract.json",
+        "sha256": "7436309eb164311665e3aea666de8580e19882fed7bb2b1509aefcec6703b8a1"
+      },
+      "schema": {
+        "fields": [
+          {
+            "name": "record_id",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "tenant_id",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "scope_node_id",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "data_class",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "business_data_kind",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "data_origin",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "quality_status",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "certification_status",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "as_of_date",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "lineage_id",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "clearance_id",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "shipment_id",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "declaration_date",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "inspection_status",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "duty_amount",
+            "type": "number",
+            "required": false
+          },
+          {
+            "name": "currency",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "cleared_at",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "status",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "source_version",
+            "type": "integer",
+            "required": false
+          }
+        ]
+      },
+      "business_keys": [
+        "clearance_id"
+      ]
+    },
+    {
+      "dataset_contract_key": "LOG-05",
+      "contract_version": "1.0.0",
+      "source": {
+        "path": "starter_kits/KIT-MFG-NONFERROUS-PROCUREMENT/1.0.0/contracts/LOG-05.contract.json",
+        "sha256": "534219900c124d92fb79d216308247bac5af115c19a596e1ac8aae297c71bb70"
+      },
+      "schema": {
+        "fields": [
+          {
+            "name": "record_id",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "tenant_id",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "scope_node_id",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "data_class",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "business_data_kind",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "data_origin",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "quality_status",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "certification_status",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "as_of_date",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "lineage_id",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "transport_event_id",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "transport_id",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "shipment_id",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "event_type",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "event_at",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "destination_location_id",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "delivered_quantity",
+            "type": "number",
+            "required": false
+          },
+          {
+            "name": "quantity_uom",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "status",
+            "type": "string",
+            "required": false
+          }
+        ]
+      },
+      "business_keys": [
+        "transport_event_id"
+      ]
+    },
+    {
+      "dataset_contract_key": "INV-01",
+      "contract_version": "1.0.0",
+      "source": {
+        "path": "starter_kits/KIT-MFG-NONFERROUS-PROCUREMENT/1.0.0/contracts/INV-01.contract.json",
+        "sha256": "c2e231b2c202493746ad6d5b06102d1369d4aefd3e119b7aec2395d49dddaf14"
+      },
+      "schema": {
+        "fields": [
+          {
+            "name": "record_id",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "tenant_id",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "scope_node_id",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "data_class",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "business_data_kind",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "data_origin",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "quality_status",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "certification_status",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "as_of_date",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "lineage_id",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "snapshot_id",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "snapshot_date",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "location_id",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "material_id",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "lot_id",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "unrestricted_quantity",
+            "type": "number",
+            "required": false
+          },
+          {
+            "name": "quality_quantity",
+            "type": "number",
+            "required": false
+          },
+          {
+            "name": "blocked_quantity",
+            "type": "number",
+            "required": false
+          },
+          {
+            "name": "safety_stock_quantity",
+            "type": "number",
+            "required": false
+          },
+          {
+            "name": "quantity_uom",
+            "type": "string",
+            "required": false
+          }
+        ]
+      },
+      "business_keys": [
+        "snapshot_id"
+      ]
+    },
+    {
+      "dataset_contract_key": "INV-02",
+      "contract_version": "1.0.0",
+      "source": {
+        "path": "starter_kits/KIT-MFG-NONFERROUS-PROCUREMENT/1.0.0/contracts/INV-02.contract.json",
+        "sha256": "e79deb4d2ba8d791fa23b22b89800d7bd327e0f9cb12fc7e42b32fb9081a32ba"
+      },
+      "schema": {
+        "fields": [
+          {
+            "name": "record_id",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "tenant_id",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "scope_node_id",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "data_class",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "business_data_kind",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "data_origin",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "quality_status",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "certification_status",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "as_of_date",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "lineage_id",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "movement_id",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "movement_date",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "movement_type",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "material_id",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "lot_id",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "from_location_id",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "to_location_id",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "quantity",
+            "type": "number",
+            "required": false
+          },
+          {
+            "name": "quantity_uom",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "reference_type",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "reference_id",
+            "type": "string",
+            "required": false
+          }
+        ]
+      },
+      "business_keys": [
+        "movement_id"
+      ]
+    },
+    {
+      "dataset_contract_key": "MFG-01",
+      "contract_version": "1.0.0",
+      "source": {
+        "path": "starter_kits/KIT-MFG-NONFERROUS-PROCUREMENT/1.0.0/contracts/MFG-01.contract.json",
+        "sha256": "d2da28efcb7a5c6576d0aca16ab702bf6146ca78c1f96b13fc25a7ff7c309e97"
+      },
+      "schema": {
+        "fields": [
+          {
+            "name": "record_id",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "tenant_id",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "scope_node_id",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "data_class",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "business_data_kind",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "data_origin",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "quality_status",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "certification_status",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "as_of_date",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "lineage_id",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "plan_line_id",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "plan_date",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "site_id",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "product_id",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "plan_quantity",
+            "type": "number",
+            "required": false
+          },
+          {
+            "name": "quantity_uom",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "priority",
+            "type": "integer",
+            "required": false
+          },
+          {
+            "name": "material_requirement",
+            "type": "number",
+            "required": false
+          },
+          {
+            "name": "capacity_requirement_hours",
+            "type": "number",
+            "required": false
+          },
+          {
+            "name": "status",
+            "type": "string",
+            "required": false
+          }
+        ]
+      },
+      "business_keys": [
+        "plan_line_id"
+      ]
+    },
+    {
+      "dataset_contract_key": "MFG-02",
+      "contract_version": "1.0.0",
+      "source": {
+        "path": "starter_kits/KIT-MFG-NONFERROUS-PROCUREMENT/1.0.0/contracts/MFG-02.contract.json",
+        "sha256": "56f2e49586f4f0e5f7e110bef1adea7be9c6022afcbb5c49e2abc32f9167a437"
+      },
+      "schema": {
+        "fields": [
+          {
+            "name": "record_id",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "tenant_id",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "scope_node_id",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "data_class",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "business_data_kind",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "data_origin",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "quality_status",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "certification_status",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "as_of_date",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "lineage_id",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "batch_id",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "plan_line_id",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "production_date",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "site_id",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "input_material_id",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "input_lot_id",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "input_quantity",
+            "type": "number",
+            "required": false
+          },
+          {
+            "name": "output_material_id",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "output_lot_id",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "output_quantity",
+            "type": "number",
+            "required": false
+          },
+          {
+            "name": "quantity_uom",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "actual_yield",
+            "type": "number",
+            "required": false
+          },
+          {
+            "name": "scrap_quantity",
+            "type": "number",
+            "required": false
+          },
+          {
+            "name": "downtime_hours",
+            "type": "integer",
+            "required": false
+          },
+          {
+            "name": "status",
+            "type": "string",
+            "required": false
+          }
+        ]
+      },
+      "business_keys": [
+        "batch_id"
+      ]
+    },
+    {
+      "dataset_contract_key": "MFG-03",
+      "contract_version": "1.0.0",
+      "source": {
+        "path": "starter_kits/KIT-MFG-NONFERROUS-PROCUREMENT/1.0.0/contracts/MFG-03.contract.json",
+        "sha256": "ae717a393236f49e613f9148ff523548b54aaa9488bd15f8b65b9644993b988a"
+      },
+      "schema": {
+        "fields": [
+          {
+            "name": "record_id",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "tenant_id",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "scope_node_id",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "data_class",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "business_data_kind",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "data_origin",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "quality_status",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "certification_status",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "as_of_date",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "lineage_id",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "equipment_event_id",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "equipment_id",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "event_type",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "start_at",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "end_at",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "planned",
+            "type": "boolean",
+            "required": false
+          },
+          {
+            "name": "root_cause",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "capacity_loss_hours",
+            "type": "integer",
+            "required": false
+          }
+        ]
+      },
+      "business_keys": [
+        "equipment_event_id"
+      ]
+    },
+    {
+      "dataset_contract_key": "QLT-01",
+      "contract_version": "1.0.0",
+      "source": {
+        "path": "starter_kits/KIT-MFG-NONFERROUS-PROCUREMENT/1.0.0/contracts/QLT-01.contract.json",
+        "sha256": "a51a40c2eec1461f99cc4c227de7b2dac87939f3bfe7e4f77860c026036829e0"
+      },
+      "schema": {
+        "fields": [
+          {
+            "name": "record_id",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "tenant_id",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "scope_node_id",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "data_class",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "business_data_kind",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "data_origin",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "quality_status",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "certification_status",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "as_of_date",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "lineage_id",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "inspection_id",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "inspection_type",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "object_ref",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "inspection_date",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "characteristic",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "result_value",
+            "type": "number",
+            "required": false
+          },
+          {
+            "name": "lower_spec",
+            "type": "number",
+            "required": false
+          },
+          {
+            "name": "upper_spec",
+            "type": "number",
+            "required": false
+          },
+          {
+            "name": "unit",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "verdict",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "action",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "spec_version",
+            "type": "string",
+            "required": false
+          }
+        ]
+      },
+      "business_keys": [
+        "inspection_id"
+      ]
+    },
+    {
+      "dataset_contract_key": "SLS-01",
+      "contract_version": "1.0.0",
+      "source": {
+        "path": "starter_kits/KIT-MFG-NONFERROUS-PROCUREMENT/1.0.0/contracts/SLS-01.contract.json",
+        "sha256": "8463dc4e099c0d36914ffc7921e2c7f01b725b35d6da2ffacdc1685a8500e64f"
+      },
+      "schema": {
+        "fields": [
+          {
+            "name": "record_id",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "tenant_id",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "scope_node_id",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "data_class",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "business_data_kind",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "data_origin",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "quality_status",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "certification_status",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "as_of_date",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "lineage_id",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "sales_line_id",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "customer_id",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "product_id",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "order_date",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "due_date",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "actual_ship_date",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "plan_quantity",
+            "type": "number",
+            "required": false
+          },
+          {
+            "name": "order_quantity",
+            "type": "number",
+            "required": false
+          },
+          {
+            "name": "shipped_quantity",
+            "type": "number",
+            "required": false
+          },
+          {
+            "name": "quantity_uom",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "unit_price",
+            "type": "number",
+            "required": false
+          },
+          {
+            "name": "currency",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "status",
+            "type": "string",
+            "required": false
+          }
+        ]
+      },
+      "business_keys": [
+        "sales_line_id"
+      ]
+    },
+    {
+      "dataset_contract_key": "FIN-01",
+      "contract_version": "1.0.0",
+      "source": {
+        "path": "starter_kits/KIT-MFG-NONFERROUS-PROCUREMENT/1.0.0/contracts/FIN-01.contract.json",
+        "sha256": "bf2f43827fc86aec2edc33b17f55226f24a5ff293e2562705998298388318a4a"
+      },
+      "schema": {
+        "fields": [
+          {
+            "name": "record_id",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "tenant_id",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "scope_node_id",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "data_class",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "business_data_kind",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "data_origin",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "quality_status",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "certification_status",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "as_of_date",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "lineage_id",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "cost_record_id",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "fiscal_period",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "product_id",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "cost_component",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "standard_unit_cost",
+            "type": "number",
+            "required": false
+          },
+          {
+            "name": "actual_unit_cost",
+            "type": "number",
+            "required": false
+          },
+          {
+            "name": "variance_amount",
+            "type": "number",
+            "required": false
+          },
+          {
+            "name": "currency",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "quantity_uom",
+            "type": "string",
+            "required": false
+          }
+        ]
+      },
+      "business_keys": [
+        "cost_record_id"
+      ]
+    },
+    {
+      "dataset_contract_key": "FIN-02",
+      "contract_version": "1.0.0",
+      "source": {
+        "path": "starter_kits/KIT-MFG-NONFERROUS-PROCUREMENT/1.0.0/contracts/FIN-02.contract.json",
+        "sha256": "9243763fcf52faaf3624a6bed150bbb774d9fcdc002a9c8119cd85434363a956"
+      },
+      "schema": {
+        "fields": [
+          {
+            "name": "record_id",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "tenant_id",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "scope_node_id",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "data_class",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "business_data_kind",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "data_origin",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "quality_status",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "certification_status",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "as_of_date",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "lineage_id",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "finance_document_id",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "document_type",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "partner_id",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "reference_id",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "posting_date",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "due_date",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "amount",
+            "type": "number",
+            "required": false
+          },
+          {
+            "name": "currency",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "paid_at",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "status",
+            "type": "string",
+            "required": false
+          }
+        ]
+      },
+      "business_keys": [
+        "finance_document_id"
+      ]
+    },
+    {
+      "dataset_contract_key": "FIN-03",
+      "contract_version": "1.0.0",
+      "source": {
+        "path": "starter_kits/KIT-MFG-NONFERROUS-PROCUREMENT/1.0.0/contracts/FIN-03.contract.json",
+        "sha256": "bda68ff5f77bbc42fb9953a31837b796f0934707590692f05ae128556e4693d0"
+      },
+      "schema": {
+        "fields": [
+          {
+            "name": "record_id",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "tenant_id",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "scope_node_id",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "data_class",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "business_data_kind",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "data_origin",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "quality_status",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "certification_status",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "as_of_date",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "lineage_id",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "ledger_line_id",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "document_id",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "posting_date",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "fiscal_period",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "account_id",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "cost_center_id",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "debit_amount",
+            "type": "number",
+            "required": false
+          },
+          {
+            "name": "credit_amount",
+            "type": "number",
+            "required": false
+          },
+          {
+            "name": "currency",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "cashflow_line",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "plan_actual",
+            "type": "string",
+            "required": false
+          }
+        ]
+      },
+      "business_keys": [
+        "ledger_line_id"
+      ]
+    },
+    {
+      "dataset_contract_key": "EXT-01",
+      "contract_version": "1.0.0",
+      "source": {
+        "path": "starter_kits/KIT-MFG-NONFERROUS-PROCUREMENT/1.0.0/contracts/EXT-01.contract.json",
+        "sha256": "b660975a83bc8b3da25f34ac4c68f83bdade02d2092a79c2f15ce69e677f627b"
+      },
+      "schema": {
+        "fields": [
+          {
+            "name": "record_id",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "tenant_id",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "scope_node_id",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "data_class",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "business_data_kind",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "data_origin",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "quality_status",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "certification_status",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "as_of_date",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "lineage_id",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "observation_id",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "indicator_code",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "observed_at",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "published_at",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "vintage_date",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "value",
+            "type": "number",
+            "required": false
+          },
+          {
+            "name": "unit",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "source_id",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "trust_grade",
+            "type": "string",
+            "required": false
+          }
+        ]
+      },
+      "business_keys": [
+        "observation_id"
+      ]
+    },
+    {
+      "dataset_contract_key": "EXT-02",
+      "contract_version": "1.0.0",
+      "source": {
+        "path": "starter_kits/KIT-MFG-NONFERROUS-PROCUREMENT/1.0.0/contracts/EXT-02.contract.json",
+        "sha256": "028695ab343c3f124f62e22eb557c04bd918afa6b842edf16cfc73a53eecd73e"
+      },
+      "schema": {
+        "fields": [
+          {
+            "name": "record_id",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "tenant_id",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "scope_node_id",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "data_class",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "business_data_kind",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "data_origin",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "quality_status",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "certification_status",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "as_of_date",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "lineage_id",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "observation_id",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "commodity_code",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "observed_at",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "published_at",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "vintage_date",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "value",
+            "type": "number",
+            "required": false
+          },
+          {
+            "name": "unit",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "currency",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "source_id",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "trust_grade",
+            "type": "string",
+            "required": false
+          }
+        ]
+      },
+      "business_keys": [
+        "observation_id"
+      ]
+    },
+    {
+      "dataset_contract_key": "EXT-03",
+      "contract_version": "1.0.0",
+      "source": {
+        "path": "starter_kits/KIT-MFG-NONFERROUS-PROCUREMENT/1.0.0/contracts/EXT-03.contract.json",
+        "sha256": "3bda1b9e003e2a4f75b61f0257d91afccbb4d69e76c57c53fb4ec1e9461d0892"
+      },
+      "schema": {
+        "fields": [
+          {
+            "name": "record_id",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "tenant_id",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "scope_node_id",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "data_class",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "business_data_kind",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "data_origin",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "quality_status",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "certification_status",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "as_of_date",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "lineage_id",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "observation_id",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "indicator_code",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "target_ref",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "observed_at",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "published_at",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "value",
+            "type": "number",
+            "required": false
+          },
+          {
+            "name": "unit",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "source_id",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "trust_grade",
+            "type": "string",
+            "required": false
+          }
+        ]
+      },
+      "business_keys": [
+        "observation_id"
+      ]
+    },
+    {
+      "dataset_contract_key": "KNW-01",
+      "contract_version": "1.0.0",
+      "source": {
+        "path": "starter_kits/KIT-MFG-NONFERROUS-PROCUREMENT/1.0.0/contracts/KNW-01.contract.json",
+        "sha256": "e438ab226d067a1f7a25cadf5a0d0a6f34a99ba79cb12a6f8fce71d074d35f9a"
+      },
+      "schema": {
+        "fields": [
+          {
+            "name": "record_id",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "tenant_id",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "scope_node_id",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "data_class",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "business_data_kind",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "data_origin",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "quality_status",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "certification_status",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "as_of_date",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "lineage_id",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "document_id",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "title",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "document_type",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "classification",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "owner_org_id",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "effective_from",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "effective_to",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "approval_status",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "source_ref",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "checksum",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "rag_eligible",
+            "type": "boolean",
+            "required": false
+          }
+        ]
+      },
+      "business_keys": [
+        "document_id"
+      ]
+    },
+    {
+      "dataset_contract_key": "SIM-01",
+      "contract_version": "1.0.0",
+      "source": {
+        "path": "starter_kits/KIT-MFG-NONFERROUS-PROCUREMENT/1.0.0/contracts/SIM-01.contract.json",
+        "sha256": "6410de0e2fa783bfcd760dd139b861e773056962dc222d9a607d5c56ad7e8442"
+      },
+      "schema": {
+        "fields": [
+          {
+            "name": "record_id",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "tenant_id",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "scope_node_id",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "data_class",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "business_data_kind",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "data_origin",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "quality_status",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "certification_status",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "as_of_date",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "lineage_id",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "driver_id",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "input_metric",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "output_metric",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "formula_definition",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "lag_period_months",
+            "type": "integer",
+            "required": false
+          },
+          {
+            "name": "output_unit",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "formula_version",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "approval_status",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "effective_from",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "effective_to",
+            "type": "string",
+            "required": false
+          }
+        ]
+      },
+      "business_keys": [
+        "driver_id"
+      ]
+    },
+    {
+      "dataset_contract_key": "SIM-02",
+      "contract_version": "1.0.0",
+      "source": {
+        "path": "starter_kits/KIT-MFG-NONFERROUS-PROCUREMENT/1.0.0/contracts/SIM-02.contract.json",
+        "sha256": "1655ffc3d6e144d272700810e0923f39ef064837bd128c2697d6f5ad70518495"
+      },
+      "schema": {
+        "fields": [
+          {
+            "name": "record_id",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "tenant_id",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "scope_node_id",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "data_class",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "business_data_kind",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "data_origin",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "quality_status",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "certification_status",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "as_of_date",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "lineage_id",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "scenario_id",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "scenario_name",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "baseline_id",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "driver_id",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "change_value",
+            "type": "number",
+            "required": false
+          },
+          {
+            "name": "change_unit",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "impact_metrics",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "scenario_period_start",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "scenario_period_end",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "approval_status",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "rationale",
+            "type": "string",
+            "required": false
+          }
+        ]
+      },
+      "business_keys": [
+        "scenario_id"
+      ]
+    },
+    {
+      "dataset_contract_key": "DEC-01",
+      "contract_version": "1.0.0",
+      "source": {
+        "path": "starter_kits/KIT-MFG-NONFERROUS-PROCUREMENT/1.0.0/contracts/DEC-01.contract.json",
+        "sha256": "9313355e1cb447e1ebf545e1ac76d89156ad62ea2c0bf26de9ec161388720046"
+      },
+      "schema": {
+        "fields": [
+          {
+            "name": "record_id",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "tenant_id",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "scope_node_id",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "data_class",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "business_data_kind",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "data_origin",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "quality_status",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "certification_status",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "as_of_date",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "lineage_id",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "decision_id",
+            "type": "string",
+            "required": true
+          },
+          {
+            "name": "package_id",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "scenario_id",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "requester_user_id",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "approver_user_id",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "decision_status",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "decision_text",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "action_id",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "action_owner_org_id",
+            "type": "string",
+            "required": false
+          },
+          {
+            "name": "kpi_before",
+            "type": "number",
+            "required": false
+          },
+          {
+            "name": "kpi_target",
+            "type": "number",
+            "required": false
+          },
+          {
+            "name": "kpi_actual",
+            "type": "number",
+            "required": false
+          },
+          {
+            "name": "effect_status",
+            "type": "string",
+            "required": false
+          }
+        ]
+      },
+      "business_keys": [
+        "decision_id"
+      ]
+    }
+  ]
+}

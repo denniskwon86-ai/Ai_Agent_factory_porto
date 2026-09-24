@@ -48,10 +48,11 @@ def bundle():
 
 @pytest.fixture
 def package(tmp_path):
-    """후보 네 JSON만 격리 경로에 복사한다. 기존 Starter는 읽지도 쓰지도 않는다."""
+    """후보 다섯 JSON만 격리 경로에 복사한다(1.2.0 부터 데이터셋 계약 포함). 기존 Starter는 읽지도 쓰지도 않는다."""
     root = tmp_path / "package"
     root.mkdir()
-    for name in ("manifest.json", "profile.json", "blueprints.json", "processes/l2-process-pack.json"):
+    for name in ("manifest.json", "profile.json", "blueprints.json", "processes/l2-process-pack.json",
+                 "dataset_contracts.json"):
         target = root / name
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes((artifacts.CANDIDATE_MANIFEST.parent / name).read_bytes())
@@ -105,8 +106,8 @@ def test_candidate_counts_and_bk01_boundaries(bundle):
 
 
 def test_candidate_contains_no_company_data_or_executable_approval(bundle):
-    assert bundle["version"] == "1.1.0"
-    assert bundle["pack"]["version"] == "1.0.0"
+    assert bundle["version"] == "1.2.0"
+    assert bundle["pack"]["version"] == "1.0.1"
     assert bundle["profile"]["mode"] == "REAL"
     assert bundle["profile"]["data_class"] == "NO_DATA"
     assert bundle["profile"]["setup_only"] is True
@@ -114,13 +115,13 @@ def test_candidate_contains_no_company_data_or_executable_approval(bundle):
     assert len(bundle["profile"]["datasets"]) == 35
     assert len(bundle["blueprints"]["blueprints"]) == 7
     assert all(bp["reference_status"] == "REFERENCE_ONLY" for bp in bundle["blueprints"]["blueprints"])
-    for doc in (bundle["manifest"], bundle["profile"], bundle["pack"], bundle["blueprints"]):
+    for doc in (bundle["manifest"], bundle["profile"], bundle["pack"], bundle["blueprints"], bundle["dataset_contracts"]):
         assert not {"company_profile_id", "company_name", "users", "signatures", "certifications", "raw_data", "credentials"} & doc.keys()
 
 
 def test_exact_original_bytes_are_retained(bundle):
     assert artifacts.load_bundle(artifacts.CANDIDATE_MANIFEST) == bundle
-    for name in ("manifest", "profile", "pack", "blueprints"):
+    for name in ("manifest", "profile", "pack", "blueprints", "dataset_contracts"):
         raw = base64.b64decode(bundle["raw_documents"][name], validate=True)
         assert hashlib.sha256(raw).hexdigest() == bundle[f"{name}_digest"]
         assert json.loads(raw.decode("utf-8-sig")) == bundle[name]
@@ -184,7 +185,8 @@ def test_hash_corruption_rejected(package):
     assert error.value.reason_code == "PROCESS_PACK_DIGEST_MISMATCH"
 
 
-@pytest.mark.parametrize("schema", [0, 2, "1", True, None])
+#: [2026-09-25] schema 2(데이터셋 계약 포함)가 정식 판이 되었다 — 지원 밖 값은 3·"2" 등으로 본다.
+@pytest.mark.parametrize("schema", [0, 3, "2", True, None])
 def test_manifest_schema_is_explicit(package, schema):
     manifest = read_json(package)
     manifest["schema_version"] = schema
@@ -287,12 +289,14 @@ def test_same_version_different_bytes_conflicts(store, bundle, package):
     assert artifacts.get_bundle(store, bundle["artifact_digest"]) == bundle
 
 
-@pytest.mark.parametrize("part", ["pack", "profile", "blueprints", "manifest", "artifact_digest", "raw_documents"])
+@pytest.mark.parametrize("part", ["pack", "profile", "blueprints", "manifest", "artifact_digest", "raw_documents",
+                                  "dataset_contracts"])
 def test_caller_cannot_pin_relabelled_or_mutated_bundle(store, bundle, part):
     value = copy.deepcopy(bundle)
     if part == "artifact_digest": value[part] = "a" * 64
     elif part == "raw_documents": value[part]["pack"] = "invalid"
     elif part == "pack": value[part]["templates"][0]["label"] = "변조"
+    elif part == "dataset_contracts": value[part]["contracts"][0]["business_keys"] = ["record_id"]
     else: value[part]["name"] = "변조"
     with pytest.raises(artifacts.ProcessPackError):
         artifacts.pin_bundle(store, value)

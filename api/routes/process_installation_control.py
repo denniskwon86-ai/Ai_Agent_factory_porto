@@ -13,6 +13,9 @@ from core.enterprise_context.process_installation import ProcessInstallationServ
 
 router = APIRouter()
 
+#: 서버가 제공하는 검토 후보 팩 하나(`process_pack_artifacts.CANDIDATE_MANIFEST` 의 판본과 같다).
+CATALOG_KIT_ID, CATALOG_VERSION = "KIT-MFG-NONFERROUS-PROCUREMENT", "1.2.0"
+
 
 class RegisterIn(StrictModel):
     context_root_id: str = Field(min_length=1)
@@ -23,12 +26,15 @@ class RegisterIn(StrictModel):
 
 def _catalog_bundle(kit_id, version):
     # 클라이언트가 로컬 경로·URL·임의 패키지를 지정할 수 없다.
-    from pathlib import Path
-    from core.data_preparation.process_pack_artifacts import load_bundle
-    if (kit_id, version) != ("KIT-MFG-NONFERROUS-PROCUREMENT", "1.1.0"):
+    from core.data_preparation.process_pack_artifacts import CANDIDATE_MANIFEST, load_bundle
+    #: ★ [2026-09-25] 새 설치는 데이터셋 계약을 싣는 판(1.2.0)만 받는다. 계약이 없는 1.1.0 으로
+    #:   설치하면 그 데이터의 실적 인증이 «고정 계약 없음» 으로 막힌다. 경로는 한 곳에서 읽는다.
+    if (kit_id, version) != (CATALOG_KIT_ID, CATALOG_VERSION):
         raise ProcessError("PROCESS_PACK_NOT_FOUND", "검토 가능한 팩 판본을 찾지 못했습니다.", 404)
-    path = Path(__file__).resolve().parents[2] / "process_packs/afs.manufacturing.materials-processes/1.1.0/manifest.json"
-    return load_bundle(path)
+    bundle = load_bundle(CANDIDATE_MANIFEST)
+    if (bundle["kit_id"], bundle["version"]) != (CATALOG_KIT_ID, CATALOG_VERSION):
+        raise ProcessError("PROCESS_PACK_METADATA_UNAVAILABLE", "서버의 후보 팩 판본이 목록과 다릅니다.", 503)
+    return bundle
 
 
 def _business_kits(bundle):
@@ -50,7 +56,7 @@ async def catalog(request: Request, context_root_id: str, scope_node_id: str = "
         boundary = boundary_for(ctx, context_root_id, scope_node_id)
         with service.transaction() as conn:
             service._authorize(conn, boundary, p.user_id, explicit_context(request, ctx))
-        bundle = await asyncio.to_thread(_catalog_bundle, "KIT-MFG-NONFERROUS-PROCUREMENT", "1.1.0")
+        bundle = await asyncio.to_thread(_catalog_bundle, CATALOG_KIT_ID, CATALOG_VERSION)
         return {"status": "success", "data": [{"kit_id": bundle["kit_id"], "version": bundle["version"],
             "artifact_digest": bundle["artifact_digest"], "name": bundle["profile"]["name"],
             "state": "DOMAIN_REVIEW_REQUIRED", "data_class": "NO_DATA", "setup_only": True,

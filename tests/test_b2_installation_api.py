@@ -10,7 +10,7 @@ ROOT = "/api/v1/enterprise-context"
 def register(client, workspace):
     req = dict(context_root_id=workspace["boundary"].context_root_id,
                scope_node_id=workspace["boundary"].scope_node_id,
-               kit_id="KIT-MFG-NONFERROUS-PROCUREMENT", version="1.1.0")
+               kit_id="KIT-MFG-NONFERROUS-PROCUREMENT", version="1.2.0")
     response = client.post(ROOT + "/process-packs/register", json=req, headers=headers(org.MANAGER_A))
     assert response.status_code == 200, response.text
     return response.json()["data"]["artifact_digest"]
@@ -51,7 +51,7 @@ def test_actual_api_plan_install_adopt_approve_and_pinned_data_profile(client, w
     from api.routes.data_preparation_control import _kit_profile_or_503
     instance = store.get_instance(ready["kit_instance_ref"])
     profile = _kit_profile_or_503(instance)
-    assert profile["version"] == "1.1.0" and profile["datasets"]
+    assert profile["version"] == "1.2.0" and profile["datasets"]
     assert store.get_kit_version(instance["kit_id"], instance["version"]) is None
     assert store.list_snapshots(instance["instance_id"]) == []
     from api.routes.data_preparation_control import router as preparation_router
@@ -83,6 +83,9 @@ def test_api_registration_is_allowlisted_and_not_member_action(client, workspace
                 kit_id="../../private", version="1.1.0")
     assert client.post(ROOT + "/process-packs/register", json=body, headers=headers()).status_code == 403
     assert client.post(ROOT + "/process-packs/register", json=body, headers=headers(org.MANAGER_A)).status_code == 404
+    #: [2026-09-25] 계약을 싣지 않는 1.1.0 은 새 설치 후보가 아니다 — 설치하면 실적 인증이 막힌다.
+    legacy = {**body, "kit_id": "KIT-MFG-NONFERROUS-PROCUREMENT", "version": "1.1.0"}
+    assert client.post(ROOT + "/process-packs/register", json=legacy, headers=headers(org.MANAGER_A)).status_code == 404
     response = client.get(ROOT + "/process-packs", params={k: body[k] for k in ("context_root_id", "scope_node_id")}, headers=headers(org.VIEWER_A))
     assert response.status_code == 200, response.text
     item = response.json()["data"][0]
