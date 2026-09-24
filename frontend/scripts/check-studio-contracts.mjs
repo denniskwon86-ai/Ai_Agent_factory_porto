@@ -2791,10 +2791,25 @@ await test('W03 저장 실패→옛 GET→안내 유지→같은 실행 저장 �
     emit({ task_id: 'TASK_B', node: 'm1', state_saved: true, state_version: 'v2' });
     await flush();
     assert.equal(now().lastStateSaveError?.task_id, 'TASK_A', '다른 실행의 저장 성공이 이 실행의 미저장 안내를 지웠다');
+    // ★★ [CR §14.2-②] 해제에는 «양쪽 ID·같은 실행·state_saved===true» 가 모두 필요하다.
+    // ③-2 실행 ID 가 없는 성공 이벤트 — 어느 실행의 저장인지 모른다.
+    emit({ node: 'x1', state_saved: true, state_version: 'v2b' });
+    await flush();
+    assert.equal(now().lastStateSaveError?.task_id, 'TASK_A', '실행 ID 없는 성공 이벤트가 미저장 안내를 지웠다');
+    // ③-3 같은 실행이지만 성공 필드가 없다 — 구형 이벤트는 재조회 호환만, 회복 근거는 아니다.
+    emit({ task_id: 'TASK_A', node: 'n1b', state_version: 'v2c' });
+    await flush();
+    assert.equal(now().lastStateSaveError?.task_id, 'TASK_A', 'state_saved 누락 이벤트가 미저장 안내를 지웠다');
     // ④ **같은 실행**의 다음 저장이 성공하면 누적 상태 전체가 써졌다 — 회복이 확인됐다.
     emit({ task_id: 'TASK_A', node: 'n2', state_saved: true, state_version: 'v3' });
     await flush();
     assert.equal(now().lastStateSaveError, null, '같은 실행이 저장에 성공했는데 안내가 남았다');
+    // ⑤ 미저장 기록 쪽 ID 가 비었다 — 어느 실행이 회복해야 하는지 알 수 없으니 누구도 해제하지 못한다.
+    emit({ node: 'z1', state_saved: false, state_save_error: '합성 저장 실패', state_version: 'v4' });
+    assert.equal(now().lastStateSaveError?.node, 'z1', 'ID 없는 저장 실패가 안내로 남지 않았다');
+    emit({ task_id: 'TASK_A', node: 'n3', state_saved: true, state_version: 'v5' });
+    await flush();
+    assert.equal(now().lastStateSaveError?.node, 'z1', 'ID 없는 미저장 기록이 다른 이벤트의 성공으로 해제됐다');
   } finally {
     for (const s of sources) { s.onmessage = null; s.close?.(); }
     globalThis.EventSource = savedEventSource;

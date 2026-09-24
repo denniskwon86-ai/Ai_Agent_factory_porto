@@ -1217,14 +1217,19 @@ export const useFactoryStore = create<FactoryStore>()((set, get) => ({
           // ★★ [CR §12-P1③] 회복은 **그 실행의** 저장 성공으로만 확인한다. 다른 실행은 다른
           //   checkpoint 라, 그쪽 저장이 성공해도 이 결과가 되살아난 것이 아니다.
           //   같은 실행이면 다음 저장이 누적 상태 전체를 쓰므로 앞에서 못 쓴 결과까지 들어간다.
+          // ★★ [CR §14.2-②] **이미 있는 안내의 해제**에는 세 조건을 모두 요구한다.
+          //   ① 양쪽 실행 ID 가 비어 있지 않다 ② 같다 ③ `state_saved === true` 로 성공이 명시됐다.
+          //   ⚠️ 위 `saveOk`(`!== false`)는 필드 누락도 성공으로 읽는다 — 구형 이벤트의 재조회
+          //     호환에는 그대로 쓰지만, «식별 불가»·«필드 누락» 을 회복 근거로 삼지는 않는다.
           const nodeTaskId = String(data.payload?.task_id || '');
           const pending = prev.lastStateSaveError;
-          const recovers = !pending || !pending.task_id || pending.task_id === nodeTaskId;
+          const released = !!pending && !!pending.task_id && !!nodeTaskId
+            && pending.task_id === nodeTaskId && data.payload?.state_saved === true;
           return {
             logs,
             // 계산은 끝났다 — 그건 그대로 센다. 저장 실패는 «따로» 남긴다.
             completed_agents: [...prev.completed_agents, data.payload.node],
-            lastStateSaveError: saveOk ? (recovers ? null : pending) : {
+            lastStateSaveError: saveOk ? (released ? null : pending) : {
               node: String(data.payload?.node || ''),
               error: String(data.payload?.state_save_error || ''),
               stale: Boolean(data.payload?.state_save_stale),
