@@ -3,6 +3,7 @@ import json
 from pathlib import Path
 
 from core.advisor_revision_store import RevisionStoreError
+from core.atomic_write import StaleWriteError
 from core.enterprise_context.process_schema import ProcessError
 from core.studio_drafts import StudioDraftService, context_key
 from core.studio_project_files import (STUDIO_FIELDS, operation_lock, projection,
@@ -172,7 +173,17 @@ class StudioBootstrapService:
                     verify_files(workspace, expected, ready=True)
                     operation = self._advance(operation, "COMPLETED", ledger_event_id=event["event_id"], ledger_acknowledged=True)
                 return operation
-            except Exception as exc:
+            except Exception as raised:
+                exc = raised
+                #: ★★ [CR §14.2-③] **조건부 쓰기 충돌은 일시 장애가 아니다.** 같은 요청을 다시
+                #:   보내도 남이 바꾼 정본은 그대로이고, 최신 판을 다시 읽어 우리 내용을 밀어넣으면
+                #:   그것이 곧 lost update 다. 그래서 409 / `FAILED_BLOCKED` 로 멈추고 확인을 넘긴다.
+                #:   ⚠️ 원문에는 경로·digest 가 있다 — 메시지로 옮기지 않는다.
+                #:   `SaveBusyError`(잠금 대기 초과)·일시 IO 는 아래 그대로 재시도 가능(503)이다.
+                if isinstance(raised, StaleWriteError):
+                    exc = RevisionStoreError(
+                        "STUDIO_PROJECT_REVISION_CONFLICT",
+                        "그 사이 프로젝트 정본이 바뀌어 덮어쓰지 않았습니다. 요청 상태와 현재 프로젝트 자료를 확인하십시오.")
                 # 고정 project/event ID를 유지한다. DB 실패로 상태 기록도 실패하면 원래 단계에서 재시도한다.
                 blocked = isinstance(exc, FileExistsError) or (isinstance(exc, (RevisionStoreError, ProcessError)) and exc.status_code < 500)
                 try:
@@ -181,6 +192,9 @@ class StudioBootstrapService:
                                   error_message="프로젝트 준비가 완료되지 않았습니다. 동일 승인판·요청 키로 상태를 확인하십시오.")
                 except RevisionStoreError:
                     pass
+                # ⚠️ 변환했으면 맨 `raise` 를 쓰지 않는다 — 그것은 원래 예외(경로 포함)를 다시 던진다.
+                if exc is not raised:
+                    raise exc from raised
                 if isinstance(exc, (RevisionStoreError, ProcessError)):
                     raise
                 if isinstance(exc, FileExistsError):

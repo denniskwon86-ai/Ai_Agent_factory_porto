@@ -177,6 +177,7 @@ def test_unit_initial_state_does_not_overwrite_a_writer_that_arrived_after_verif
     `provision()` 은 `project_meta.json`·marker 만 쓰고 이 파일은 쓰지 않으므로, 그 사이에
     생긴 `latest_state.json` 은 곧 **다른 writer** 다.
     """
+    from core.advisor_revision_store import RevisionStoreError
     from core.paths import workspace_path
     env = unit_bootstrap
     approved = _decide(env, _save(env))
@@ -189,14 +190,36 @@ def test_unit_initial_state_does_not_overwrite_a_writer_that_arrived_after_verif
         return result
 
     env.bootstrap.provision = provision_then_intrude
-    _error(lambda: _bootstrap(env, approved), "STUDIO_SETUP_IO_FAILED", 503)
-    folder = _workspace(env, _operation(env))
+    #: ★★ [CR §14.2-③] 조건부 쓰기 충돌은 일시 장애(503·재시도)가 아니라 **409·차단**이다.
+    #:   종전 기대 503 은 「같은 요청으로 재개하라」고 안내했다 — 재개해도 정본은 남의 것이다.
+    with pytest.raises(RevisionStoreError) as caught:
+        _bootstrap(env, approved)
+    assert (caught.value.reason_code, caught.value.status_code) == ("STUDIO_PROJECT_REVISION_CONFLICT", 409)
+    blocked = _operation(env)
+    folder = _workspace(env, blocked)
+    #: ⚠️ 원문(StaleWriteError)에는 경로가 있다 — 사용자 메시지로 옮기지 않는다.
+    assert str(folder) not in str(caught.value) and "latest_state" not in str(caught.value)
+    assert blocked["stage"] == "FAILED_BLOCKED"
+    assert blocked["result"]["error_code"] == "STUDIO_PROJECT_REVISION_CONFLICT"
     assert json.loads((folder / "latest_state.json").read_text(encoding="utf-8")) == intruder, \
         "검증 뒤 끼어든 writer 의 정본을 초기 상태로 덮었다"
     assert not _events(env), "초기 기록이 막혔는데 원장 사건이 남았다"
+    # 같은 요청을 다시 보내도 덮어쓰지 않는다 — 차단 상태가 먼저 답한다. ID 는 그대로다.
+    _error(lambda: _bootstrap(env, approved), "STUDIO_BOOTSTRAP_BLOCKED")
+    again = _operation(env)
+    assert (again["project_id"], again["stage"]) == (blocked["project_id"], "FAILED_BLOCKED")
+    assert json.loads((folder / "latest_state.json").read_text(encoding="utf-8")) == intruder
+    assert not _events(env) and len(env.provision.calls) == 1
 
 
-def test_unit_ledger_ack_then_ready_state_write_failure_recovers_without_new_event(unit_bootstrap, monkeypatch):
+def _save_busy(message):
+    from core.atomic_write import SaveBusyError
+    return SaveBusyError(message)
+
+
+#: ★ [CR §14.2-③] 잠금 대기 초과(`SaveBusyError`)는 일시 장애다 — 충돌(409)로 옮기지 않는다.
+@pytest.mark.parametrize("failure", [OSError, _save_busy], ids=["io", "save-busy"])
+def test_unit_ledger_ack_then_ready_state_write_failure_recovers_without_new_event(unit_bootstrap, monkeypatch, failure):
     import core.studio_bootstrap as module
     env = unit_bootstrap
     approved = _decide(env, _save(env))
@@ -205,7 +228,7 @@ def test_unit_ledger_ack_then_ready_state_write_failure_recovers_without_new_eve
     def fail_ready_state(path, value, **kwargs):
         #: ⚠️ [10.2-B] 위와 같다 — 인자를 전달하고 **같은 READY 지점에서** 실패한다.
         if Path(path).name == "latest_state.json" and value.get("setup_status") == "READY":
-            raise OSError("unit failure after committed ledger ack")
+            raise failure("unit failure after committed ledger ack")
         return write(path, value, **kwargs)
 
     monkeypatch.setattr(module, "write_json", fail_ready_state)
@@ -219,6 +242,45 @@ def test_unit_ledger_ack_then_ready_state_write_failure_recovers_without_new_eve
     completed = _bootstrap(env, approved)
     assert completed["project_id"] == failed["project_id"] and completed["stage"] == "COMPLETED"
     assert _events(env) == [event] and len(env.provision.calls) == 1
+
+
+def test_unit_ready_write_conflict_after_ledger_ack_blocks_and_keeps_the_single_event(unit_bootstrap, monkeypatch):
+    """★★ [CR §14.2-③] READY 갱신 중 **다른 writer 가 정본을 바꿨다.** 원장 접수는 이미 끝났다.
+
+    ⚠️ 여기서 재시도(503)를 안내하면 재개가 최신 판을 다시 읽어 우리 READY 를 밀어넣는다 —
+      남의 기록을 덮는 자동 회복이다. 409·차단으로 멈추고, 이미 남은 원장 사건은
+      지우지도 새로 만들지도 않는다.
+    ★ 충돌은 대역이 던지지 않는다 — 실제 조건부 저장이 실제 파일의 판본 차이를 보고 거절한다."""
+    import core.studio_bootstrap as module
+    from core.advisor_revision_store import RevisionStoreError
+    env = unit_bootstrap
+    approved = _decide(env, _save(env))
+    write = module.write_json
+    intruder = {"project_id": "INTRUDER", "value": "READY 사이에 끼어든 writer 의 확정값"}
+
+    def intrude_then_write(path, value, **kwargs):
+        if Path(path).name == "latest_state.json" and value.get("setup_status") == "READY":
+            Path(path).write_text(json.dumps(intruder, ensure_ascii=False), encoding="utf-8")
+        return write(path, value, **kwargs)
+
+    monkeypatch.setattr(module, "write_json", intrude_then_write)
+    with pytest.raises(RevisionStoreError) as caught:
+        _bootstrap(env, approved)
+    assert (caught.value.reason_code, caught.value.status_code) == ("STUDIO_PROJECT_REVISION_CONFLICT", 409)
+    blocked = _operation(env)
+    folder = _workspace(env, blocked)
+    assert str(folder) not in str(caught.value) and "latest_state" not in str(caught.value)
+    assert blocked["stage"] == "FAILED_BLOCKED"
+    assert json.loads((folder / "latest_state.json").read_text(encoding="utf-8")) == intruder, \
+        "READY 갱신이 끼어든 writer 의 정본을 덮었다"
+    events = _events(env)
+    assert len(events) == 1, "원장 접수 뒤 충돌에서 원장 사건이 지워지거나 늘었다"
+    # 재요청도 덮어쓰지 않고 새 사건을 만들지 않는다 — 대역을 거두고 보내도 차단이 먼저 답한다.
+    monkeypatch.setattr(module, "write_json", write)
+    _error(lambda: _bootstrap(env, approved), "STUDIO_BOOTSTRAP_BLOCKED")
+    assert _operation(env)["project_id"] == blocked["project_id"]
+    assert json.loads((folder / "latest_state.json").read_text(encoding="utf-8")) == intruder
+    assert _events(env) == events and len(env.provision.calls) == 1
 
 
 def test_unit_completion_db_failure_after_ready_files_retries_original_event(unit_bootstrap, monkeypatch):
