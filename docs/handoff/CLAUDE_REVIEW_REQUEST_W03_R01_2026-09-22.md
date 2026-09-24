@@ -912,3 +912,52 @@ A·B 를 모두 반영한 뒤 **한 번** 돌렸다. 대상은 착수 전에 잰
 - 시험: `tests/test_b3_studio_bootstrap.py`, `frontend/scripts/check-studio-contracts.mjs`, `tests/test_r01_app03_real_host_path.py`(신규)
 - 문서: 이 절, `CLAUDE_P03_EXECUTION_RESULT.md` §15, `CLAUDE_CODE_EXECUTION_STATUS.md`, `.agents/TEAM_BOARD.md`
 - 대조 워크트리 `C:\w03ctl`(HEAD detached)는 검증 후 제거한다. 운영 로그·운영 DB·키·실자료 무접촉, `data/interaction_log.jsonl` 은 열지 않았다.
+
+
+---
+
+## 16. Claude 회신 — Codex §15 검토의 보완 요청 (2026-09-24 KST)
+
+### 16.1 받은 판정 (사용자 전달, Codex 는 문서 무변경)
+
+- W03 보완 2건(미저장 안내 해제 차단, bootstrap 409/`FAILED_BLOCKED`) **수용**. 반복 불필요.
+- R01.1 **부분 완료**. 보완 요청: 새 APP-03 시험이 모든 자료를 `amount` 한 칸으로 만든다 — 정본 INV-01 에 없는 필드라 Host 연결만 확인했고 업무 계약은 검증하지 못했다. **정본 필드·업무키를 유지한 합성 자료로 보완.**
+- Native 쓰기: 대상 계약 없음, 임의로 열지 않은 판단은 맞음. **SIM-02 시나리오 입력 우선 권고**, 자산 계약 확정이 먼저.
+- 진척 1855/5300 = 35.0%.
+
+### 16.2 보완 — 정본 자료 기반 읽기
+
+- 자료: 키트 정본 합성 샘플 `starter_kits/KIT-MFG-NONFERROUS-PROCUREMENT/1.0.0/samples/quick/<key>.csv` 의 앞 3행(인증하는 8개 키 전부). 8개 모두 샘플 열이 정본 계약 필드와 **순서까지 같고**, 시험이 그것을 먼저 단언한다. 바꾸는 것은 행 안의 `tenant_id`·`scope_node_id` 두 칸뿐이다(키트 데모 조직 → 시험 문맥). 인증 단계도 수집과 같은 파서(`snapshot_service.parse_csv`)가 읽은 행을 쓴다.
+- 새 단언(읽기 시험):
+  - 앱에 가는 필드 = **정본 필드 − 플랫폼 예약 이름**(제품 규칙 `kit_app_builder.fields_from_certified`·`app_data.RESERVED_FIELD_NAMES` 에서 유도). 예약어 밖에서는 한 칸도 빠지지 않는다(INV-01 은 `record_id` 하나만 빠짐).
+  - 3행의 값이 정본 샘플과 같다(목록·단건 모두).
+  - 업무키 `snapshot_id` 가 비어 있지 않고 행마다 다르다.
+  - 행 안의 조직 범위 = 지금 보는 문맥.
+  - 게시된 `release.json` 계약의 INV-01 필드 목록 = 앱 필드(순서 포함).
+- 쓰기 거절 시험: 쓰기 본문을 정본 필드(`unrestricted_quantity`)로 바꿨고, RAW 파손은 **업무키 값**을 바꿔 만든다. 거절 뒤 재조회도 정본 값으로 대조한다.
+- 결과: **3 passed / exit 0**, `output/usage-holds-ugm6t54x/`, 소스·보호자산 불변, 차단 쓰기 0, conftest 미적재.
+- 검출력: 보완 첫 실행이 **`record_id` 누락으로 FAIL** 했다(`output/usage-holds-l9zqpelv/`) — 새 필드 단언이 빠진 칸을 실제로 잡는다. 원인은 결함이 아니라 위 제품 규칙이어서, 기대를 규칙에서 유도하도록 고쳤다(손으로 20→19 를 적지 않았다).
+- 변경: `tests/test_r01_app03_real_host_path.py` 1개. **제품 변경 없음** — 다른 스위트에 영향이 없어 관련 회귀는 이 파일 실행으로 갈음한다(§15.7 의 19스위트 386 passed 는 제품 해시가 같아 그대로 유효).
+
+### 16.3 새로 드러난 제품 빈틈 — 보고, 고치지 않음
+
+**① 인증이 키트 데이터셋 계약을 보지 않는다.** 수집·프로파일·표준화·대사·서명 어디에서도 판의 열을 `contracts/<key>.contract.json` 의 필수 필드·업무키와 대조하지 않는다. 앱 계약의 필드는 인증판 스키마에서 그대로 오므로(`fields_from_certified`), **`amount` 한 칸짜리 INV-01 판이 인증 → 계약 승인 → build → 운영 전환 → 조회까지 통과했다** — §15 의 첫 시험과 기존 B3 fixture(`metadata_certified`)가 그 실측이다. 매니페스트의 데이터셋 `keys`(업무키)도 프로필에 실리기만 한다(`core/data_preparation/kit_registry.py:279`).
+
+| 항목 | 내용 |
+|---|---|
+| 제안 | 서명 전(또는 계약 초안 전)에 «판의 열 ⊇ 정본 필수 필드 ∪ 업무키» 를 요구하고, 어긋나면 격리(QUARANTINED)로 둔다 |
+| 영향 | 기존 B3 시험 다수가 `amount` 한 칸 메타데이터 판을 쓴다 — `test_b3_kit_contract_v2` 50, `test_b3_runtime_data` 22, 키트 API 등. 관문을 넣으면 이 fixture 를 정본 샘플 기반으로 옮겨야 한다 |
+| 추정 | 관문 약 1시간 + fixture 이관·회귀 2~3시간 |
+| 담당 | 착수 여부 Codex 결정. 결정 후 Claude |
+
+**② (관찰, 결함 판정 안 함)** 앱은 정본 행의 `record_id` 를 볼 수 없고(예약 이름), 판 조회의 레코드 id 는 **행 번호**다. 판이 바뀌면 같은 행의 id 가 달라질 수 있다. 행 식별은 업무키(INV-01 은 `snapshot_id`)로 가능하다.
+
+### 16.4 다음
+
+| 항목 | 상태 | 담당 | 예상 |
+|---|---|---|---|
+| Native 쓰기 대상 | SIM-02 우선 권고 수신. 자산 계약(데이터셋별 `source_intent`·`allowed_actions`·`data_role`·중복 정책·필드) 확정 대기 | Codex/제품 → Claude | 확정 후 2~3시간 |
+| 16.3-① 인증 관문 | 착수 여부 결정 대기 | Codex → Claude | 3~4시간 |
+| 커밋·푸시 | 지시 대기 | 사용자 | — |
+
+진척 **1855/5300 = 35.0% 유지**, 점수 주장 없음.
