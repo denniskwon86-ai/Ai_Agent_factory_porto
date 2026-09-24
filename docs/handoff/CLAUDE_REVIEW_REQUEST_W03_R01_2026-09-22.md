@@ -961,3 +961,74 @@ A·B 를 모두 반영한 뒤 **한 번** 돌렸다. 대상은 착수 전에 잰
 | 커밋·푸시 | 지시 대기 | 사용자 | — |
 
 진척 **1855/5300 = 35.0% 유지**, 점수 주장 없음.
+
+
+---
+
+## 17. Claude 회신 — 인증 계약 관문 (Codex §16 이후 권고 1) (2026-09-25 KST)
+
+### 17.1 받은 판정·권고 (사용자 전달, Codex 는 문서 무변경)
+
+- 정본 자료 기반 읽기 보완 **수용**, 이전 지적 종결. W03 보완 수용 유지.
+- 남은 중요 결함: 인증 경로(`certification_subject.py`)가 키트 계약의 필수 필드·업무키를 검사하지 않는다.
+- 권고 1: **설치에 고정된 계약 기준**으로 누락·빈 업무키·중복 차단(3~4시간). 권고 2: SIM-02 Native 계약 확정 후 쓰기→재조회(계약 확정 대기).
+
+### 17.2 착수 중 확인한 사실과 사용자 결정
+
+- APP-03 이 쓰는 B2 설치 인스턴스는 팩 **1.1.0** 번들에 고정돼 있고, 그 번들은 스스로 «계약명·앱 후보 식별자만 참조» 라고 밝힌다 — **필드·업무키 계약이 없다.** 필드 단위 계약은 설치되지 않은 스타터 키트 1.0.0 `contracts/*.json`(매니페스트가 sha256 기록)에만 있다. 키트 등록부는 코드 스스로 «mutable registry» 다.
+- 즉 «설치에 고정된 계약» 이 존재하지 않아 사용자에게 두 가지를 물었고 답을 받았다:
+  1. 계약 고정 위치 → **팩 1.2.0 에 데이터셋 계약 수록, 설치가 번들 지문째 고정**(권장안).
+  2. 고정 계약이 없는 설치본(1.1.0 전부·등록부 키트)의 실적 인증 → **차단**(권장안).
+
+### 17.3 구현
+
+| 층 | 변경 |
+|---|---|
+| 자산 | `process_packs/afs.manufacturing.materials-processes/1.2.0/` 신설. 1.1.0 을 복사해 판본 참조만 1.2.0 으로 올리고(앱 참조 39곳, 업무 팩 1.0.0→1.0.1), `dataset_contracts.json` 에 35개 데이터셋 계약(필드 이름·형·필수, 업무키, 계약 판본, 원본 경로·sha256)을 싣는다. 원본 sha256 은 스타터 키트 매니페스트 기록과 대조했다. **1.1.0 은 그대로**다 |
+| 번들 | `process_pack_artifacts`: manifest `schema_version 2` 에서만 `dataset_contracts` 구성요소를 받고 적재·재조립·지문에 포함한다. 계약 문서 검증: 프로필 데이터셋과 1:1, 업무키 비어 있지 않고 필드 안, 필드 중복·필수 여부 형식, 키트 판본 일치. **schema 1 의 identity·지문 계산은 바꾸지 않았다**(1.1.0 번들 지문 `670973f6…5f0d` 유지). `CANDIDATE_MANIFEST` → 1.2.0. 호출자 연결로 읽는 `stored_bundle(conn, digest)` 추가 |
+| 설치 | `process_kit_instances.pinned_dataset_contract(conn, instance, key)`: 불변 링크 → 고정 번들 → 계약. 등록부는 보지 않는다. `binding_for_instance` 는 같은 링크 검증 함수를 공유하도록 정리. 설치 API 후보 목록은 1.2.0 하나(경로는 `CANDIDATE_MANIFEST` 한 곳에서, 판본 불일치 시 503) |
+| 관문 | `contract_conformance.py`(신규): 필수 필드 누락·빈 업무키(공백 포함)·업무키 중복(복합 키는 튜플) — 결과에 값 없이 줄 번호·필드 이름만. `sealed_table()`: 봉인 원문을 지문 대조 후 파싱(파싱 바이트도 재대조) |
+| 인증 | `certification_subject._conforming_contract()` 를 서명 대상 생성 전에 호출(preview·restart·sign 공통). 고정 계약 없음 → `CONTRACT_NOT_PINNED`(409). 어긋남 → `CONTRACT_CONFORMANCE_FAILED`(422, `issues` 첨부). 원문 없음/변경 → `RAW_UNAVAILABLE`/`RAW_CHECKSUM_MISMATCH`. 계약 확인 불가 → `CONTRACT_UNAVAILABLE`(503). 서명 대상 payload 에 `dataset_contract_digest` 봉인. 기존 오류 순서(상태·용도·소유·정책·문맥)는 그대로 |
+
+### 17.4 시험
+
+- 신규: `test_contract_conformance.py`(대조기·봉인 원문 27), `test_pack_dataset_contracts.py`(1.1.0 지문 불변, 1.2.0 계약이 스타터 키트 원본 그대로, 부품 변조·누락·잘못된 업무키·schema 혼용 거부), `test_certification_contract_gate.py`(정상 판은 고정 계약 지문 봉인, `amount` 한 칸 판 422, 빈/중복 업무키 줄 번호 422·값 비노출, 1.1.0 설치본·등록부 키트 409, RAW 변경 거부).
+- fixture 이관(시험 자료만, 단언 약화 없음): 공용 도우미 `tests/kit_samples.py`(정본 샘플·제품과 같은 RAW 뿌리·운영 `data/` 단언·팩 1.2.0 고정 인스턴스). B3 `metadata_certified` → `sample_certified`(«나중 판» 은 다음 행 구간+추가 열), B0 `company`·`_reconciled`, `test_b3_process_context.add_certified`. 세션 seed 지문에 `kit_samples.py`·키트 계약/샘플 추가.
+- 기대 변경 1건: `test_expected_digest_rejects_changed_raw_checksum` — 기록만 바꾸면 이제 관문이 먼저 `RAW_CHECKSUM_MISMATCH` 로 막는다. 원래 의도(서명 대상 지문 결속)는 «원문과 기록을 함께 바꾼» 경우로 보존해 여전히 `SUBJECT_CONFLICT` 를 단언한다(매개화 2건).
+- 팩·설치 시험: 후보 판본 1.2.0/팩 1.0.1, 복사 fixture 5부품, schema 매개변수 `2`→`3`(2가 정식), 번들 변조 목록에 계약 부품 추가, 1.1.0 등록 요청 404 단언 추가.
+
+(결과 수치·대조는 17.5)
+
+### 17.5 결과
+
+관련 회귀 — 영향 받는 32개 파일 전부(인증 서명 경로·설치 fixture·후보 팩을 지나는 시험 전체). 한 실행으로는 2~3시간이 걸려 **서로 겹치지 않는 묶음으로 나눠 병렬** 실행했다(묶음마다 격리 실행 루트).
+
+| 묶음 | 대상 | 결과 | 실행 루트 |
+|---|---|---|---|
+| 빠른 묶음(12) | 대조기·팩 계약·관문·팩·설치 API·B0 인증 6·실적 인증 | **231 passed / 1 skip** | `output/usage-holds-t2w47ck7/` |
+| G2(6) | `b3_process_context`·`b2_installation`·`verification_plan`·`b3_materializer_v2`·`b3_runtime_contract_v2`·R01 | **430 passed / 1 skip** | `output/usage-holds-iz6vbuzp/` |
+| G3(7) | B4 5개·`b5_kit_review_api`·`b6_kit_app_entry` | **241 passed** | `output/usage-holds-yz8bqhdl/` |
+| G1a | `b3_kit_contract_v2` | **50 passed** | `output/usage-holds-dv4u_a94/` |
+| G1b | `b3_kit_api` | **36 passed** | `output/usage-holds-pvfp0hw4/` |
+| G1c | `b3_runtime_data`·`b3_release_readiness`·`b3_release_cohort` | **113 passed** | `output/usage-holds-ifc_032a/` |
+| G1d | `b3_seed_isolation`·`b3_kit_rejection` | **45 passed** | `output/usage-holds-_oqyuvlw/` |
+
+- 합계 **1,148건 — 1,146 passed · 2 skip · 실패 0**. 모든 실행 `exit 0`·`sources_unchanged`·`protected_assets_unchanged` true·차단 쓰기 0·conftest 미적재.
+- skip 2건은 둘 다 이 PC 의 심볼릭 링크 권한(`test_b2_pack_artifacts::test_symlink_escape_is_rejected`, `test_verification_plan::test_symlink_target_or_tests_directory_is_rejected`) — 기존과 같은 환경 사유.
+- 도중 실패는 1건뿐이었다(빠른 묶음 첫 실행 `test_expected_digest_rejects_changed_raw_checksum` — 17.4 의 기대 변경). 고친 뒤 빠른 묶음 전체를 다시 돌린 것이 위 기록이다.
+- 한 실행으로 시작했던 916건 묶음은 속도 때문에 멈추고 나눠 다시 돌렸다. 멈춘 실행은 결과로 세지 않았다.
+- `seed_isolation` 통과 = cold 설치·8개 인증을 RAW 까지 새로 만든 seed 가 «최초 시험 경로 참조 금지» 검사를 지났다(RAW 는 제품과 같은 `data_path("data_preparation")` 아래).
+- **변이 1건**(인증 분기, 예산 내): 짧은 경로 워크트리에서 관문이 대조 결과를 무시하도록(`if False and issues`) 바꾸자 `amount` 한 칸·빈 업무키·중복 업무키 **3건이 «막히지 않았다»로 FAIL**, 고정 계약 없음·RAW 변경·계약 지문 봉인 4건은 그대로 통과 — 층마다 독립적으로 검증된다. 워크트리는 제거했다.
+- 참고(보고만): 세션 seed 의 복제본들은 DB 는 각자지만 **RAW 파일은 공유**한다. 지금은 캐시 키트의 RAW 를 고치는 시험이 없어 오염이 없다. 그런 시험이 생기면 `verify_clone` 에 RAW 지문 대조를 더해야 한다(실행 중 seed 파일을 바꾸면 그 실행이 무효라 이번에는 넣지 않았다).
+- 참고(보고만, 기존 사실): 스타터 키트 파일은 `text=auto` 라 저장소에는 LF, 이 PC 작업 트리에는 CRLF 로 풀리고, 키트 매니페스트의 sha256 기록은 **CRLF 바이트 기준**이다. LF 로 풀리는 환경(리눅스 CI 등)에서는 키트 자체의 지문 대조가 어긋날 수 있다. 새 시험은 이것에 기대지 않도록 «매니페스트 기록 + 파싱한 내용» 으로 대조한다(커밋 전 자가 점검에서 발견·수정). 팩 1.1.0·1.2.0 파일은 `-text` 로 바이트 그대로 저장돼 영향이 없다.
+
+### 17.6 남은 것 · 결정 필요
+
+| 항목 | 내용 | 담당 | 예상 |
+|---|---|---|---|
+| **팩 업그레이드 흐름 없음** | 1.1.0 이 설치된 범위에 1.2.0 을 설치하면 `PROCESS_PACK_UPGRADE_REQUIRED`(«다른 팩 판본의 업무 대응은 업데이트 검토가 필요합니다»)로 막힌다. 차단 결정과 겹쳐 **기존 1.1.0 설치 환경은 실적 인증을 할 수 없다.** 업그레이드 검토 흐름(대응 유지·원장 기록)이 필요하다 | Codex 결정 → Claude | 설계 확정 후 3~5시간 |
+| 관문 이전 서명분 | 관문 이전에 서명된 판의 소비(`process_context._owner_proof`)는 소급 차단하지 않았다(기대 키만 대조). 소급 여부는 정책 결정 | Codex | — |
+| 행 안 조직 범위 대조 | 계약의 `fail_closed_on_scope_missing` 등(행의 `tenant_id`·`scope_node_id` 가 판 문맥과 같은가)은 권고 범위 밖이라 넣지 않았다 | Codex 결정 | 1시간 |
+| SIM-02 Native 쓰기→재조회 | 계약 확정 대기(변동 없음) | Codex/제품 → Claude | 2~3시간 |
+
+진척 **1855/5300 = 35.0% 유지**, 점수 주장 없음. 실제 브라우저 NOT_RUN. 커밋·푸시는 지시 대기.
