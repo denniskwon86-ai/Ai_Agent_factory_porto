@@ -64,22 +64,21 @@ def authority(monkeypatch):
 
 
 def _reconciled(store, tmp_path, *, data_kind=m.DATA_KIND_REAL, contract="FIN-03"):
-    store.upsert_kit_version(kit_id="k", version="1.0.0", name="t", mode="DEMO/SYNTHETIC",
-                             source_path="k.json", fingerprint_value="fp",
-                             profile={"datasets": []})
-    fp = store.get_kit_version("k", "1.0.0")["fingerprint"]
-    inst = store.create_instance(kit_id="k", version="1.0.0", kit_fingerprint=fp,
-                                 tenant_id="T", scope_node_id="S", entity_mode="REAL")
+    """대사까지 마친 판. ★ [2026-09-25] 인증이 설치 고정 계약과 봉인 원문을 대조하므로, 등록부
+    키트·`a` 한 칸 RAW 대신 계약을 싣는 팩(1.2.0)을 고정하고 정본 샘플을 올린다(`tests/kit_samples.py`)."""
+    from tests import kit_samples
+    context = {"tenant_id": "T", "scope_node_id": "S", "entity_mode": "REAL"}
+    inst = kit_samples.pinned_instance(store, context=context, context_root_id="S", actor="t",
+                                       operation_id="actual-certification-install")
     binding = store.create_binding(instance_id=inst["instance_id"],
                                    dataset_contract_key=contract,
-                                   provider=m.PROVIDER_FILE_SNAPSHOT, config={},
-                                   tenant_id="T", scope_node_id="S", entity_mode="REAL")
-    snap = svc.ingest(store, binding=binding, payload=b"a\n1\n", file_name="f.csv",
-                      workspace_root=str(tmp_path), created_by="t", data_kind=data_kind)
+                                   provider=m.PROVIDER_FILE_SNAPSHOT, config={}, **context)
+    snap, parsed = kit_samples.ingest_sample(store, binding, contract, context, created_by="t",
+                                             data_kind=data_kind)
     sid = snap["snapshot_id"]
-    svc.profile(store, sid, ROWS, ["a"])
-    svc.standardize(store, sid, ROWS)
-    svc.reconcile(store, sid, ROWS, {"row_count": 1})
+    svc.profile(store, sid, parsed.rows, parsed.columns)
+    svc.standardize(store, sid, parsed.rows)
+    svc.reconcile(store, sid, parsed.rows, {"row_count": len(parsed.rows)})
     return sid
 
 

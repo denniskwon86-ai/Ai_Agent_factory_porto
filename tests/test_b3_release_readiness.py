@@ -17,9 +17,9 @@ from core import app_runtime_contract as arc
 from core import studio_release_readiness as sr
 from core.data_preparation import readiness as rd
 from core.enterprise_context.process_schema import ProcessError
-from tests import org_seed as org
+from tests import kit_samples, org_seed as org
 from tests.test_b3_runtime_data import (  # noqa: F401
-    runtime, kit, installation, workspace, enforced_org, metadata_certified, database, hold,
+    runtime, kit, installation, workspace, enforced_org, sample_certified, database, hold,
 )
 from tests.test_b2_installation import _state
 
@@ -81,7 +81,8 @@ def test_actual_readiness_tokens_match_promotion_and_host_fingerprints(runtime, 
 def test_later_certification_cannot_replace_pinned_readiness(runtime, monkeypatch):
     w = runtime
     before = _readiness(w)
-    newer = metadata_certified(w, "INV-01", existing_binding=w["data"]["INV-01"]["binding"], column="new_amount")
+    newer = sample_certified(w, "INV-01", existing_binding=w["data"]["INV-01"]["binding"],
+                             offset=kit_samples.SAMPLE_ROWS, extra={"new_amount": 1})
     _no_discovery(w, monkeypatch)
     after = _readiness(w)
     assert before == after

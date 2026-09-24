@@ -1,14 +1,13 @@
 """B3 키트 2.0 독립 시험. 실행은 메인 audit 격리 runner 전용이다.
 
 정상 후보는 실제 process pack load/pin과 B1/B2 승인 경로를 쓴다. 모든 조직은
-.invalid, DB는 검증한 tmp 경로다. 인증은 합성 메타데이터·B0 정책/서명 시험이며
-RAW/운영 데이터/Host 실행 증거가 아니다. publisher_materializer_stub 시험은
+.invalid, DB는 검증한 tmp 경로다. 인증은 키트 정본 합성 샘플을 제품 수집으로 올린 판의
+B0 정책/서명이며(설치 고정 계약과 대조), 운영 데이터/Host 실행 증거가 아니다. publisher_materializer_stub 시험은
 저장 readback·호출 순서 검증용 대역으로, 실제 물질화 시험과 구별한다.
 """
 from __future__ import annotations
 
 import copy
-import hashlib
 import json
 import threading
 from concurrent.futures import ThreadPoolExecutor
@@ -20,7 +19,7 @@ from core import app_manifest, app_runtime_contract as arc
 from core import kit_app_builder as kb, kit_app_contract as kc, project_data_context as pdc
 from core.enterprise_context.process_context import ProcessContextService, snapshot_fingerprint
 from core.enterprise_context.process_schema import ProcessError, canonical
-from tests import org_seed as org
+from tests import kit_samples, org_seed as org
 from tests.test_b1_process_configuration import approval, proposal, workspace  # noqa: F401
 from tests.test_b2_installation import installation, _plan, _prepared, _apply, _read, _state  # noqa: F401
 from tests.test_b3_process_context import build as process_build, database, error
@@ -33,10 +32,15 @@ DATA_KEYS = ("INV-01", "INV-02", "MDM-05", "MDM-06", "MFG-01", "MFG-02", "MFG-03
 APP_KEYS = {"INV-01", "INV-02", "MFG-01", "MFG-02", "MFG-03", "QLT-01"}
 
 
-def metadata_certified(w, key, *, existing_binding=None, column="amount"):
-    """RAW 생성 없이 합성 행의 schema·정책·서명 메타데이터만 준비한다."""
+def sample_certified(w, key, *, existing_binding=None, offset=0, extra=None):
+    """정본 합성 샘플을 **제품 수집**으로 올리고 B0 인증까지 마친다(`tests/kit_samples.py`).
+
+    ⚠️ [2026-09-25] 종전 `metadata_certified` 는 RAW 없이 `amount` 한 칸짜리 판을 만들었다. 인증이
+      설치 고정 계약과 봉인 원문을 대조하게 되면서 그 판은 막힌다 — 막혀야 맞다.
+    `offset`·`extra` 는 «같은 결속의 나중 판» 을 정본을 깨지 않고 다르게 만들 때 쓴다."""
     from core.data_preparation import certification_subject as cs, models as m, ownership_binding as ob
     from core.data_preparation import snapshot_service as ss
+    from tests import kit_samples
     store = w["store"]
     if existing_binding is None:
         binding = store.create_binding(instance_id=w["instance_id"], dataset_contract_key=key,
@@ -51,16 +55,12 @@ def metadata_certified(w, key, *, existing_binding=None, column="amount"):
                        effective_from=approved["effective_from"])
     else:
         binding = existing_binding
-    raw = (column + "\n1\n").encode()
-    digest = hashlib.sha256(raw).hexdigest()
-    snapshot = store.create_snapshot(instance_id=w["instance_id"], binding_id=binding["binding_id"],
-        dataset_contract_key=key, data_kind=m.DATA_KIND_REAL, checksum=digest, content_fingerprint=digest,
-        byte_size=len(raw), row_count=1, schema=[{"name": column, "type": "number"}],
-        created_by=org.MANAGER_A, **w["context"])
-    sid, rows = snapshot["snapshot_id"], [{column: "1"}]
-    ss.profile(store, sid, rows, [column])
+    snapshot, parsed = kit_samples.ingest_sample(store, binding, key, w["context"], offset=offset,
+                                                 created_by=org.MANAGER_A, extra=extra)
+    sid, rows = snapshot["snapshot_id"], parsed.rows
+    ss.profile(store, sid, rows, parsed.columns)
     ss.standardize(store, sid, rows)
-    ss.reconcile(store, sid, rows, {"row_count": 1})
+    ss.reconcile(store, sid, rows, {"row_count": len(rows)})
     args = dict(actor=org.MANAGER_A, context=w["context"], use_kind="OPERATIONAL",
                 period_from="2026-08-01", period_to="2026-08-31")
     preview = cs.preview(store, sid, **args)
@@ -92,7 +92,7 @@ def cold_kit(installation, monkeypatch):
     ca.approve_policy(w["store"], tenant_id=w["context"]["tenant_id"], entity_mode="REAL",
         context_root_id=w["boundary"].context_root_id, actor=org.ADMIN,
         evidence_ref="test-only-b3-kit-policy", document=policy)
-    w["data"] = {key: metadata_certified(w, key) for key in DATA_KEYS}
+    w["data"] = {key: sample_certified(w, key) for key in DATA_KEYS}
     w["fixed"] = process_build(w, [w["ids"][key] for key in TEMPLATES])
     w["ledger"] = decision_ledger
     assert "GENERATE" in w["fixed"]["permitted_actions"]
@@ -153,8 +153,11 @@ def test_actual_pinned_candidate_produces_read_only_v2_without_side_effects(kit)
     assert arc.validate(contract) == []
     assert contract["process_context"] == kit["fixed"]
     assert {d["enterprise_contract_key"] for d in contract["datasets"]} == APP_KEYS
-    assert all(d["allowed_actions"] == ["read"] and d["fields"][0]["name"] == "amount"
-               and d["fields"][0]["type"] == "number" for d in contract["datasets"])
+    #: 필드는 인증판(정본 샘플)에서 온다 — 정본 계약 필드에서 플랫폼 예약 이름만 빠진다.
+    from core.app_data import RESERVED_FIELD_NAMES
+    assert all(d["allowed_actions"] == ["read"] and [f["name"] for f in d["fields"]] == [
+        n for n in kit_samples.canonical_fields(d["enterprise_contract_key"]) if n not in RESERVED_FIELD_NAMES]
+        for d in contract["datasets"])
     assert contract["process_context"]["sources"][1]["artifact_digest"] == kit["bundle"]["artifact_digest"]
 
 
@@ -213,7 +216,8 @@ def test_schema_projection_unit_does_not_invent_empty_or_unknown_fields(schema):
 
 def test_later_certified_schema_does_not_replace_fixed_snapshot(kit):
     old = producer(kit)
-    newer = metadata_certified(kit, "INV-01", existing_binding=kit["data"]["INV-01"]["binding"], column="new_amount")
+    newer = sample_certified(kit, "INV-01", existing_binding=kit["data"]["INV-01"]["binding"],
+                             offset=kit_samples.SAMPLE_ROWS, extra={"new_amount": 1})
     assert newer["snapshot_id"] != kit["data"]["INV-01"]["snapshot_id"]
     assert producer(kit) == old
 

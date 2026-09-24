@@ -1,14 +1,13 @@
 """B3 독립 계약 시험. 실행은 메인 audit 격리 runner 전용이다.
 
 정상 업무는 실제 후보 팩 load/pin + B1/B2 승인 API로 만든다. 조직은 .invalid,
-직접 SQL은 경로를 확인한 tmp DB뿐이다. 인증 시험은 합성 metadata/행의 B0 정책·
-서명 경로이며 실제 RAW 파일/운영 데이터/Host 실행 검증으로 보고하지 않는다.
+직접 SQL은 경로를 확인한 tmp DB뿐이다. 인증 시험은 키트 정본 합성 샘플을 제품 수집으로
+올린 판의 B0 정책·서명 경로이며(설치 고정 계약과 대조) 운영 데이터/Host 실행 검증으로 보고하지 않는다.
 semantic_projection 이름의 시험만 읽기 투영 대역을 사용하며 원문 검증과 구분한다.
 """
 from __future__ import annotations
 
 import copy
-import hashlib
 import json
 import sqlite3
 from contextlib import contextmanager
@@ -366,9 +365,13 @@ def test_pinned_artifact_corruption_is_503_without_registry_fallback(packed):
 
 
 def add_certified(w, contract, *, existing_binding=None, use="OPERATIONAL"):
-    """합성 행만 사용한 B0 메타데이터·정책·서명 시험. RAW 파일은 만들지 않는다."""
+    """키트 정본 합성 샘플을 제품 수집으로 올린 판의 B0 정책·서명 시험(`tests/kit_samples.py`).
+
+    ⚠️ [2026-09-25] 종전에는 RAW 없이 `amount` 한 칸짜리 판을 만들었다. 인증이 설치 고정 계약과
+      봉인 원문을 대조하게 되어 그 판은 막힌다. 같은 결속의 나중 판은 샘플의 다음 행 구간이다."""
     from core.data_preparation import certification_subject as cs, models as m, ownership_binding as ob
     from core.data_preparation import snapshot_service as snapshots
+    from tests import kit_samples
     store = w["store"]
     if existing_binding is None:
         binding = store.create_binding(instance_id=w["instance_id"], dataset_contract_key=contract,
@@ -383,15 +386,13 @@ def add_certified(w, contract, *, existing_binding=None, use="OPERATIONAL"):
                        effective_from=approved["effective_from"])
     else:
         binding = existing_binding
-    raw = b"amount\n1\n"
-    snap = store.create_snapshot(instance_id=w["instance_id"], binding_id=binding["binding_id"],
-        dataset_contract_key=contract, data_kind=m.DATA_KIND_REAL, checksum=hashlib.sha256(raw).hexdigest(),
-        content_fingerprint=hashlib.sha256(raw).hexdigest(), byte_size=len(raw), row_count=1,
-        schema=["amount"], created_by=org.MANAGER_A, **w["context"])
-    sid, rows = snap["snapshot_id"], [{"amount": "1"}]
-    snapshots.profile(store, sid, rows, ["amount"])
+    offset = kit_samples.SAMPLE_ROWS if existing_binding is not None else 0
+    snap, parsed = kit_samples.ingest_sample(store, binding, contract, w["context"], offset=offset,
+                                             created_by=org.MANAGER_A)
+    sid, rows = snap["snapshot_id"], parsed.rows
+    snapshots.profile(store, sid, rows, parsed.columns)
     snapshots.standardize(store, sid, rows)
-    snapshots.reconcile(store, sid, rows, {"row_count": 1})
+    snapshots.reconcile(store, sid, rows, {"row_count": len(rows)})
     args = dict(actor=org.MANAGER_A, context=w["context"], use_kind=use,
                 period_from="2026-08-01", period_to="2026-08-31")
     preview = cs.preview(store, sid, **args)

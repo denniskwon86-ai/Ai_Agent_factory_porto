@@ -88,6 +88,53 @@ def _head(conn: Any, snapshot_id: str) -> dict | None:
     return {**result, "payload": payload}
 
 
+_ISSUE_LABELS = {"MISSING_FIELD": "필수 필드 누락", "EMPTY_BUSINESS_KEY": "빈 업무키",
+                 "DUPLICATE_BUSINESS_KEY": "업무키 중복"}
+
+
+def _conforming_contract(conn: Any, row: dict) -> str:
+    """★★ [2026-09-25] **설치가 고정한 데이터셋 계약**과 판의 봉인 원문을 대조한다. 계약 지문을 돌려준다.
+
+    종전에는 인증이 판의 열을 어떤 계약과도 대조하지 않아, 정본 INV-01 에 없는 `amount` 한
+    칸짜리 판이 인증·게시·운영 조회까지 통과했다. 이제 서명 대상을 만들기 전에 막는다.
+
+    ⚠️ 고정 계약이 없으면 **막는다**(`CONTRACT_NOT_PINNED`). 계약을 싣지 않은 팩(1.1.0)의
+      설치본과 등록부 키트가 여기에 해당한다 — 못 본 것을 통과로 세지 않는다(2026-09-25 결정).
+    ⚠️ 대조는 호출자가 준 행이 아니라 **지문을 검증한 원문**으로 한다(`sealed_table`).
+    ⚠️ 오류 문장에 자료 값을 싣지 않는다 — 필드 이름과 줄 번호만."""
+    from core.data_preparation import contract_conformance as cc
+    from core.data_preparation.process_kit_instances import pinned_dataset_contract
+    from core.enterprise_context.process_schema import ProcessError
+    instance = conn.execute("SELECT * FROM kit_instances WHERE instance_id=?", (row["instance_id"],)).fetchone()
+    try:
+        contract = pinned_dataset_contract(conn, dict(instance), row["dataset_contract_key"]) if instance else None
+        if contract is None:
+            raise auth.CertificationError(
+                "CONTRACT_NOT_PINNED",
+                "설치가 고정한 데이터셋 계약이 없습니다 — 계약을 싣는 업무 팩으로 설치한 데이터만 실적 인증을 할 수 있습니다.")
+        issues = cc.inspect(contract, *cc.sealed_table(row))
+    except (ProcessError, cc.ContractShapeError) as exc:
+        raise auth.CertificationError("CONTRACT_UNAVAILABLE", "고정된 데이터셋 계약을 확인하지 못했습니다.", 503) from exc
+    if issues:
+        parts = []
+        for code, label in _ISSUE_LABELS.items():
+            found = [i for i in issues if i["code"] == code]
+            if not found:
+                continue
+            if code == "MISSING_FIELD":
+                names = found[0]["fields"]
+                parts.append(f"{label} {len(names)}개({', '.join(names[:10])}{' …' if len(names) > 10 else ''})")
+            else:
+                lines = [str(i["line"]) for i in found]
+                parts.append(f"{label} {len(found)}행(줄 {', '.join(lines[:10])}{' …' if len(lines) > 10 else ''})")
+        error = auth.CertificationError(
+            "CONTRACT_CONFORMANCE_FAILED",
+            f"판이 데이터셋 계약과 맞지 않습니다 — {'; '.join(parts)}. 원천을 고쳐 새 Snapshot 으로 다시 올리십시오.", 422)
+        error.issues = issues
+        raise error
+    return auth.digest(contract)
+
+
 def _candidate(conn: Any, row: dict, *, use_kind: str, period_from: str, period_to: str,
                new_revision: bool = False) -> tuple[dict, dict, dict | None]:
     from core import actual_certification_policy as acp
@@ -111,6 +158,7 @@ def _candidate(conn: Any, row: dict, *, use_kind: str, period_from: str, period_
     head = _head(conn, row["snapshot_id"])
     if head and head["payload"]["context_root_id"] != root:
         raise auth.CertificationError("SNAPSHOT_NOT_FOUND", "데이터 Snapshot 을 찾을 수 없습니다.", 404)
+    contract_digest = _conforming_contract(conn, row)
     revision = (head["revision"] + int(new_revision)) if head else 1
     payload = {k: row[k] for k in ("snapshot_id", "checksum", "binding_id", "instance_id", "dataset_contract_key",
                                    "tenant_id", "entity_mode", "scope_node_id", "data_kind")}
@@ -118,7 +166,8 @@ def _candidate(conn: Any, row: dict, *, use_kind: str, period_from: str, period_
                    owner_dept_id=owner["owner_dept_id"], ownership_binding_id=owner["binding_id"],
                    ownership_digest=owner["fingerprint"], signing_policy_id=policy["policy_id"],
                    signing_policy_revision=policy["revision"], signing_policy_digest=policy["digest"],
-                   required=policy["document"]["required_reviews"][use], revision=revision)
+                   required=policy["document"]["required_reviews"][use], revision=revision,
+                   dataset_contract_digest=contract_digest)
     # checksum뿐 아니라 대사/프로파일과 원천 결속 변경도 서명 대상 변경이다.
     binding = conn.execute("SELECT * FROM source_bindings WHERE binding_id=?", (row["binding_id"],)).fetchone()
     payload["source_digest"] = auth.digest(dict(binding))

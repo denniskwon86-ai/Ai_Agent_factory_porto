@@ -6,8 +6,8 @@ from types import SimpleNamespace
 import pytest
 
 from tests.test_b3_kit_contract_v2 import (kit, installation, workspace, enforced_org,  # noqa: F401
-    draft, approve, metadata_certified, database, hold)
-from tests import org_seed as org
+    draft, approve, sample_certified, database, hold)
+from tests import kit_samples, org_seed as org
 
 
 @pytest.fixture
@@ -62,7 +62,8 @@ def test_later_certified_snapshot_changes_neither_consumed_data_nor_proof_finger
     monkeypatch.setattr("core.data_preparation.store.data_preparation_store", w["store"])
     before = gate.data_fingerprint(w["rid"], w["plane"], contract=w["contract"])
     assert before not in (gate.UNREADABLE, gate.NO_DATA)
-    newer = metadata_certified(w, "INV-01", existing_binding=w["data"]["INV-01"]["binding"], column="new_column")
+    newer = sample_certified(w, "INV-01", existing_binding=w["data"]["INV-01"]["binding"],
+                             offset=kit_samples.SAMPLE_ROWS, extra={"new_column": 1})
     monkeypatch.setattr(w["store"], "list_snapshots", lambda *a, **k: pytest.fail("최신판 열거 금지"))
     assert resolve(w)[1][0]["snapshot_id"] != newer["snapshot_id"]
     assert gate.data_fingerprint(w["rid"], w["plane"], contract=w["contract"]) == before

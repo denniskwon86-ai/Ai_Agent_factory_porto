@@ -9,7 +9,7 @@ from core.data_preparation import certification_authority as ca, certification_s
 from core.data_preparation import models as m, ownership_binding as ob, snapshot_service as svc
 from core.data_preparation.store import DataPreparationStore
 from core.org_directory import org_directory
-from tests import org_seed as org
+from tests import kit_samples, org_seed as org
 
 EVIDENCE = "합성 시험 ERP 마감본 2026/08 총계 대사 일치"
 
@@ -22,18 +22,18 @@ def company(tmp_path, monkeypatch, enforced_org):
     store = DataPreparationStore(str(tmp_path / "subjects.db"))
     context = dict(tenant_id="tenant_default", entity_mode="REAL", scope_node_id=org.NODES[org.DEPT_A])
     root = org.NODES[org.DEPT_ROOT]
-    store.upsert_kit_version(kit_id="TEST", version="1", name="B0 합성 인증 시험", source_path="test",
-                             fingerprint_value="test-fp", profile={}, mode=m.DATA_KIND_DEMO)
-    inst = store.create_instance(kit_id="TEST", version="1", kit_fingerprint="test-fp", **context)
+    #: ★ [2026-09-25] 인증은 설치가 고정한 데이터셋 계약과 봉인 원문을 대조한다. 그래서 등록부
+    #:   키트·`a` 한 칸 RAW 대신 계약을 싣는 팩(1.2.0)을 실제로 고정하고 FIN-03 정본 샘플을 올린다.
+    inst = kit_samples.pinned_instance(store, context=context, context_root_id=root, actor=org.ADMIN,
+                                       operation_id="b0-company-install")
     source = store.create_binding(instance_id=inst["instance_id"], dataset_contract_key="FIN-03",
                                    provider=m.PROVIDER_FILE_SNAPSHOT, config={}, **context)
-    snap = svc.ingest(store, binding=source, payload=b"a\n1\n", file_name="test.csv", workspace_root=str(tmp_path),
-                      created_by=org.MANAGER_A, data_kind=m.DATA_KIND_REAL)
+    snap, parsed = kit_samples.ingest_sample(store, source, "FIN-03", context, created_by=org.MANAGER_A)
     sid = snap["snapshot_id"]
-    rows = [{"a": "1"}]
-    svc.profile(store, sid, rows, ["a"])
+    rows = parsed.rows
+    svc.profile(store, sid, rows, parsed.columns)
     svc.standardize(store, sid, rows)
-    svc.reconcile(store, sid, rows, {"row_count": 1})
+    svc.reconcile(store, sid, rows, {"row_count": len(rows)})
     owner_args = dict(**context, dataset_contract_key="FIN-03", owner_dept_id=org.DEPT_A,
                       evidence_ref="test-only-company-owner-approval")
     approved = ob.approve(**owner_args, actor_id=org.ADMIN)
@@ -168,14 +168,29 @@ def test_changed_ownership_is_stale(company):
     assert exc.value.reason_code == "REVIEW_STALE"
 
 
-def test_expected_digest_rejects_changed_raw_checksum(company):
+@pytest.mark.parametrize("change,reason", [("sealed_original", "SUBJECT_CONFLICT"),
+                                           ("checksum_only", "RAW_CHECKSUM_MISMATCH")])
+def test_expected_digest_rejects_changed_raw_checksum(company, change, reason):
+    """확인한 뒤 원문이 바뀌면 서명하지 않는다.
+
+    [2026-09-25] 인증이 봉인 원문을 계약과 대조하게 되면서 두 경우가 갈린다.
+    - 원문과 기록이 **함께** 바뀜(정본 형식은 지킴) → 관문은 통과, 서명 대상 지문이 달라 `SUBJECT_CONFLICT`.
+    - 기록만 바뀜 → 원문과 어긋나 그보다 먼저 `RAW_CHECKSUM_MISMATCH`."""
+    import hashlib
+    from pathlib import Path
     policy(company)
     req = request(company)
+    checksum = "changed"
+    if change == "sealed_original":
+        columns, table = kit_samples.sample_table("FIN-03", company["context"], offset=kit_samples.SAMPLE_ROWS)
+        payload = kit_samples.to_csv(columns, table)
+        Path(company["store"].get_snapshot(company["sid"])["raw_path"]).write_bytes(payload)
+        checksum = hashlib.sha256(payload).hexdigest()
     with company["store"].transaction() as conn:
-        conn.execute("UPDATE dataset_snapshots SET checksum='changed' WHERE snapshot_id=?", (company["sid"],))
+        conn.execute("UPDATE dataset_snapshots SET checksum=? WHERE snapshot_id=?", (checksum, company["sid"]))
     with pytest.raises(ca.CertificationError) as exc:
         sign(company, req)
-    assert exc.value.reason_code == "SUBJECT_CONFLICT"
+    assert exc.value.reason_code == reason
     assert svc.actual_certifications(company["store"], company["sid"]) == []
 
 

@@ -47,9 +47,12 @@ def source_digest():
     """실행 중 소스 교체도 거부한다. 경로/본문만 읽고 모듈을 실행하지 않는다."""
     paths = list((_ROOT / "core").rglob("*.py")) + list((_ROOT / "nodes").rglob("*.py"))
     paths += list((_ROOT / "process_packs").rglob("*.json"))
+    #: [2026-09-25] 인증 판은 키트 정본 샘플에서 온다(`tests/kit_samples.py`).
+    kit = _ROOT / "starter_kits" / "KIT-MFG-NONFERROUS-PROCUREMENT" / "1.0.0"
+    paths += list((kit / "contracts").glob("*.json")) + list((kit / "samples" / "quick").glob("*.csv"))
     paths += [_ROOT / "config.py", _ROOT / "state_models.py"]
     paths += [_ROOT / "tests" / name for name in (
-        "b3_kit_seed.py", "test_b3_kit_contract_v2.py", "test_b3_seed_isolation.py",
+        "b3_kit_seed.py", "kit_samples.py", "test_b3_kit_contract_v2.py", "test_b3_seed_isolation.py",
         "test_b2_installation.py", "test_b1_process_configuration.py", "org_seed.py",
         "usage_hold_test_plugin.py", "test_b3_process_context.py")]
     digest = hashlib.sha256()
