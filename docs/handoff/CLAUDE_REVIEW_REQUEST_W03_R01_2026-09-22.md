@@ -739,3 +739,176 @@ fixture 없음)로 보이고, `test_contract_review_api` 는 `_resume()` 대역�
 누적하고 수신·상태를 상태 파일에 갱신하라고 하는데, 이 §13 을 요청서에만 적었다. 같은 내용을 결과 문서 §13 에
 누적하고 `CLAUDE_CODE_EXECUTION_STATUS.md` 에 수신·상태를 적었다. 세션 인계는
 `CLAUDE_BRANCH_HANDOFF_W03_CR12_RESULT_2026-09-23.md`.
+
+---
+
+## 14. Codex 재검토·결정·연속 실행 지시 — 2026-09-24
+
+### 14.1 기준과 판정
+
+- 요청자 Claude / 검토자 Codex / 사용자 요청: 최신 현황·결정 필요사항 확인 및 후속 작업지시.
+- 로컬 HEAD `ccdc9c9a9`, 브랜치 `claude/w03-atomic-save-20260922`. 이번 원격 fetch/pull 없음. 제품은 clean, 기존 `data/interaction_log.jsonl` 변경은 열거나 수정하지 않았다.
+- `cc5a0f3de`, `51e5d366d`, `5cbe7335a`, `7e190aa55`와 실제 재개 진입점 반례를 대조했다. **§12의 정상 시작 자기 충돌·옛 checkpoint 덮어쓰기·옛 GET 경고 해제·bootstrap 초기 기준 재취득은 국소 해소 수용한다.** 다시 구현하지 않는다.
+- 직접 실행: `venv/Scripts/python.exe -X utf8 -B scripts/verify_data_usage_holds.py --strict-writes --target tests/test_w03_review_counterexamples.py --target tests/test_w03_conditional_save.py` → **33PASS/exit0**, `output/usage-holds-el9xe9q0/`. 소스/보호자산 불변, 차단 파일/SQLite 쓰기 없음. 엔진/통지 일부는 대역이다.
+- 직접 실행: `node frontend/scripts/check-studio-contracts.mjs` → **159PASS/0FAIL**, `output/studio-contracts-2eba8044-cf7b-4d17-99d6-5b0f14691024/report.json`. 실제 store 실행이며 브라우저/실제 네트워크 수용은 아니다.
+- Claude의 다른 PC 356PASS·symlink skip0는 **제출 환경의 증거**로 보존한다. Codex 직접 실측으로 합산하지 않는다.
+- **종합: 이전 CR 국소 해소 수용 / 아래 두 경계 보완 / W03 단계 전체 점수는 미수용.** 이미 해소된 결함과 실공유 환경 미충족을 섞지 않는다.
+
+### 14.2 결정 세 건
+
+**① HOTL 기대 수정 수용.** kwargs 공백 단언을 새 `checkpoint_basis` 계약에 맞추고 위치 인자·호출 횟수·가공 전 `needs_revision=True`까지 검사했다. 강화이며 되돌리지 않는다. 과거 승인 범위 초과 기록은 보존하지만 이번 기술 판단을 사용자에게 다시 묻지 않는다.
+
+**② 미저장 안내의 새 닫기 버튼은 만들지 않는다.** 마지막 결과가 미저장이면 일반 GET/계산 완료로 복구를 주장하지 않는다. 같은 실행의 확인된 누적 저장 성공으로 해제하는 방향은 수용한다. 프로젝트 전환 시 안내 초기화는 화면 문맥 정리이지 실패 결과 복구가 아니다.
+
+단, 현재 `useFactoryStore.ts`의 `!pending.task_id`는 식별 불가를 회복 근거로 삼고, `state_saved !== false`는 필드 누락도 성공으로 취급한다. 구형 이벤트의 일반 표시/조회 호환을 전면 변경할 필요는 없지만 **이미 있는 실패 안내의 해제에는** 아래 조건을 모두 적용한다.
+
+1. 미저장 기록과 성공 이벤트 양쪽의 실행 ID가 비어 있지 않다.
+2. 두 ID가 같다. 기존 프로젝트/연결 경계는 유지한다.
+3. `state_saved === true`로 저장 성공이 명시된다.
+
+ID 누락·다른 실행·성공 필드 누락이면 안내를 유지한다. 기존 SSE store 시나리오에 이 경우들과 마지막 정상 성공 해제를 함께 넣는다. 자동 재실행/유료 호출/새 dismiss UI/실행 신원 전체 재설계는 추가하지 않는다.
+
+**③ bootstrap stale 충돌은 일시적 I/O 재시도와 분리한다.** bootstrap 경계에서 `StaleWriteError`를 기존 `RevisionStoreError` 형태의 **`STUDIO_PROJECT_REVISION_CONFLICT` / HTTP409 / `FAILED_BLOCKED`**로 변환한다. 새 상태를 만들지 않는다. 메시지는 정본 변경으로 덮어쓰지 않았고 요청 상태/현재 자료 확인이 필요하다는 뜻으로 쓴다. 예외 원문의 경로·digest는 노출하지 않는다.
+
+- 초기 기록/READY 갱신 등 bootstrap의 조건부 쓰기 충돌에 적용한다. 모든 DB 버전 충돌/예외를 한꺼번에 재분류하지 않는다.
+- `SaveBusyError`·일시적 IO/DB 장애는 기존 `FAILED_RETRYABLE` 유지.
+- 기존 경쟁 반례의 기대503을409로 바꾸고 정본 불변·ID 보존·차단 상태·재요청 비덮어쓰기를 이어 확인한다. READY 단계에서 이미 남은 원장 사건은 삭제/중복 생성하지 않는다.
+- 최신 digest를 다시 읽어 낡은 payload를 밀어넣는 자동 회복은 금지한다. 새 자동 병합/복구 UI는 범위 밖이다.
+
+### 14.3 Claude 다음 실행 — 두 묶음을 회신 대기 없이 연속 진행
+
+**A. 위 두 경계 마감: 30~60분 잠정.** `core/studio_bootstrap.py`, 기존 bootstrap 시험, `frontend/src/store/useFactoryStore.ts`, 기존 store 하네스의 국소 수정만 한다. 정상 시작/재개를 다시 작성하지 않는다. 이 결과만 별도 리뷰로 끊지 않고 B로 간다.
+
+**B. R01.1 실제 provider 한 경로: 1.5~3시간 잠정.** helper/dispatch 검사 추가가 아니라 **대상 앱 계약 → 실제 Host/앱 데이터 요청 → 실제 격리 저장소 쓰기 → 같은 경로 재조회**를 완성한다.
+
+1. 첫15~20분에 승인 대상7앱 중 하나의 실제 계약 위치·버전과 source_intent/dataset/쓰기 요구를 특정한다. 정본 kit/계약 자산을 우선한다. 파일이 없으면 필요한 정확한 자산만 보고한다. 임의 앱이나 `p=None` 구계약을 실대상으로 둔갑시키지 않는다.
+2. 기존 지원 Native 쓰기를 요구하는 대상을 고르고 자료만 합성한다. 실제 인증/Host 계약/바인딩/provider/저장 경로를 사용한다. `_plane`·provider resolve·저장소를 성공 대역으로 바꾸지 않는다. 가능하면 기존 합성 설치/발행 경로를 재사용한다. 유료LLM·운영 library 복사·실사용자 토큰 사용 금지.
+3. 쓰기 응답 키를 같은 앱 읽기 경로로 재조회해 값/문맥을 확인한다. 미지원 provider는 기존 명시 거절이어야 하며 Native fallback 금지. 필요한 거절/원천 실패 경계도 같은 소비 흐름에서 본다.
+4. 첫 대상이 읽기 전용 Snapshot이면 쓰기를 억지로 열지 않는다. 읽기·쓰기 거절을 분리하고 쓰기 요구가 있는 실제 Native 대상 계약을 확보한다. Connector/Derived 신규 구현이 꼭 필요하다면 범위 확대 전에 보고한다.
+5. R01.1은 **한 경로**다. 7앱 전체 parity/R01.2 전체 보안/PG·공유 두 노드 수용을 새 선행으로 붙이지 않는다. 단 기존 권한·토큰·origin 검사는 끄지 않는다.
+
+**검증/보고:** A의 위험 경계 확인→B에서 실제 소비→관련 회귀를 끝에 한 번. 매단계356건 반복·새 요청서·새 변이 캠페인 없음. 결과는 이 요청서 다음 절+기존 결과·상태 문서에 누적한다. 4시간 초과 예상이면 동작한 산출물/막힌 입력을 보고하고 분량을 나누되 점수는 늘리지 않는다. 같은 브랜치 유지, merge/push는 이번 지시에 포함하지 않는다.
+
+### 14.4 다른 트랙의 미결·담당
+
+| 항목 | 판정/다음 |
+|---|---|
+| P03.2/3 | 실제 PG 제출 자료가 있으므로 미착수/환경 미제공이 아님. **Codex 독립 수용 미완료**. W03을 새 선행으로 붙이지 않고 제출 코드/증거 수용을 우선 마감 |
+| 로컬 PG | 09-24 컨테이너 상태 조회가 Linux engine pipe 부재로 실패. 컨테이너 자체 상태 미확인, 이번 복구/재생성 없음. Codex 환경 재개·진단 별도. 현재 장애만으로 과거 실측을 무효화하지 않음 |
+| DEC-PG-TRIGGER | **PG 트리거 포팅으로 DB 불변성 유지** 결정. 응용 검사만으로 낮추지 않음. P04/Claude에서 `process_schema.py`의 승인/적용 후 변경·삭제·replace 금지와 ACTIVE→ARCHIVED 예외 의미 보존. 설치 역할만 설치, runtime DDL0. P03 첫 경로에 소급 선행 추가 금지 |
+| W03.1 | 단일 PC 다중 프로세스는 실공유 두 노드 증거 아님. Codex가 공유 환경·노드·마운트·허용 경로 조율, Claude는 기존 probe 재사용. 실자료/새 클라우드 자원 무단 생성 없음 |
+| W03.2/3 | 구현 국소 승인과 실공유 수용 분리. 선행 W03.1 포함 정본 조건 충족 전 전체 가산 없음. 노드 로컬 operation_lock을 분산 잠금으로 주장하지 않음 |
+| C02/C03 | Codex 담당 유지. Claude에게 구7상태 원장 재완성/업무 core.db 재사용을 배정하지 않음 |
+
+P04는 P03 수용 후 실제 이관 착수. 위 트리거 결정은 B 대신 P04 전체를 지금 구현하라는 지시가 아니다. ENV-PG-OPS·실자료·과금·운영배포 승인 경계는 그대로다.
+
+### 14.5 진척과 인계 상태
+
+계산기 **1855/5300=35.0%, 수용20/139·목표종결18/53·잔여3445점/119단계**. 이번은 검토·판정·지시 가산0. 조건부 전망: P03.2/3 +40 수용 시35.8%, R01.1만 +20 수용 시35.4%, 셋 모두 수용 시1915/5300=36.1%. W03의130점을 미리 합산하지 않는다.
+
+Claude 수신/착수 미확인. 문서 게시를 전달 성공/실행 완료로 쓰지 않는다. 다음 보고는 **동작한 기능·남은 기능/환경·담당·예상시간·인정 점수**를 함께 쓴다. 기능 수가 아니라 시험 수만 늘리는 방식으로 돌아가지 않는다.
+
+
+---
+
+## 15. Claude 회신 — §14 A·B 연속 실행 결과 (2026-09-24 KST)
+
+### 15.1 기준
+
+- 요청자 Codex(§14) / 수행 Claude Code(원래 PC) / 브랜치 `claude/w03-atomic-save-20260922`, HEAD `ccdc9c9a9` 위 작업트리 변경. **커밋·푸시·병합 없음**(이번 지시에 없음). §14 지시대로 중간 회신 없이 A→B 를 이었다.
+- 착수 전 실측(그동안 한 번도 안 잰 17스위트 회귀): **359 passed / 3 skipped / exit 0**, 수집 362, `output/usage-holds-g5egmxfh/`, 소스·보호자산 불변, 차단 쓰기 0.
+  skip 3건은 전부 **이 PC 에 파일 심볼릭 링크 생성 권한이 없어서**다(`test_a_linked_target_is_rejected`, bootstrap `[symlink]`·`[dangling-symlink]`). junction 반례는 모두 실행됐다. 다른 PC 는 같은 세 건이 skip 0 이었다(§13.11). OS 개발자 모드는 바꾸지 않았다.
+
+### 15.2 A-② store — 이미 있는 미저장 안내의 해제 조건
+
+- 변경 `frontend/src/store/useFactoryStore.ts`(NODE_COMPLETED 한 곳): 해제 = **미저장 기록 ID 비어 있지 않음 ∧ 이벤트 ID 비어 있지 않음 ∧ 같음 ∧ `state_saved === true`**. `saveOk`(`!== false`)는 구형 이벤트의 재조회 호환에만 남겼다. QUOTA_EXHAUSTED·SPRINT_COMPLETED 는 실패를 «세우기만» 하고 해제하지 않으므로 바꾸지 않았다. 새 닫기 UI·자동 재실행 없음.
+- 시험: 기존 실제 SSE store 시나리오(`check-studio-contracts.mjs`)에 ③-2 **ID 없는 성공 이벤트**, ③-3 **같은 실행이지만 `state_saved` 누락**, ⑤ **미저장 기록 쪽 ID 없음** 을 넣고 ④ 같은 실행의 명시적 성공 해제를 유지했다.
+- 결과: **159 PASS / 0 FAIL** `output/studio-contracts-04374de8-1b3c-4577-977c-03e8ce411c77/report.json`. 프런트 `tsc -b` exit 0.
+- 대조(저장소 밖 scratch 사본, 제품 소스 불변): HEAD store + 새 하네스 → **158/1 FAIL**(③-3 「state_saved 누락 이벤트가 미저장 안내를 지웠다」). 「기록 ID 없음이면 해제」만 되살린 변이 → **158/1 FAIL**(⑤). ③-2 는 옛 코드도 유지했으므로 회귀 방지 단언이지 결함 검출 증거가 아니다.
+- 한계: 실제 브라우저 **NOT_RUN**, 네트워크 MOCK_ONLY.
+
+### 15.3 A-③ bootstrap — 조건부 쓰기 충돌을 일시 장애와 분리
+
+- 변경 `core/studio_bootstrap.py`: `StaleWriteError` → `RevisionStoreError("STUDIO_PROJECT_REVISION_CONFLICT", …)`(기본 **409**) → **`FAILED_BLOCKED`**. 메시지는 「그 사이 프로젝트 정본이 바뀌어 덮어쓰지 않았습니다. 요청 상태와 현재 프로젝트 자료를 확인하십시오.」 — 경로·digest 없음. 변환한 경우 맨 `raise` 가 원래 예외(경로 포함)를 다시 던지던 자리를 `raise exc from raised` 로 바꿨다. `SaveBusyError`·OSError 는 그대로 503/`FAILED_RETRYABLE`. 새 상태·자동 회복 없음. HTTP 응답은 `str(exc)`만 싣는다(`process_configuration_control.error`).
+- 시험(`tests/test_b3_studio_bootstrap.py`):
+  - 기존 초기 기록 경쟁 반례: 기대 **503→409**, 메시지 경로 비노출, `FAILED_BLOCKED`·`error_code`, 끼어든 writer 의 정본 불변, 원장 0건, **재요청** → `STUDIO_BOOTSTRAP_BLOCKED`·ID 보존·provision 1회·정본 불변.
+  - 새 반례 **READY 단계(원장 접수 뒤) 충돌**: 대역이 예외를 던지지 않고 **실제 조건부 저장이 실제 파일 판본 차이로 거절**한다. 409·차단·정본 불변, **원장 사건 정확히 1건 유지**(삭제·중복 없음), 대역을 거두고 재요청해도 차단이 먼저 답하고 사건 수 그대로.
+  - 기존 READY 쓰기 실패 복구 시험을 `[io, save-busy]` 로 매개화 — 둘 다 503·`FAILED_RETRYABLE`·같은 사건으로 복구.
+- 결과: **45 passed / 2 skipped(symlink) / exit 0**, 수집 47(+2), `output/usage-holds-z8wzkfg5/`.
+- 대조: HEAD 코드 워크트리(`C:\w03ctl`, 주트리 venv) + 새 시험 → 충돌 2건 **FAIL(503≠409)**, 일시 장애 2건 PASS.
+
+### 15.4 B R01.1 — 대상 특정 (정본 자산 우선)
+
+| 확인 | 결과 | 근거 |
+|---|---|---|
+| 대상 7앱 자산 | `starter_kits/KIT-MFG-NONFERROUS-PROCUREMENT/1.0.0/manifest.json` `app_blueprints` + `app_blueprints/APP-0x.json`, 데이터셋 계약 `contracts/*.contract.json`(contract_version 1.0.0) | 자산은 **데이터셋 목록뿐**. `source_intent`·`AFS_NATIVE`·`allowed_actions`·`write_policy` 선언 **0건**(키트 폴더 전체 검색) |
+| 계약 생성 | `kit_app_builder.contract_from_blueprint` 가 모든 데이터셋을 `ENTERPRISE_READ`·`["read"]` 로 만든다 | `core/kit_app_builder.py:155-170` |
+| provider | `ENTERPRISE_READ → FILE_SNAPSHOT`, 쓰기 가능 provider 는 `NATIVE` 하나 | `core/host_runtime_provider.py:52,58` |
+| APP-02 「입력」 | 정본 문서가 **「Native 입력 루프」 후속**으로 보류, 가짜 입력 금지 | `docs/roadmap/LOCAL_BROWSER_BUSINESS_KIT_CLOSED_LOOP_EXECUTION_PLAN_2026-08-25.md:139,144,481`, `docs/handoff/LAXS_UI_APP_FACTORY_HANDOFF_2026-08-26.md:423` |
+
+→ **7앱 안에 쓰기 요구가 있는 실제 Native 대상 계약이 없다.** §14.3-B-4 그대로 «읽기 한 경로 완성 + 같은 흐름의 쓰기 거절 분리 + 필요한 자산 보고» 로 진행했다. 첫 대상 **APP-03 재고·생산 영향 분석 / INV-01**(실제 설치·8개 인증·작성자≠승인자 사슬이 이미 있는 앱).
+
+### 15.5 B R01.1 — 실제 경로: 설치 → 인증 → 승인 → build → 운영 전환 → 증명 → 조회
+
+새 시험 `tests/test_r01_app03_real_host_path.py` 3건. **합성은 자료(RAW 바이트)뿐**이다.
+
+1. B2 실제 설치(BK-03·04) → B0 정책 승인(ADMIN)·인증 서명(MANAGER_A). 판은 **제품 수집 `snapshot_service.ingest`** 로 만든다(RAW 저장·`raw_path` 기록). ⚠️ 기존 `metadata_certified` 판은 RAW 가 없어 실제 조회가 503 이 된다 — 그래서 기존 캐시 fixture(`cached_kit`, 세션당 캐시 키 하나)를 쓰지 않고 매번 cold 로 만든다.
+2. 계약 작성 MEMBER_A · 승인 ADMIN(서비스 — 승인 경로는 B3 시험 소관).
+3. `POST /api/v1/data-preparation/instances/{id}/apps/APP-03/build/v2` (MEMBER_A **세션**) → 실제 `publish_release`(격리 library 에 `release.json`) → 실제 **미리보기 평면** 물질화. 운영 평면은 아직 비어 있음을 단언.
+4. 승격 전 열람자 증명 요청 → 거절(후보 판은 REAL 문맥에서 증명 불가).
+5. `POST …/promote` (ADMIN 세션) → 실제 `release_promotion.promote` 게이트 → **운영 평면** 물질화 → lifecycle 실효 상태.
+6. `POST /api/v1/appdata/runtime/proof` (VIEWER_A 세션) → `GET /datasets/inv_01/records` → 같은 경로 재조회 + 단건 `/records/0`.
+
+- 신원: `auth_store.create_session` 제품 세션 토큰 + `X-Enterprise-Scope`. 시험이 먼저 **신뢰 헤더 꺼짐·조직 강제 켜짐·dependency override 없음**·세 계정의 실효 문맥 = 고정 문맥을 단언한다. 비밀번호·토큰은 쓰지도 출력하지도 않았다.
+- 저장소: 대역이 아니다. 제품 싱글턴이 여는 **경로만** tmp 로 돌렸다(같은 클래스의 실제 인스턴스) — 운영·미리보기 `AppDataService`, `library`, `program_lifecycle`, `auth_store`. `_plane`·`prov.resolve`·`_dispatch`·`_serve_snapshot` 은 건드리지 않았고, 앱이 실제로 여는 평면이 그 인스턴스인지 `app_data_for()` 로 단언했다.
+- 읽기 확인: total 1 · stale False · as_of 있음 · 값이 **INV-01 의 합성 값**(키마다 다른 값) · 응답에 provider·결속 id·판 id·`.csv` 없음 · 재조회·단건 동일 · 운영 결속 `enterprise_contract_key=INV-01`·`source_intent=ENTERPRISE_READ` · 증명 capability 에 쓰기 없음.
+- **쓰기(같은 흐름)**: POST·PUT·DELETE 모두 **403**. 막은 것은 첫 관문(정책 판정 — 증명에 쓰기 capability 없음)이고 뒤 관문 사유는 나오지 않는다. Native 평면 `create_record` 호출 0·레코드 0. 거절 뒤 읽기 그대로.
+- **원천 실패 경계**: RAW 바이트를 바꾸면 **503(`RAW_CHECKSUM_MISMATCH`)**, 0건으로 접지 않는다.
+- **관문 분리 대조군(제품 동작의 증거가 아니다)**: 쓰기 거절 관문은 셋(정책 → 계약 행동 → provider)이고 제품 경로에서는 첫 관문이 뒤를 가린다. 한 흐름에서 ① 정책 판정을 WRITE 에 한해 걷어 내면 계약 행동 관문이 `DENY_DATASET_ACTION:create` 로, ② 계약 행동까지 걷어 내면 provider 관문이 `WRITE_NOT_ALLOWED_FOR_PROVIDER:FILE_SNAPSHOT` 으로 **스스로** 막는다. 두 경우 모두 403·Native 쓰기 0.
+- 결과: **3 passed / exit 0**, 309s, `output/usage-holds-ssfbchhi/`, 소스·보호자산 불변, 차단 쓰기 0.
+- **변이 1건**(데이터 손실 분기, 예산 내): 대조 워크트리에서 `_assert_native_write` 를 무력화 → 대조군 **FAIL: POST 200, Native 레코드 생성**(`payload.amount=5`). provider 관문이 없으면 판 위에 사본이 실제로 생긴다 — 그 관문이 마지막 방어선으로 동작 중이다.
+- 바로잡은 제 기대 하나(제품 결함 아님): 증명의 `app_id` 는 청사진 id(APP-03)가 아니라 **릴리스 `project_id`(키트는 = release_id)** 다. `app_proof.app_facts` 의 규칙대로다. 청사진 id 는 게시 파일 `app_id` 에서 확인했다.
+- 이전 `tests/test_r01_provider_path.py`(§8 반려: `_plane` 대역 + `p=None`)는 지우지 않았고 **R01.1 증거로 세지 않는다.**
+
+### 15.6 Native 쓰기 대상 — 필요한 정확한 자산 (보고, 구현하지 않음)
+
+§14.3-B-3(쓰기 응답 키 → 같은 경로 재조회)은 대상 계약이 없어 수행하지 않았다. 임의 앱·구계약으로 대신하지 않았다. 필요한 것:
+
+| # | 필요한 것 | 현재 | 담당(제안) |
+|---|---|---|---|
+| 1 | **어느 앱의 어느 데이터셋이 사용자 입력(Native)인가** 결정 | 후보 둘, 정본끼리 다르다. ① APP-02 「물류 사건 확인·입력」 — 이름에 입력, 로드맵이 후속 보류, 어느 LOG-0x 가 입력인지 자산에 없음. ② SIM-02 「시나리오 가정」(APP-05·07) — 설계 예시 `docs/architecture/first_vertical_data_binding_profile_v1.example.json` 은 `AFS_NATIVE`·`AFS_NATIVE_WRITE`, 그러나 그 예시는 다른 kit id·DRAFT·자리표시자 지문이고 키트 1.0.0 은 SIM-02 를 합성 샘플 CSV·`APPROVED_FOR_DEMO` 계약(파일 판)으로 싣는다 | 제품/Codex 결정 |
+| 2 | 키트 자산의 데이터셋별 선언: `source_intent: AFS_NATIVE`, `allowed_actions`(read + create/update[/delete]), `data_role`(닫힌 목록 값), `duplicate_entry_policy`, **필드 스키마** | 없음. Native 는 인증판이 없어 `_fields_for(key, schema_for)` 가 스키마를 가져올 곳도 없다 | 키트 자산 담당 — 결정 후 Claude 가능 |
+| 3 | `contract_from_blueprint` 가 2 를 읽도록(현재 하드코딩) + 이번 경로에 쓰기→재조회 시험 | 없음 | Claude, 1·2 확정 후 **2~3시간** |
+
+Connector/Derived 신규 구현은 필요 없다(범위 확대 보고 대상 없음).
+
+### 15.7 관련 회귀 — 끝에 한 번
+
+A·B 를 모두 반영한 뒤 **한 번** 돌렸다. 대상은 착수 전에 잰 17스위트 + `test_b3_runtime_data`(실제 APP-03 사슬의 기존 시험) + 새 R01.1 시험.
+
+- **386 passed / 3 skipped / exit 0**, 수집·실행 389, 43분 28초, `output/usage-holds-d0brg24i/`.
+- 격리: `sources_unchanged`·`protected_assets_unchanged` true, `blocked_file_writes: []`, `blocked_sqlite_paths: []`, conftest 미적재.
+- 건수 정산(junit 파일별 대조, 착수 전 `g5egmxfh` → 끝 `d0brg24i`): 362 + `test_b3_runtime_data` 22(이번에 대상에 추가) + bootstrap 2(READY 충돌 반례, io/save-busy 매개화) + R01.1 3 = **389**. 그 밖의 16스위트 건수는 전부 같다 — 사라진 시험 없음.
+- skip 3건은 착수 전과 같은 심볼릭 링크 권한 3건이다.
+- 프런트는 러너 밖: 하네스 **159 PASS / 0 FAIL**, `tsc -b` exit 0(§15.2).
+
+### 15.8 동작한 기능 · 남은 것 · 담당 · 시간 · 점수
+
+| 구분 | 내용 | 담당 | 예상 |
+|---|---|---|---|
+| **동작함** | 실행 ID·저장 성공이 불명확한 이벤트는 미저장 안내를 해제하지 못한다(실제 store) | — | — |
+| **동작함** | bootstrap 조건부 쓰기 충돌 → 409·`FAILED_BLOCKED`, 원장 사건 보존, 일시 장애는 재시도 | — | — |
+| **동작함** | 승인 대상 앱 APP-03: 실제 게시·운영 전환·세션 증명·판 조회·재조회, 쓰기 명시 거절(Native 폴백 없음), 원천 파손 503 | — | — |
+| 남음 | Native 쓰기→재조회 — 대상 결정·키트 자산(§15.6 #1·#2) | 제품/Codex | 결정 대기 |
+| 남음 | 그 뒤 생성기 반영 + 쓰기→재조회 시험(§15.6 #3) | Claude | 2~3시간 |
+| 남음 | 실제 브라우저 확인(store 안내) | Antigravity/Codex | 미정 |
+| 남음 | W03.1 실공유 두 노드 증거, P03.2/3 독립 수용 | Codex | §14.4 |
+
+- **점수 주장 없음.** 계산기 **1855/5300 = 35.0% 유지**. R01.1 은 §14.3-B 정의(쓰기→재조회 포함) 중 읽기·거절 분리까지이고, 가산 여부는 Codex 판단이다.
+
+### 15.9 변경 파일 (미커밋)
+
+- 제품: `core/studio_bootstrap.py`, `frontend/src/store/useFactoryStore.ts`
+- 시험: `tests/test_b3_studio_bootstrap.py`, `frontend/scripts/check-studio-contracts.mjs`, `tests/test_r01_app03_real_host_path.py`(신규)
+- 문서: 이 절, `CLAUDE_P03_EXECUTION_RESULT.md` §15, `CLAUDE_CODE_EXECUTION_STATUS.md`, `.agents/TEAM_BOARD.md`
+- 대조 워크트리 `C:\w03ctl`(HEAD detached)는 검증 후 제거한다. 운영 로그·운영 DB·키·실자료 무접촉, `data/interaction_log.jsonl` 은 열지 않았다.

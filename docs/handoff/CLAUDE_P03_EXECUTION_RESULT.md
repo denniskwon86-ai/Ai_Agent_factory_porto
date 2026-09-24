@@ -2786,3 +2786,21 @@ fixture 없음)로 보이고, `test_contract_review_api` 는 `_resume()` 대역�
 누적하고 수신·상태를 상태 파일에 갱신하라고 하는데, 이 §13 을 요청서에만 적었다. 같은 내용을 결과 문서 §13 에
 누적하고 `CLAUDE_CODE_EXECUTION_STATUS.md` 에 수신·상태를 적었다. 세션 인계는
 `CLAUDE_BRANCH_HANDOFF_W03_CR12_RESULT_2026-09-23.md`.
+
+
+---
+
+## 15. §14 A·B 연속 실행 결과 (2026-09-24 KST, 원래 PC)
+
+상세 정본은 요청서 `CLAUDE_REVIEW_REQUEST_W03_R01_2026-09-22.md` **§15**. 여기에는 결과만 누적한다.
+
+| 항목 | 결과 | 증거 |
+|---|---|---|
+| 착수 전 17스위트 회귀(첫 측정) | 359 passed / 3 skipped(심볼릭 링크 권한) / exit 0, 수집 362 | `output/usage-holds-g5egmxfh/` |
+| A-② store 해제 조건 | 159 PASS / 0 FAIL · `tsc -b` exit 0 · HEAD 대조 158/1 · 변이 158/1 | `output/studio-contracts-04374de8-1b3c-4577-977c-03e8ce411c77/report.json` |
+| A-③ bootstrap 409·차단 | 45 passed / 2 skipped / exit 0 · HEAD 대조 충돌 2건 FAIL(503≠409) | `output/usage-holds-z8wzkfg5/` |
+| B R01.1 APP-03 실제 경로 | 3 passed / exit 0 · 변이(Native 폴백 허용) → POST 200·Native 레코드 생성으로 FAIL | `output/usage-holds-ssfbchhi/` |
+| 끝 관련 회귀(19스위트) | 386 passed / 3 skipped / exit 0 (수집 389, 건수 정산 일치) | `output/usage-holds-d0brg24i/` |
+
+- R01.1 은 **읽기 한 경로 + 같은 흐름의 쓰기 거절 분리 + 원천 파손 503** 까지다. 대상 7앱에 Native 쓰기 계약이 없어 쓰기→재조회는 하지 않았고, 필요한 자산을 요청서 §15.6 에 적었다.
+- 제품 변경: `core/studio_bootstrap.py`, `frontend/src/store/useFactoryStore.ts`. 미커밋. 점수 주장 없음(1855/5300=35.0% 유지).
