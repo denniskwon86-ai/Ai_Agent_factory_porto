@@ -1032,3 +1032,65 @@ A·B 를 모두 반영한 뒤 **한 번** 돌렸다. 대상은 착수 전에 잰
 | SIM-02 Native 쓰기→재조회 | 계약 확정 대기(변동 없음) | Codex/제품 → Claude | 2~3시간 |
 
 진척 **1855/5300 = 35.0% 유지**, 점수 주장 없음. 실제 브라우저 NOT_RUN. 커밋·푸시는 지시 대기.
+
+
+---
+
+## 18. Claude 회신 — 1.1.0 설치본 → 업그레이드 → 재인증 → 운영 조회 (2026-09-25 KST)
+
+### 18.1 받은 판정 (사용자 전달, Codex 는 문서 무변경)
+
+- 신규 실적 인증 관문 **국소 수용**. Codex 직접 49 passed, 제출 7묶음 1,146/2/0 대조 일치.
+- 확인된 공백: `_owner_proof` 에 계약 지문 검증이 없어 새 관문이 과거 인증분의 운영 사용을 막지 않는다.
+- 다음 묶음: **1.1.0 업그레이드(미리보기 → 명시 적용, 인스턴스 ID·사용자 수정·데이터·인증 이력 보존, 삭제 후 재설치·덮어쓰기 금지) → 재인증 → 운영 조회**, 그 안에서 과거 서명분의 운영 소비 제한(역사 조회와 운영 사용 구분)과 행의 조직 경계(테넌트 일치, 조직 범위는 기존 권한 계약이 허용한 범위, «모든 행 부서 동일» 같은 새 정책 금지). SIM-02 는 그 다음.
+
+### 18.2 설계와 구현
+
+| 층 | 무엇을 | 어떻게 |
+|---|---|---|
+| DP 고정 이력 | 같은 인스턴스 ID 를 새 판본에 고정 | `kit_process_instance_upgrades`(추가만 — 갱신·삭제·교체 트리거). 원 링크·인스턴스 행은 **그대로**. `pins`·`pin_for`·`current_pin` 이 사슬(순번·이전 지문·정체성·불변 키)을 검증하고 한 줄이라도 끊기면 전체를 손상(503)으로 본다. `upgrade_or_get`: 같은 작업 멱등, 검토 시점 고정 지문 CAS, 같은 키트의 **더 높은** 판본만 |
+| 소비처 | «인스턴스 = 한 번들» 등호 → «이력 소속» | `process_context._instance`, `project_data_context.process_instance`(프로젝트 봉인의 `kit_version` 은 고정 번들 판본), `studio_release_cohort._references`(저장 cohort 는 자기 판본이 이력에 있으면 유효, 새 cohort 는 현재 고정), `kit_app_contract` 저장 계약 검증, `contract_materializer.resolve_process_binding`(원 지문과 같으면 종전 그대로, 다를 때만 이력 조회), `process_installation._existing_instance`. `profile_for_instance`·`pinned_dataset_contract` 는 현재 고정 |
+| 업그레이드 saga | 미리보기 → 명시 적용 → 별도 승인 | 계획에 `upgrade_from_artifact_digest`(CAS). **미리보기는 무부작용**: from/to 판본, 유지 표준 업무 수, process_id 보존, 앱 후보 판본 갱신 수, 계약 수, 경고 `RECERTIFICATION_REQUIRED`. 설치자 재개(명시 적용) 때 DP 이력 한 줄 → ECM 초안은 **현재 승인판의 복사**(그 적용본의 원본 참조·노드 `source_ref`·앱 후보 판본만 바뀜, 사용자 수정 보존) → 작성자와 다른 승인자 승인 → APPLIED. 설치된 표준 업무 내용이 두 판 사이에서 바뀌면 자동으로 옮기지 않는다(`PROCESS_PACK_UPGRADE_REVIEW_REQUIRED`). 설치 키트 집합이 다르거나 하향·동일·다른 키트면 거절 |
+| 과거 서명 소비 제한 | 운영 사용은 현재 고정 계약으로 검증된 서명만 | `_owner_proof`(이력 모드 아님): 서명 대상의 `dataset_contract_digest` = 현재 고정 계약 지문. 고정 계약 없음 `CONTRACT_NOT_PINNED`, 다름·없음 `CERTIFICATION_RECERTIFICATION_REQUIRED`. 새 문맥에서는 차단 항목(열람·초안은 되고 GENERATE·RUN·RELEASE 는 빠짐), 고정 문맥 재검증에서는 충돌. 이력 모드(`held_history`)와 인증 이력 조회는 그대로 — `cs.read` 는 관문 사유를 `CONTRACT_BLOCKED` 상태·사유로 보여 주고 멈추지 않는다 |
+| 재인증 경로 | 서명·이력 보존, 새 판으로 다시 서명 | `snapshot_service.reissue_for_recertification` + `POST /snapshots/{id}/recertification`(업로드와 같은 권한·가시성): 인증된 판의 **봉인 원문**(지문 대조)으로 새 판, 원 판이 대사에 쓴 **원천 선언 합계** 그대로 → 프로파일·표준화·대사(`RECONCILED`). 서명은 기존 인증 경로(현재 고정 계약 관문) |
+| 행 조직 경계 | 테넌트 일치 · 범위는 판 노드와 그 하위 | `contract_conformance.inspect(..., tenant_id, scopes)` → `TENANT_MISMATCH`·`SCOPE_OUT_OF_BOUNDS`(줄 번호·필드 이름만). `scopes` 는 ECM 운영 조직 관계로 전개한 판 노드와 하위(`EcmResolver.descendants`, 기존 권한 계약이 쓰는 전개). 하위 조직 행은 그대로 받는다. ECM 장애는 `CONTRACT_UNAVAILABLE`(503) |
+
+### 18.3 시험
+
+- 신규 `tests/test_kit_pack_upgrade.py`(DP): 이력 추가·원 링크/행 불변, 계약·프로필이 현재 고정을 따름, 같은 작업 멱등·같은 대상 재고정 거절, CAS 거절, 하향 거절, 추가만(갱신·삭제·교체 트리거 3), 이력 손상 = 503, **옛 릴리스 cohort 는 이력으로 검증되고 같은 ID 재생성은 `STUDIO_RELEASE_REBUILD_AFTER_UPGRADE_UNSUPPORTED`, 새 릴리스는 1.2.0**.
+- 신규 `tests/test_kit_upgrade_recertification_e2e.py`(끝에서 끝까지, 실제 B2 saga·ECM 승인·B0 관문·Host): ① 1.1.0 실제 설치 ② 관문 이전 서명 **재현**(그 시점만 관문을 끔 — 지금 코드로는 만들 수 없는 상태) → 운영 차단(`CONTRACT_NOT_PINNED`)·열람/초안 가능·인증 이력 조회 ③ 사용자 수정(이름 변경 승인) ④ 업그레이드 미리보기(요약·경고, DP 이력·ECM head 무변경) ⑤ 설치자 재개 → DP 이력 2줄 → 별도 승인자 승인 → 같은 인스턴스 ID·같은 process_id·이름 변경 보존, 옛 서명 운영 차단(`CERTIFICATION_RECERTIFICATION_REQUIRED`) ⑥ 재인증(같은 체크섬 새 판 → 서명 → 계약 지문 봉인) → 문맥 GENERATE 허용·새 판 참조 ⑦ **앱 게시·운영 전환·세션 증명·운영 조회** — 정본 값 일치. 옛 서명은 판·서명·상태가 그대로 남고 운영 문맥의 근거가 아님.
+- 추가: 행 경계 단위 4(하위 노드 허용 포함)·관문 3(타 테넌트·형제 부서·막힌 진행 중 서명의 이력 조회).
+- R01 시험은 격리·세션 준비를 재사용 함수로 나눔(동작 변화 없음).
+
+### 18.4 회귀
+
+영향 범위 81개 파일(바꾼 12개 모듈을 쓰는 시험 전부)을 겹치지 않는 묶음으로 나눠 병렬 실행했다. **최종 코드 기준**:
+
+| 묶음 | 대상 | 결과 | 실행 루트 |
+|---|---|---|---|
+| R1 | `b3_kit_contract_v2`·`b3_kit_api`·`b3_kit_rejection`·`b3_seed_isolation` | **131 passed** | `output/usage-holds-wszw15k1/` |
+| R2 | `b3_runtime_data`·`release_readiness`·`release_cohort`·`materializer_v2`·`runtime_contract_v2`·`publish_boundary`·`contract_reconcile`·`legacy_contract_errors` | 344 passed · 1 skip · **1 실패(기존)** | `output/usage-holds-lfm89ory/` |
+| P3 | `b3_process_context`·`b2_installation(_api)`·`b2_pack_artifacts`·`verification_plan/dispatch`·`pack_dataset_contracts`·`kit_pack_upgrade` | **392 passed** · 2 skip | `output/usage-holds-4a20mlal/` |
+| R4 | B4 5·B5 6·B6 2 | **451 passed** | `output/usage-holds-8bvatsl6/` |
+| P5 | B0 인증 7·실적 인증·관문·대조기·데이터 준비 10 | 501 passed · **17 오류(환경)** | `output/usage-holds-vxso6ej3/` |
+| P6 | 스튜디오·앱·계산 등 26(아래 R7 로 다시 돈 4개 제외) | 실패·오류 **22(기존)** | `output/usage-holds-43i0p1yo/` |
+| R7 | 끝에서 끝까지 2·R01 3·`contract_materializer`·`end_to_end_canary`·`provider_dispatch`·`release_materializes_into_its_own_plane` | 78 passed · **25 실패(기존)** | `output/usage-holds-cryfzoss/` |
+
+- **새 실패 0.** 실패·오류는 전부 오늘 변경과 무관함을 대조로 증명했다: P6 의 48건(R7 로 다시 돈 4개 파일 26건 포함)은 **현재 HEAD `43ddc8baf`(오늘 변경 전)와 관문 이전 `8ebde3865` 두 대조 워크트리에서 똑같은 48건**으로 실패한다(목록 차이 0). R2 의 `test_b3_publish_boundary` 1건도 HEAD 에서 같다. R7 의 25건은 모두 그 기존 목록 안이며, 기존 1건(`canary::test_the_whole_path_runs_end_to_end`)은 이번에 통과했다.
+- 기존 실패의 성격: conftest 전용 fixture(`seeded_org`)를 격리 러너가 읽지 않음, 조직 DB 가 러너 data 에 있어 시험 tmp 격리 단언에 걸림, 공유 앱 데이터 DB 오염 등 **러너 환경과 시험 방식의 충돌**이다.
+- P5 의 17 오류(`test_snapshot_export`)는 fixture 가 경로 문자열에 `WorkSpace` 가 있으면 «운영 저장소» 로 판정하는 탓이다 — 같은 코드를 짧은 경로(`C:\w03cur`, 현재 변경분 복사)에서 돌리면 **29/29 통과**.
+- ⚠️ 경과 기록: 병렬 실행 도중 P2 결과를 보고 `contract_materializer.py` 를 고쳐 **그때 돌던 P1·P4·P7 이 무효**(`sources_unchanged: false`)가 됐다. 무효 실행은 세지 않았고, 멈춘 뒤 최종 코드로 R1·R2·R4·R7 을 다시 돌린 것이 위 기록이다. P3·P5·P6 은 그 수정 전에 끝났고, 수정한 함수(2.0 경로의 `resolve_process_binding`)를 지나는 시험은 없다 — 물질화를 지나는 P6 4개는 R7 로 다시 돌렸다.
+- 끝에서 끝까지 2건은 수정 전·후 모두 통과. 새 검사가 결함을 잡는지는 시험이 행동으로 증명한다(옛 서명 운영 차단 사유가 나와야 하고 GENERATE·RUN 이 빠져야 한다). 오늘 변이 예산(1건)은 관문 검증에 이미 썼다.
+- 대조 워크트리 3개(`C:\w03head`·`C:\w03pre`·`C:\w03cur`)는 제거했다.
+
+### 18.5 남은 것 · 결정 필요
+
+| 항목 | 내용 | 담당 | 예상 |
+|---|---|---|---|
+| 업그레이드 전 릴리스의 재생성 | 릴리스 ID 가 «인스턴스+앱» 으로 정해지고 cohort 가 ID 마다 불변이라, 업그레이드 **전에** 게시한 앱을 같은 ID 로 다시 만들 수 없다(명시 거절). 옛 릴리스는 이력으로 검증된다. 판본별 cohort 또는 릴리스 ID 규칙 결정 필요 | Codex 결정 → Claude | 결정 후 3~4시간 |
+| DP 고정 시점 | 설치와 같은 규칙으로 **명시 적용(재개) 때** DP 이력을 남기고 업무판 승인은 별도다. 승인이 반려되면 DP 이력은 남고(업무판은 1.1.0 유지) 인증은 1.2.0 계약으로 대조된다(더 엄격). 승인 뒤에만 고정하려면 승인-DP 두 단계 정합 설계가 필요 | Codex 판단 | — |
+| 적용본 목록의 판본 표시 | 목록 API(`data_preparation_control` 적용본 목록)는 인스턴스 행(설치 판본)을 보여 준다 — 현재 고정 판본 노출은 화면 계약과 함께 | Codex(UI) + Claude(API) | 1시간 |
+| 표준 업무 내용이 바뀐 업그레이드 | 이번은 앱 후보 판본 표기만 다른 경우만 자동. 내용 변경은 검토 요구로 멈춘다 | Codex 결정 | — |
+| SIM-02 Native 입력 | 다음 순서(`SCENARIO_INPUT` 역할·필드 계약 재사용, 서버가 조직·작성자·승인 통제) | Codex/제품 → Claude | 계약 확정 후 |
+
+진척 **1895/5300 = 35.8%**(Codex 가 P03.2·P03.3 +40 수용한 원장 기준), 이번 묶음 점수 주장 없음. 실제 브라우저 NOT_RUN. 커밋·푸시는 지시 대기.

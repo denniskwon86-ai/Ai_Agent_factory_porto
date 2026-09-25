@@ -1129,6 +1129,8 @@ venv/Scripts/python.exe -X utf8 -B scripts/local_pg_trial.py run installer -- ve
 
 # P03.2 · P03.3 — 실제 PostgreSQL 에서 제품 경로 소비 (Claude / 2026-09-21)
 
+> **Codex 수용 판정 / 2026-09-25:** 이 절의 실제 PostgreSQL 16.15 설치·로그인·세션·문맥 조회/쓰기·거절, 4동시 티켓 소비 1회/재소비 거절, 프로세스 재시작 대사 및 runtime DDL0 계측/DB권한 차단을 P03.2(+20)·P03.3(+20)의 출구로 수용했다. 제출 코드와 현재 커밋을 대조하고, `test_db_adapter_first_slice`·`test_db_managed_schema_first_slice`·`test_first_path_product_writes`를 격리 실행해 78PASS/exit0(`output/usage-holds-6fs4btps/`), 소스·보호자산 불변을 확인했다. 이 회신에서 실제 PG 재실행은 하지 않았다. 범위는 합성 자료의 첫 auth·ECM 경로이며, 아래 §5의 ECM 프로필/공정 설치 표 및 트리거는 P04에서 다룬다. 계산기 확인: 1895/5300=35.8%, 22/139 수용, 19/53 종결. 이후 이 문서에 남은 P03.2/3 ‘수용 대기’ 문구는 당시 이력이다.
+
 격리 로컬 PG **16.15** (`127.0.0.1:55432`, db `afs_trial_local`, schema `app`). 설치는
 `afs_installer`, 소비는 `afs_runtime`. 명령은 모두 Codex 의 launcher 를 거쳤고
 (`scripts/local_pg_trial.py run <role> -- …`), 접속 정보는 자식 환경에만 전달됐다 —
@@ -2836,3 +2838,20 @@ fixture 없음)로 보이고, `test_contract_review_api` 는 `_resume()` 대역�
 
 - 결정(사용자): 계약은 팩 1.2.0 에 싣고 설치가 고정 / 고정 계약 없으면 차단.
 - 남음: **팩 업그레이드 흐름 없음** — 기존 1.1.0 설치 환경은 실적 인증 불가(요청서 §17.6).
+
+
+---
+
+## 18. 1.1.0 설치본 → 업그레이드 → 재인증 → 운영 조회 (2026-09-25 KST, Claude)
+
+상세 정본은 요청서 **§18**.
+
+| 항목 | 결과 | 증거 |
+|---|---|---|
+| 끝에서 끝까지(1.1.0 실제 설치 → 관문 이전 서명 재현 → 운영 차단 → 사용자 수정 → 업그레이드 미리보기·적용·승인 → 재인증 → 앱 게시·운영 조회) | 2 passed | `tests/test_kit_upgrade_recertification_e2e.py`, `output/usage-holds-cryfzoss/` |
+| DP 고정 이력(추가만·CAS·하향 거절·손상 감지·옛 릴리스 cohort 유지) | 전부 통과 | `tests/test_kit_pack_upgrade.py`, `output/usage-holds-4a20mlal/` |
+| 행 조직 경계·이력 조회의 관문 사유 표시 | 전부 통과 | `output/usage-holds-vxso6ej3/` |
+| 관련 회귀 81개 파일(병렬, 최종 코드) | **새 실패 0**. 기존 실패·오류는 HEAD·관문 이전 대조에서 동일 | 요청서 §18.4 표 |
+
+- 남음(결정 필요): 업그레이드 전 게시 앱의 같은 ID 재생성(명시 거절 중), DP 고정 시점(적용 때 vs 승인 뒤), 적용본 목록의 판본 표시, 표준 업무 내용이 바뀐 업그레이드, SIM-02.
+- 진척 1895/5300=35.8%(Codex 원장), 이번 묶음 점수 주장 없음.
