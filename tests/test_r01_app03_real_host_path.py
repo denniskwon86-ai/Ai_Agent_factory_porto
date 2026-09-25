@@ -166,19 +166,14 @@ def raw_kit(installation, monkeypatch, raw_root):
     return w
 
 
-@pytest.fixture
-def host(installation, monkeypatch, tmp_path):
-    """실제 앱(`main.app`) + 제품 세션 + 격리 경로. 싱글턴은 **같은 클래스의 실제 인스턴스**로만 바꾼다."""
-    import config
+def isolate_host(monkeypatch, tmp_path):
+    """제품 싱글턴이 여는 **경로만** tmp 로 돌린다(같은 클래스의 실제 인스턴스). 설치 전에 부른다."""
     import core.app_data as app_data_module
     from core import app_preview, library_paths
     from core.app_data import AppDataService
     from core.app_data_store import AppDataStore
     from core.auth import auth_store
-    from core.org_directory import org_directory
     from core.program_lifecycle import program_lifecycle
-    from core.project_visibility import resolve_viewing_context
-    from core.scope_policy import org_enforce
 
     monkeypatch.setattr(library_paths, "_LIBRARY_DIR", str(tmp_path / "library"))
     preview = AppDataService(AppDataStore(db_path=str(tmp_path / "app_data_preview.db")))
@@ -187,10 +182,20 @@ def host(installation, monkeypatch, tmp_path):
     monkeypatch.setattr(app_data_module, "app_data_service", operational)
     monkeypatch.setattr(program_lifecycle, "db_path", str(tmp_path / "program_lifecycle.db"))
     monkeypatch.setattr(auth_store, "db_path", str(tmp_path / "auth.db"))
-    w = raw_kit(installation, monkeypatch, tmp_path / "raw")
+    return {"preview": preview, "operational": operational, "library": tmp_path / "library"}
+
+
+def host_session(w, isolated):
+    """실제 앱(`main.app`) + 제품 세션. 격리·신뢰 헤더·조직 강제·실효 문맥을 **먼저** 단언한다."""
+    import config
+    from core import app_preview
+    from core.auth import auth_store
+    from core.org_directory import org_directory
+    from core.project_visibility import resolve_viewing_context
+    from core.scope_policy import org_enforce
     #: ★ 격리가 «주장» 이 아니라 사실인지 — 앱이 실제로 여는 평면이 방금 둔 그 인스턴스인가.
-    assert app_preview.app_data_for(app_preview.AUDIENCE_OPERATIONAL) is operational
-    assert app_preview.app_data_for(app_preview.AUDIENCE_PREVIEW) is preview
+    assert app_preview.app_data_for(app_preview.AUDIENCE_OPERATIONAL) is isolated["operational"]
+    assert app_preview.app_data_for(app_preview.AUDIENCE_PREVIEW) is isolated["preview"]
     #: ★ 대조군이 진짜인지 먼저 — 개발용 신뢰 헤더가 꺼져 있고 조직 강제가 켜져 있다.
     assert getattr(config, "ORG_TRUST_HEADER", False) is False
     assert org_enforce() is True
@@ -209,8 +214,16 @@ def host(installation, monkeypatch, tmp_path):
         assert auth_store.resolve(token) == actor
         return {"X-Session-Token": token, "X-Enterprise-Scope": scope}
 
-    yield {**w, "client": client, "session": session, "preview": preview, "operational": operational,
-           "library": tmp_path / "library"}
+    return {**w, **isolated, "client": client, "session": session}
+
+
+@pytest.fixture
+def host(installation, monkeypatch, tmp_path):
+    """실제 앱(`main.app`) + 제품 세션 + 격리 경로. 싱글턴은 **같은 클래스의 실제 인스턴스**로만 바꾼다."""
+    from core.org_directory import org_directory
+    isolated = isolate_host(monkeypatch, tmp_path)
+    w = raw_kit(installation, monkeypatch, tmp_path / "raw")
+    yield host_session(w, isolated)
     org_directory._invalidate()
 
 
