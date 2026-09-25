@@ -679,7 +679,12 @@ def _assert_active_work_kit_app(instance_id: str, app_id: str) -> None:
     if not contract:
         raise HTTPException(
             status_code=409, detail="승인된 업무 앱 계약이 있어야 전사 시나리오에 저장할 수 있습니다.")
-    release_id = kb.release_id_for(instance_id, app_id)
+    try:
+        #: ★ [2026-09-25 Codex §19.2] 현재 활성 판본의 앱 릴리스(1.0 적용본은 종전 ID).
+        release_id = kb.current_release_id(store, instance_id, app_id)
+    except Exception as exc:  # noqa: BLE001 — 못 읽은 판본을 «없음» 으로 접지 않는다
+        raise HTTPException(
+            status_code=503, detail="업무 앱의 활성 판본을 확인할 수 없습니다.") from exc
     if not os.path.exists(library_paths.release_json(release_id)):
         raise HTTPException(status_code=409, detail="이 업무 앱은 아직 생성되지 않았습니다.")
     try:

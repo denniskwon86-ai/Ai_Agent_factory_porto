@@ -19,7 +19,9 @@ type World = { boundary: ProcessBoundary; registered: boolean; plans: Map<string
   operations: InstallationOperation[]; requests: Map<string, { body: string; operation: InstallationOperation }>;
   changes: ProcessChangeReview[]; approved: ResolvedProcesses | null;
   edits: Map<string, { input: string; receipt: ProcessChangeReceipt }>;
-  approvals: Map<string, { input: ProcessApprovalInput; receipt: ProcessApprovalReceipt }> };
+  approvals: Map<string, { input: ProcessApprovalInput; receipt: ProcessApprovalReceipt }>;
+  /** [2026-09-26] 승인됐지만 판본 활성화가 끊긴 업그레이드(합성). 재시도 실패 횟수를 정해 둔다. */
+  upgrade?: { changeId: string; operationId: string; failuresLeft: number } };
 const principals: Record<Role, string> = { requester: 'synthetic-requester', installer: 'synthetic-installer', approver: 'synthetic-approver' };
 const roleLabels: Record<Role, string> = { requester: '모의 요청자', installer: '모의 설치 담당자', approver: '모의 별도 승인자' };
 const clone = <T,>(value: T): T => structuredClone(value);
@@ -112,9 +114,18 @@ function createSyntheticServer() {
       const write = <T,>(action: string, body: unknown, work: () => T) => call(label(), principal, 'POST', action, body, work);
       const accessActions = () => role === 'approver' ? ['read', 'approve']
         : role === 'installer' ? ['read', 'propose', 'edit'] : ['read', 'propose'];
-      const projectOperation = (operation: InstallationOperation): InstallationOperation => ({ ...operation,
-        permitted_actions: !operation.change_id && ['AWAITING_INSTALLER', 'FAILED_RETRYABLE', 'PLANNED', 'PREPARING'].includes(operation.stage)
-          && role === 'installer' ? [operation.installer === principal ? 'resume' : 'adopt'] : [] });
+      const projectOperation = (operation: InstallationOperation): InstallationOperation => {
+        const projected: InstallationOperation = { ...operation,
+          permitted_actions: !operation.change_id && ['AWAITING_INSTALLER', 'FAILED_RETRYABLE', 'PLANNED', 'PREPARING'].includes(operation.stage)
+            && role === 'installer' ? [operation.installer === principal ? 'resume' : 'adopt'] : [] };
+        // 서버와 같게: 같은 승인 재요청 값(retry)은 활성화 대기일 때 그 승인자에게만 준다.
+        if (operation.upgrade) {
+          const { retry, ...upgrade } = operation.upgrade;
+          projected.upgrade = upgrade.activation === 'ACTIVATION_PENDING' && role === 'approver' && retry
+            ? { ...upgrade, retry } : upgrade;
+        }
+        return projected;
+      };
       const projectChange = (change: ProcessChangeReview): ProcessChangeReview => {
         const blockers = [
           ...(change.actor === principal ? ['PROCESS_DISTINCT_REVIEWER_REQUIRED'] : []),
@@ -351,6 +362,23 @@ function createSyntheticServer() {
           if (change.actor === principal) fail(403, 'PROCESS_DISTINCT_REVIEWER_REQUIRED', '자기가 작성한 초안은 승인할 수 없습니다.');
           if (role !== 'approver') fail(403, 'SYNTHETIC_PERMISSION_DENIED', '모의 별도 승인자만 승인할 수 있습니다.');
           if (!body.reason.trim()) fail(422, 'SYNTHETIC_REASON_REQUIRED', '승인 이유가 필요합니다.');
+          if (target.upgrade?.changeId === changeId) {
+            // 같은 승인 재요청만 멱등 경로다. 다른 값이면 서버처럼 멱등 충돌로 거절한다.
+            const approval = target.approvals.get(changeId)!;
+            if (JSON.stringify(approval.input) !== JSON.stringify(body)) {
+              fail(409, 'PROCESS_IDEMPOTENCY_CONFLICT', '이미 승인된 요청의 검토 내용이 다릅니다.');
+            }
+            const operation = target.operations.find((item) => item.operation_id === target.upgrade!.operationId)!;
+            if (target.upgrade.failuresLeft > 0) {
+              target.upgrade.failuresLeft--;
+              fail(503, 'PROCESS_UPGRADE_ACTIVATION_PENDING',
+                '업무판 승인은 기록됐고 새 판본 활성화는 끝나지 않았습니다. 같은 승인을 다시 요청하면 활성화를 다시 시도합니다.');
+            }
+            const activated = { ...operation.upgrade!, activation: 'ACTIVE' };
+            delete activated.retry; delete activated.activation_error;
+            operation.upgrade = activated;
+            return approval.receipt;
+          }
           const previous = target.approvals.get(changeId);
           if (previous && JSON.stringify(previous.input) === JSON.stringify(body)) return previous.receipt;
           if (scenario === 'conflict409' || change.status !== 'DRAFT'
@@ -402,6 +430,37 @@ function createSyntheticServer() {
       if (count) notify();
       return count;
     },
+    // [2026-09-26] 승인됐지만 판본 활성화가 끊긴 업그레이드 한 건(합성). 빈 선택 범위에만 넣는다.
+    seedUpgrade: (scope: Scope) => {
+      if (!canSeedPreview(scope, false)) return false;
+      const target = world(scope, false), label = `${scope}:selected`;
+      const changeId = `SYNTHETIC-upgrade-change-${label}`, operationId = `SYNTHETIC-upgrade-operation-${label}`;
+      const input: ProcessApprovalInput = { expected_head_version: 1, draft_digest: 'd'.repeat(64),
+        reason: '합성 · 데이터셋 계약을 싣는 1.2.0 업그레이드 승인' };
+      const receipt: ProcessApprovalReceipt = { change_id: changeId, configuration_id: `synthetic-config-${label}`,
+        status: 'APPLIED', profile_id: `SYNTHETIC-upgrade-profile-${label}`, head_version: 2,
+        digest: input.draft_digest, event_id: `SYNTHETIC-event-${changeId}`, audit_delivery: 'PENDING' };
+      target.approved = { boundary: clone(target.boundary), configuration_id: receipt.configuration_id,
+        head_version: 2, profile_id: receipt.profile_id, digest: receipt.digest, state: 'APPROVED',
+        payload: clone(preview), legacy_review_required: false };
+      target.changes.unshift({ change_id: changeId, configuration_id: receipt.configuration_id, base_head_version: 1,
+        draft_profile_id: receipt.profile_id, draft_digest: input.draft_digest, actor: principals.requester,
+        reason: '합성 · 1.1.0 → 1.2.0 업그레이드', status: 'APPLIED', boundary: clone(target.boundary),
+        current_head_version: 2, principal_user_id: '', permitted_actions: [], review_blockers: [],
+        operation_id: operationId, payload: clone(preview), base_payload: clone(preview) });
+      target.approvals.set(changeId, { input, receipt });
+      target.operations.unshift({ operation_id: operationId, configuration_id: receipt.configuration_id,
+        plan_digest: 'c'.repeat(64), stage: 'APPLIED', error_code: '', kit_instance_ref: 'SYNTHETIC-instance',
+        change_id: changeId, actor: principals.requester, installer: principals.installer, revision: 3,
+        applied_profile_id: receipt.profile_id, data_ready: false, apps_ready: false,
+        upgrade: { instance_id: 'SYNTHETIC-instance', from_artifact_digest: 'a'.repeat(64), to_artifact_digest: 'b'.repeat(64),
+          from_version: '1.1.0', to_version: '1.2.0', activation: 'ACTIVATION_PENDING',
+          activation_error: 'PROCESS_STORAGE_UNAVAILABLE',
+          retry: { change_id: changeId, ...input } } });
+      target.upgrade = { changeId, operationId, failuresLeft: 1 };
+      notify();
+      return true;
+    },
     subscribe: (listener: () => void) => { listeners.add(listener); return () => { listeners.delete(listener); }; },
     getSnapshot: () => revision,
     setScenario: (value: Scenario) => { scenario = value; postReadBlocked = false; notify(); },
@@ -446,6 +505,12 @@ function Fixture() {
         setScenario('normal'); server.setScenario('normal');
       }}>편집 화면 바로 체험 · 합성 승인판</button>
       <p>빈 모의 범위에서만 사용합니다. 설치·승인 절차를 검증하지 않는 화면 미리보기이며 기존 승인판·요청·기록은 덮어쓰지 않습니다.</p>
+      <button type="button" disabled={!server.canSeedPreview(scope)} onClick={() => {
+        if (!server.seedUpgrade(scope)) return;
+        setPreviewNotice(`합성 문맥 ${scope}에 «승인됐지만 판본 활성화가 끊긴 업그레이드» 한 건을 넣었습니다. 첫 재시도는 모의 503, 두 번째 재시도에서 활성화됩니다.`);
+        setRole('approver'); setVisible(true); setMount((value) => value + 1);
+        setScenario('normal'); server.setScenario('normal');
+      }}>판본 업그레이드 활성화 대기 체험 · 합성</button>
       {previewNotice && <p role="status">{previewNotice}</p>}
       <label>합성 역할 선택 · 실계정 아님 <select value={role} onChange={(event) => setRole(event.target.value as Role)}>
         <option value="requester">모의 요청자</option><option value="installer">모의 설치 담당자</option>

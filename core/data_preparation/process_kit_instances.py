@@ -107,6 +107,8 @@ def binding_for_instance(store, instance):
 #   과거 승인판·릴리스·인증이 그것을 가리킨다. 업그레이드는 `kit_process_instance_upgrades` 에
 #   **새 행을 더할 뿐**이다(갱신·삭제·교체 트리거로 막는다). 그래서 «이 인스턴스가 판본 D 에
 #   고정된 적이 있는가» 는 이력 안에 D 가 있는가로 묻고, 새로 시작하는 일은 마지막 고정을 쓴다.
+# ★ [§19.1] 이 표의 한 줄 = **승인된 활성 판본**. 승인 대기 중인 판본은 여기 없다(ECM 설치
+#   작업의 AWAITING_APPROVAL 이 대기 기록이다). 그래서 «마지막 고정» 이 곧 현재 활성 판본이다.
 # ⚠️ 이력 한 줄이라도 사슬이 끊기면(순번·이전 지문·정체성) 전체를 손상으로 본다 — 앞부분만
 #   믿고 쓰지 않는다.
 
@@ -172,9 +174,31 @@ def _version_key(version):
     return tuple(int(part) for part in str(version).split("."))
 
 
+def activation_pending(conn, instance, bundle):
+    """[2026-09-25 Codex §19.1] 승인된 업무판이 가리키는 새 판본이 **아직 활성화되지 않았는가.**
+
+    ★ 새 판본은 업무판 승인 **뒤에** 고정 이력에 들어간다. ECM 과 DP 는 다른 DB 라 둘 사이에
+      원자 커밋이 없어서, 승인 직후(또는 활성화 실패 뒤)에는 승인판이 새 판본을 가리키고
+      DP 는 아직 옛 판본이다. 그 모양(같은 키트, 이력에 없는 **더 높은** 판본)을 손상과 갈라
+      «활성화 대기» 로 알린다. ⚠️ 어느 쪽이든 소비는 막힌다 — 사유만 다르다."""
+    history = pins(conn, instance)
+    if not history or any(p["artifact_digest"] == bundle["artifact_digest"] for p in history):
+        return False
+    current = history[-1]["identity"]
+    try:
+        return (bundle["kit_id"] == current["kit_id"]
+                and _version_key(bundle["version"]) > _version_key(current["version"]))
+    except (TypeError, ValueError):
+        return False
+
+
 def upgrade_or_get(store, *, operation_id, instance_id, bundle, expected_from, actor):
     """같은 인스턴스를 **새 판본에 고정**한다(이력에 한 줄 추가). 같은 operation 은 멱등.
 
+    ★★ [2026-09-25 Codex §19.1] **업무판 승인이 커밋된 뒤에만** 부른다
+      (`process_installation.activate_approved_upgrade`). 명시 적용(설치자 재개)은 승인 대기
+      기록만 만들고 이 표에는 쓰지 않는다 — 반려·취소·승인 전에는 활성 판본이 그대로다.
+      `actor` 는 활성화를 일으킨 승인자다.
     ⚠️ 적용본을 지우거나 새로 만들지 않는다 — 인스턴스 ID·결속·판·인증 이력은 그대로다.
     ⚠️ `expected_from` 은 계획을 검토한 시점의 현재 고정이다. 그 사이 바뀌었으면 막는다(CAS).
     ⚠️ 같은 키트의 **더 높은 판본**만 받는다. 내리거나 이미 거친 판본으로 돌아가지 않는다."""

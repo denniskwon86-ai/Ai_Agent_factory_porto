@@ -396,8 +396,9 @@ class ProcessConfigurationService:
             change, head, boundary = self._change(conn, change_id, actor, context, "propose")
             _, payload = self._profile(conn, change["draft_profile_id"], head, approved=False)
             self._check_draft(change, head, payload, draft_digest, change["base_head_version"])
-            from core.enterprise_context.process_installation import validate_installation_references
-            validate_installation_references(payload, boundary, repo=self.repo, store=self.store)
+            from core.enterprise_context.process_installation import pending_upgrade, validate_installation_references
+            validate_installation_references(payload, boundary, repo=self.repo, store=self.store,
+                                             upgrade=pending_upgrade(conn, change))
             return {**self._change_result(change), "payload": payload, "review_required": "DISTINCT_PUBLISHER",
                     "ready_to_review": True, "data_ready": False, "apps_ready": False}
 
@@ -452,9 +453,10 @@ class ProcessConfigurationService:
                 blockers.append("PROCESS_HEAD_CONFLICT")
             if head["head_version"] == 0 and self._legacy(conn, boundary)[1] != change["legacy_token"]:
                 blockers.append("PROCESS_LEGACY_CONFLICT")
-            from core.enterprise_context.process_installation import validate_installation_references
+            from core.enterprise_context.process_installation import pending_upgrade, validate_installation_references
             try:
-                validate_installation_references(payload, boundary, repo=self.repo, store=self.store)
+                validate_installation_references(payload, boundary, repo=self.repo, store=self.store,
+                                                 upgrade=pending_upgrade(conn, change))
             except ProcessError as exc:
                 # 가용성/저장 형식 장애는 승인 불가 안내로 축소하지 않는다.
                 if exc.status_code not in (404, 409):
@@ -520,6 +522,16 @@ class ProcessConfigurationService:
             raise ProcessError("PROCESS_HEAD_CONFLICT", "초안의 기준 승인판과 현재 head가 다릅니다.")
 
     def approve(self, *, change_id, actor, context, expected_head_version, draft_digest, reason):
+        """승인. 업그레이드 설치의 초안이면 승인이 **커밋된 뒤** 새 판본을 활성화한다.
+
+        ★ [2026-09-25 Codex §19.1] 같은 승인을 다시 요청하면(아래 멱등 경로) 끊긴 활성화를 잇는다."""
+        result = self._approve(change_id=change_id, actor=actor, context=context,
+                               expected_head_version=expected_head_version, draft_digest=draft_digest, reason=reason)
+        from core.enterprise_context.process_installation import activate_approved_upgrade
+        activate_approved_upgrade(self, change_id, actor=actor)
+        return result
+
+    def _approve(self, *, change_id, actor, context, expected_head_version, draft_digest, reason):
         if not isinstance(reason, str) or not reason.strip():
             raise ProcessError("PROCESS_REVIEW_REQUIRED", "검토 이유가 필요합니다.", 422)
         with self.transaction(write=True) as conn:
@@ -537,8 +549,9 @@ class ProcessConfigurationService:
                 raise ProcessError("PROCESS_PROFILE_IMMUTABLE", "초안의 승인 상태가 변경되었습니다.")
             if head["head_version"] == 0 and self._legacy(conn, boundary)[1] != change["legacy_token"]:
                 raise ProcessError("PROCESS_LEGACY_CONFLICT", "편집 도중 구 업무 구성이 변경되었습니다. 다시 검토하십시오.")
-            from core.enterprise_context.process_installation import validate_installation_references
-            validate_installation_references(payload, boundary, repo=self.repo, store=self.store)
+            from core.enterprise_context.process_installation import pending_upgrade, validate_installation_references
+            validate_installation_references(payload, boundary, repo=self.repo, store=self.store,
+                                             upgrade=pending_upgrade(conn, change))
             now, event_id = self._now(), uid("process_event")
             self._authorize(conn, boundary, actor, context, "publish")
             previous = head["active_profile_id"]

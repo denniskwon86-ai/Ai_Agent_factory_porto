@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { createProcessInstallationApi, processContextIdentity, type ProcessDocument,
-  type ProcessInstallationApi, type ProcessChangeReview } from '../lib/processInstallationApi';
+  type ProcessInstallationApi, type ProcessChangeReview, type InstallationUpgrade } from '../lib/processInstallationApi';
 import { createInstallationFlow, type InstallationFlow, type InstallationFlowState } from '../lib/processInstallationFlow';
 import { createProcessEditFlow, processBoundaryKey, type ProcessEditFlow } from '../lib/processConfigurationEdit';
 import { ProcessConfigurationEditor } from './ProcessConfigurationEditor';
@@ -213,6 +213,7 @@ function InstallationScope({ flow, editFlow, companyWide }: {
           <strong>{STAGES[operation.stage] || `확인 필요 · ${operation.stage}`}</strong>
           <p>요청 번호: {operation.operation_id}</p>
           {operation.error_code && <p>확인할 사유: {operation.error_code}</p>}
+          {operation.upgrade && <UpgradeActivation flow={flow} state={state} upgrade={operation.upgrade} />}
           <p>요청자: {operation.actor} · 설치 담당자: {operation.installer || '아직 지정되지 않음'}</p>
           <OperationActions key={`${operation.operation_id}:${operation.revision}`} flow={flow} state={state} />
           {operation.change_id && <button type="button" disabled={!!state.busy}
@@ -222,7 +223,9 @@ function InstallationScope({ flow, editFlow, companyWide }: {
         <h5>이 범위의 설치 요청</h5>
         {!state.operations.length ? <p>조회된 설치 요청이 없습니다.</p> : <ul className="process-operation-list">
           {state.operations.map((op) => <li key={op.operation_id}>
-            <span>{STAGES[op.stage] || `확인 필요 · ${op.stage}`}<small>{op.operation_id}</small></span>
+            <span>{STAGES[op.stage] || `확인 필요 · ${op.stage}`}
+              {op.upgrade && ` · 판본 ${op.upgrade.from_version} → ${op.upgrade.to_version} ${ACTIVATION[op.upgrade.activation]?.short || op.upgrade.activation}`}
+              <small>{op.operation_id}</small></span>
             <button type="button" disabled={!!state.busy} onClick={() => void flow.refresh(op.operation_id)}>상태 보기</button>
           </li>)}
         </ul>}
@@ -246,6 +249,30 @@ function InstallationScope({ flow, editFlow, companyWide }: {
       </section>
     </>}
   </>;
+}
+
+/** [2026-09-26] 판본 업그레이드의 활성화 상태. 새 판본은 **승인 뒤에만** 활성화된다(Codex §19.1). */
+const ACTIVATION: Record<string, { short: string; text: string }> = {
+  NOT_REQUESTED: { short: '· 적용 전', text: '설치 담당자의 명시 적용 전입니다. 현재 판본이 그대로 활성입니다.' },
+  AWAITING_APPROVAL: { short: '· 승인 대기', text: '승인 전까지 현재 판본이 그대로 활성입니다. 계약·인증·프로필은 바뀌지 않았습니다.' },
+  NOT_ACTIVATED: { short: '· 활성화 안 됨', text: '반려·취소되어 판본이 바뀌지 않았습니다.' },
+  ACTIVE: { short: '· 활성', text: '새 판본이 활성화되었습니다. 기존 인증분은 새 판본 계약으로 재인증한 뒤 운영에 쓸 수 있습니다.' },
+  ACTIVATION_PENDING: { short: '· 활성화 대기', text: '업무 구성은 승인됐지만 판본 활성화가 끝나지 않았습니다. 그동안 새 판본의 운영 사용은 막혀 있습니다.' },
+};
+
+export function UpgradeActivation({ flow, state, upgrade }: {
+  flow: InstallationFlow; state: InstallationFlowState; upgrade: InstallationUpgrade;
+}) {
+  const view = ACTIVATION[upgrade.activation];
+  const pending = upgrade.activation === 'ACTIVATION_PENDING';
+  return <div className={pending ? 'process-safety' : undefined} role={pending ? 'status' : undefined}>
+    <p><strong>판본 업그레이드 {upgrade.from_version} → {upgrade.to_version}</strong> · {view?.text || `확인 필요 · ${upgrade.activation}`}</p>
+    {pending && upgrade.activation_error && <p>마지막 활성화 실패 사유: {upgrade.activation_error}</p>}
+    {pending && (upgrade.retry
+      ? <button type="button" disabled={!!state.busy} onClick={() => void flow.retryActivation()}>
+        같은 승인으로 활성화 다시 시도</button>
+      : <p>이 승인을 한 승인자만 같은 승인을 다시 요청해 활성화를 이을 수 있습니다.</p>)}
+  </div>;
 }
 
 function OperationActions({ flow, state }: { flow: InstallationFlow; state: InstallationFlowState }) {

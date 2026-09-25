@@ -16,7 +16,35 @@ type Props = {
   page?: boolean;
 };
 type OperationsView = 'all' | 'active' | 'candidate' | 'pending';
-type InstanceRow = Record<string, unknown> & { instance_id: string; label?: string; entity_mode?: string; status?: string };
+type PendingUpgrade = { state: 'AWAITING_APPROVAL' | 'ACTIVATION_PENDING' | string; version: string;
+  activation_error?: string };
+/** [2026-09-26 Codex §19.3·§20] B2 적용본의 `version` 은 **승인된 활성 판본**이다. 대기 판본은
+ *  `pending_upgrade` 로 따로 온다 — 현재 판본으로 오인시키지 않도록 따로 그린다. */
+type InstanceRow = Record<string, unknown> & { instance_id: string; label?: string; entity_mode?: string; status?: string;
+  version?: string; installed_version?: string; pending_upgrade?: PendingUpgrade | null };
+
+const PENDING_LABEL: Record<string, string> = {
+  AWAITING_APPROVAL: '승인 대기',
+  ACTIVATION_PENDING: '승인됨 · 활성화 대기',
+};
+
+function PendingUpgradeNotice({ row }: { row: InstanceRow }) {
+  const pending = row.pending_upgrade;
+  if (!pending) return null;
+  const waiting = pending.state === 'AWAITING_APPROVAL';
+  return (
+    <div role="status" style={{ padding: '8px 12px', fontSize: 13, borderRadius: 8,
+      border: '1px solid var(--state-warn-fg)', background: 'var(--surface-card)' }}>
+      <b>판본 {pending.version} {PENDING_LABEL[pending.state] || `확인 필요 · ${pending.state}`}</b>
+      <div style={{ marginTop: 3 }}>
+        {waiting
+          ? `승인 전까지 현재 판본 ${row.version || ''}이 그대로 쓰입니다. 계약·인증·앱은 바뀌지 않았습니다.`
+          : `업무 구성은 승인됐지만 판본 활성화가 끝나지 않아 운영 사용이 막혀 있습니다. 승인자가 «표준 업무 구성»의 설치 요청에서 활성화를 다시 시도할 수 있습니다.`}
+        {!waiting && pending.activation_error ? ` (마지막 실패 사유: ${pending.activation_error})` : ''}
+      </div>
+    </div>
+  );
+}
 function subscribeKitOperationsContext(listener: () => void) {
   for (const event of ['factory:enterprise-context-changed', 'factory:session-changed', 'factory:acting-user-changed']) window.addEventListener(event, listener);
   return () => { for (const event of ['factory:enterprise-context-changed', 'factory:session-changed', 'factory:acting-user-changed']) window.removeEventListener(event, listener); };
@@ -193,12 +221,18 @@ function KitOperationsContent({
                       {row.label || '이름 미등록 적용본'}
                       <span style={{ opacity: .7, marginLeft: 6, fontSize: 11 }}>
                         {contextLabel(row.entity_mode)} · {instanceStatusLabel(row.status)}
+                        {row.version ? ` · 판본 ${row.version}` : ''}
+                        {row.installed_version && row.version && row.installed_version !== row.version
+                          ? ` (설치 ${row.installed_version})` : ''}
+                        {row.pending_upgrade
+                          ? ` · ${row.pending_upgrade.version} ${PENDING_LABEL[row.pending_upgrade.state] || '확인 필요'}` : ''}
                       </span>
                     </button>
                   );
                 })}
                 </div>
               </div>
+              {selectedInstance && <PendingUpgradeNotice row={selectedInstance} />}
               {selected && (
                 <div style={{ border: '1px solid var(--surface-border)', borderRadius: 8,
                   background: 'var(--surface-card)' }}>

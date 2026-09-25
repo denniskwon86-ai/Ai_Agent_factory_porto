@@ -280,6 +280,28 @@ export function createInstallationFlow(api: ProcessInstallationApi, companyWide:
       return readMutationResult(check);
     }),
     refreshReview: () => run('처리 결과 다시 조회', readMutationResult),
+    /**
+     * [2026-09-26 Codex §20] 승인은 기록됐지만 판본 활성화가 끊긴 업그레이드를 **같은 승인 재요청**으로 잇는다.
+     * 서버가 그 승인자에게만 준 `retry` 값(원래 기준판·지문·이유)을 그대로 보낸다 — 새 승인을 만들지 않는다.
+     * 아직도 활성화가 안 되면 서버가 503(`PROCESS_UPGRADE_ACTIVATION_PENDING`)으로 알리고, 상태는 다시 조회한다.
+     */
+    retryActivation: () => run('판본 활성화 다시 시도', async (check) => {
+      const operation = state.operation;
+      const retry = operation?.upgrade?.activation === 'ACTIVATION_PENDING' ? operation.upgrade.retry : undefined;
+      if (!operation || !retry) throw new ProcessApiError(409, '다시 시도할 활성화가 없습니다. 요청 상태를 다시 조회해 주세요.');
+      const access = await freshAccess(check);
+      let failure: ProcessApiError | null = null;
+      try {
+        await api.approve(access.boundary, retry.change_id, {
+          expected_head_version: retry.expected_head_version, draft_digest: retry.draft_digest, reason: retry.reason });
+      } catch (error) {
+        if (!(error instanceof ProcessApiError) || error.reasonCode !== 'PROCESS_UPGRADE_ACTIVATION_PENDING') throw error;
+        failure = error;
+      }
+      check();
+      const [page, current] = await Promise.all([api.list(access.boundary), api.get(operation.operation_id)]); check();
+      return { access, operation: current, operations: page.items, nextOffset: page.next_offset, error: failure };
+    }),
     confirmBoundary: async () => {
       if (state.busy || !state.boundaryChanged || !state.pendingAccess) return;
       const preservedAttempts = state.startAttempted && state.prepared

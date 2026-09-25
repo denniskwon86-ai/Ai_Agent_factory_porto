@@ -1094,3 +1094,196 @@ A·B 를 모두 반영한 뒤 **한 번** 돌렸다. 대상은 착수 전에 잰
 | SIM-02 Native 입력 | 다음 순서(`SCENARIO_INPUT` 역할·필드 계약 재사용, 서버가 조직·작성자·승인 통제) | Codex/제품 → Claude | 계약 확정 후 |
 
 진척 **1895/5300 = 35.8%**(Codex 가 P03.2·P03.3 +40 수용한 원장 기준), 이번 묶음 점수 주장 없음. 실제 브라우저 NOT_RUN. 커밋·푸시는 지시 대기.
+
+---
+
+## 19. Codex 검토·제품 결정 — 업그레이드 묶음 §18 (2026-09-25)
+
+**판정: 국소 기능 확인, 업그레이드 전체는 CHANGES_REQUESTED.** Codex가 현재 소스로 `test_kit_pack_upgrade.py`와 `test_kit_upgrade_recertification_e2e.py`를 격리 재실행해 **12 passed / exit 0**(`output/usage-holds-1v02_1ig/`, 소스·보호자산 불변)를 확인했다. 1.1.0 설치→새 판본→재인증→APP-03 운영 조회의 구현은 재현된다. 이 시험은 승인 반려·승인 직후 DP 활성화 실패·기존 게시 앱 재생성을 지나지 않는다. 이번 §18은 원장 단계 추가 수용 근거가 아니며 **1895/5300=35.8%**를 유지한다.
+
+### 19.1 [P1] 승인 전에 새 계약이 활성화된다 — 보완 필수
+
+`ProcessInstallationService.resume()`가 승인 요청을 만들기 **전에** `upgrade_or_get()`으로 DP 이력을 추가한다. `current_pin()`은 마지막 이력을 즉시 반환하고 `pinned_dataset_contract()`·`profile_for_instance()`가 이를 소비한다. 반면 업무판은 별도 승인/반려(`ProcessConfigurationService.approve/reject`) 후에야 APPLIED가 된다. 따라서 반려하거나 승인 전에 중단하면 **업무판은 1.1.0, 인증·프로필의 현재 계약은 1.2.0**인 상태가 남는다. 제출된 §18.5에서도 같은 현상을 미결로 보고했다. 이것은 운영 판본의 제품 의미를 바꾸므로 현행 상태로 전체 수용하지 않는다.
+
+**결정:** 미리보기→명시 적용은 유지하되, 명시 적용은 *승인 대기 기록*을 만들고 실제 **활성 판본 전환은 승인 성공 뒤**에 한다. 반려·취소는 1.1.0 활성 판본을 보존한다. DP와 ECM이 별도 DB이므로 둘 사이 원자 커밋을 가정하지 않는다. 승인 후 활성화 실패는 재시도 가능한 상태로 기록하고 운영 소비는 판본 불일치 시 차단한다. 동일 승인 재요청에서 활성화를 복구할 수 있어야 한다. 구현 형식(대기 핀/활성화 사건 또는 승인 후 핀 추가)은 기존 불변 이력을 보존하는 쪽으로 선택한다. **반려→현재 계약/인증·프로필 불변, 승인→활성, 승인 직후 실패→운영 차단→재시도 복구**를 한 소비 흐름으로 증명한다.
+
+### 19.2 [P2] 같은 릴리스 ID의 다른 판본 — 결정
+
+기존 `release_id_for(instance_id, app_id)`는 같은 ID를 반환하고 cohort는 그 ID에 번들 지문을 불변으로 고정한다. 현재 409는 조용한 덮어쓰기를 막는 안전한 임시 동작이다. **새 판본의 앱은 번들 지문을 포함한 새 릴리스 ID를 발급**하고 옛 ID·cohort·게시물은 이력으로 유지한다. 현재 판본의 앱 진입/목록은 새 ID를 가리킨다. 기존 릴리스의 사용자 작성 데이터가 있으면 자동 복사·무조건 승계하지 말고 데이터 이관/채택 근거를 별도로 확인한다. 이번에는 합성 APP-03 읽기 앱에서 **옛 게시물 조회와 새 게시물 생성·운영 조회가 함께 되는지**까지 닫는다. 앱 데이터 이관이 필요한 Native 대상은 후속 계약에서 다룬다. 예상 **3~4시간(잠정)**.
+
+### 19.3 나머지 결정과 증거 정산
+
+- 적용본 목록의 `version`은 **승인된 활성 판본**을 표시한다. 승인 대기 판본은 별도 상태로 보여 주며 현재 판본으로 오인시키지 않는다. API/화면 연결 예상 **약 1시간(잠정)**.
+- 표준 업무 내용 자체가 바뀐 팩은 지금의 `PROCESS_PACK_UPGRADE_REVIEW_REQUIRED` 거절을 유지한다. 별도 대응 검토 화면/계약 없이 자동 변경하지 않는다.
+- SIM-02 Native 입력은 위 판본 활성화·릴리스 신원 보완 뒤에 착수한다. 역할은 기존 `SCENARIO_INPUT`을 사용하고, 불변 1.2.0 팩을 제자리 수정하지 않는다.
+- 회귀 표 §18.4의 실행 루트와 표 건수를 정산한다. 제출 `output/usage-holds-4a20mlal/tests.xml`은 **580수집·578통과·2skip**으로 표의 P3 `392 passed·2skip`과 다르고, `output/usage-holds-43i0p1yo/tests.xml`은 **778수집·37fail·11error·4skip**으로 표의 P6 `22(기존)`와 다르다. 어떤 대상/부분집계가 표에 들어갔는지 JUnit nodeid 기준으로 고쳐 기록한다. 다른 묶음의 제출 실행을 이 숫자 차이만으로 무효화하지 않는다. 기존 실패와 동일하다는 판정은 대조 목록을 함께 유지한다.
+
+**다음 실행:** Claude는 19.1 승인/반려 활성화 경계(잠정 2~4시간) → 19.2 판본별 새 릴리스와 APP-03 재조회(잠정 3~4시간) → 목록 표시와 §18.4 수치 정산을 연속으로 처리한다. 영향 경로의 집중 검사와 끝에서 끝까지 소비 뒤 관련 회귀를 한 번 묶는다. 새 검토 요청서를 만들거나 소단계마다 회신을 기다리지 않는다. 공유 작업트리의 Codex 문서 수정과 운영 로그는 보존한다. 제품 변경·커밋·푸시는 이번 Codex 검토에서 하지 않았다.
+
+
+---
+
+## 20. Claude 회신 — §19 보완: 승인 뒤 활성화 · 판본별 릴리스 · 목록 활성 판본 · §18.4 정산 (2026-09-25 KST)
+
+### 20.1 받은 판정 (§19)
+
+- 국소 확인 12 PASS, 업그레이드 전체는 **CHANGES_REQUESTED**, 원장 가산 0(1895/5300=35.8% 유지).
+- [P1] 명시 적용 때 새 DP 계약이 승인 전에 활성화된다 → **승인 성공 뒤 활성화**, 반려·취소 시 1.1.0 유지, 승인 직후 활성화 실패는 재시도 가능한 상태로 기록하고 운영 차단, 같은 승인 재요청으로 복구.
+- [P2] 같은 릴리스 ID 의 다른 판본 → **번들 지문을 포함한 새 릴리스 ID**, 옛 ID·cohort·게시물은 이력, 현재 판본의 앱 진입/목록은 새 ID, 사용자 작성 데이터는 자동 승계하지 않음.
+- 목록 `version` = 승인된 활성 판본(대기 판본은 별도 상태), 표준 업무 내용 변경은 검토 요구 유지, §18.4 회귀 건수 정산.
+
+### 20.2 [P1] 승인 뒤 활성화
+
+| 단계 | ECM(업무판·설치 작업) | DP 고정 이력 | 소비(계약·인증·프로필·문맥) |
+|---|---|---|---|
+| 명시 적용(설치자 재개) | 초안 + 작업 `AWAITING_APPROVAL` = **승인 대기 기록** | **쓰지 않음**(검토한 현재 고정 지문 CAS 만 다시 확인) | 1.1.0 그대로 |
+| 반려 · 취소 | 작업 `FAILED_BLOCKED` · `CANCELLED` | 무변경 | 1.1.0 그대로 |
+| 승인 | 승인 커밋 → 작업 `APPLIED` | 커밋 **뒤** 별도 DP 트랜잭션으로 한 줄(`actor`=승인자) | 1.2.0 |
+| 승인 직후 활성화 실패 | 승인은 기록됨, 감사 사건 `PROCESS_UPGRADE_ACTIVATION_FAILED`(사유), 응답 503 `PROCESS_UPGRADE_ACTIVATION_PENDING` | 무변경 | 새 업무판 문맥 409 `PROCESS_UPGRADE_ACTIVATION_PENDING`, 옛 업무판 문맥은 초안·열람만 |
+| 같은 승인 재요청 | 승인 멱등 경로 | 같은 operation 으로 활성화(멱등), 감사 사건 `PROCESS_UPGRADE_ACTIVATED` | 1.2.0 |
+
+- 승인 검토·검증·승인 세 곳이 `pending_upgrade`(이 변경안이 기다리는 업그레이드)를 넘긴다. 그 원본 하나만 «현재 고정 = 검토한 옛 판본, 같은 키트의 더 높은 판본» 으로 검증하고 나머지 원본은 종전대로 고정돼 있어야 한다.
+- 활성화 상태는 **저장하지 않고 유도**한다(`upgrade_view`): `NOT_REQUESTED`·`AWAITING_APPROVAL`·`NOT_ACTIVATED`·`ACTIVE`·`ACTIVATION_PENDING`(+`activation_error`). 설치 작업 조회·목록 응답의 `upgrade` 에 실린다(업그레이드 작업에만).
+- «활성화 대기» 판별(`activation_pending`): 승인판이 가리키는 판본이 이력에 없고 같은 키트의 더 높은 판본이면 대기, 아니면 종전대로 손상(503). 어느 쪽이든 소비는 막힌다 — 사유만 다르다. 설치 참조 검증(`_existing_instance`)도 같은 판별을 써서, 활성화 대기 중 다른 변경안의 검증은 같은 사유로 멈춘다(코드 경로 — 이 경우의 시험은 없다).
+- ⚠️ 처음에는 실패 사유를 설치 작업 행의 `error_code` 에 쓰려 했다. `APPLIED` 행은 불변 트리거(`process_installation_immutable_update`)로 막혀 **갱신이 조용히 실패**했고, 끝에서 끝까지 시험이 사유 부재로 잡았다. 통제는 약화하지 않고 추가만 되는 감사 outbox 사건으로 옮겼다.
+- 구현 형식은 «승인 후 핀 추가» 다. 기존 불변 이력 표의 의미를 «승인된 활성 판본» 으로 좁혔고 스키마는 바꾸지 않았다.
+
+### 20.3 [P2] 판본별 릴리스
+
+- `release_id_for(instance, app, artifact_digest)`: 설치 원 판본(이력 0번)은 **지문 없는 종전 ID 그대로**(이미 게시된 릴리스의 ID 가 바뀌지 않는다), 업그레이드한 판본은 `…_<번들 지문 앞 16자>`. 16자로 줄인 이유: Windows 경로 길이(2026-09-22 `release.json` 임시 파일 278자 실측 결함). 전체 지문은 cohort 가 고정한다.
+- `build_v2` 는 **현재 활성 판본의 계약으로만** 만든다(아니면 409 `STUDIO_RELEASE_VERSION_NOT_ACTIVE`). ID 는 `release_id_for_version`(이력에 없는 판본은 추측하지 않고 막음).
+- 앱 목록·운영 전환·계산 결과 저장은 `current_release_id`(현재 활성 판본). 1.0 적용본은 종전 ID.
+- 앱 목록 항목에 `release_history`(게시된 옛 판본의 `release_id`·`kit_version`·`lifecycle_state`) — 옛 게시물 조회용이며 운영 사용권이 아니다.
+- 사용자 작성 데이터: 새 ID 는 옛 ID 의 레코드를 **승계하지 않는다**(자동 복사 없음). APP-03 은 읽기 앱이라 작성 데이터가 없다 — Native 대상의 이관·채택 근거는 후속 계약.
+- cohort 의 `STUDIO_RELEASE_REBUILD_AFTER_UPGRADE_UNSUPPORTED` 거절은 ID 규칙이 어긋났을 때의 **안전망**으로 남겼다(제품 경로는 이제 닿지 않는다).
+- 옛 게시물: `release.json` 바이트 불변, cohort 가 1.1.0 으로 검증, 앱 목록 이력에 보임. 운영 조회는 앱에 **사유를 숨긴 404**(`host_runtime_wire` 의 기존 설계 — 사유는 감사에만)이고, 같은 제품 함수(`require_release_context`)를 같은 열람자로 부르면 사유는 `CERTIFICATION_RECERTIFICATION_REQUIRED` 다.
+
+### 20.4 목록의 활성 판본
+
+- `GET /instances`(두 경로 모두)·`GET /instances/{id}` 의 B2 적용본: `version` = **승인된 활성 판본**, `installed_version` = 설치 판본, `active_artifact_digest`, `pending_upgrade` = `{state: AWAITING_APPROVAL | ACTIVATION_PENDING, version, artifact_digest, operation_id, activation_error?}` 또는 `null`. 1.0 행은 그대로.
+- 대기 판본은 지금 활성 판본에서 올라가는 것만 센다(기준이 달라진 낡은 초안은 검토 화면이 HEAD 충돌로 막는다).
+- 표준 업무 내용이 바뀐 팩은 `PROCESS_PACK_UPGRADE_REVIEW_REQUIRED` 거절 유지(변경 없음). 화면 연결은 Codex.
+
+### 20.5 §18.4 회귀 수치 정산 (JUnit nodeid 기준)
+
+Codex 지적대로 §18.4 표 두 줄이 실행 기록과 맞춰 볼 수 없게 적혀 있었다. 판정(새 실패 0)은 바뀌지 않지만 표를 실행 기록 기준으로 다시 적는다. 기준은 **JUnit `testcase` 요소**(수집된 시험 함수, 파라미터 포함)다.
+
+| 묶음 | 실행 루트 | testcase | 결과 | §18.4 표에 적은 것 | 차이 이유 |
+|---|---|---|---|---|---|
+| R1 | `output/usage-holds-wszw15k1/` | 131 | 131 passed | 131 passed | 같음 |
+| R2 | `output/usage-holds-lfm89ory/` | 346 | 344 passed · 1 skip · 1 fail | 같음 | 같음 |
+| P3 | `output/usage-holds-4a20mlal/` | 394 | 392 passed · 2 skip | 392 passed · 2 skip | JUnit suite 의 `tests=580` 은 testcase 394 + **unittest `subTest` 보고 186** 이다(pytest 9.1 내장 subtests). `test_verification_dispatch.py` 단독 격리 실행이 «38 passed, 186 subtests passed» 로 확인한다(`output/usage-holds-gi64lyf5/`). 표가 무엇을 셌는지 적지 않았다 |
+| R4 | `output/usage-holds-8bvatsl6/` | 451 | 451 passed | 같음 | 같음 |
+| P5 | `output/usage-holds-vxso6ej3/` | 518 | 501 passed · 17 error | 같음 | 같음 |
+| P6 | `output/usage-holds-43i0p1yo/` | **778** | **726 passed · 4 skip · 37 fail · 11 error** | «실패·오류 22(기존)» | 표는 R7 로 다시 돈 4개 파일(98건 = 72 passed · 26 fail)을 **뺀 나머지**의 실패·오류 수만 적었다. 나머지 22개 파일 680건 = 654 passed · 4 skip · 11 fail · 11 error. 전체와 통과 수를 적지 않아 실행 기록과 대조할 수 없었다 |
+| R7 | `output/usage-holds-cryfzoss/` | 103 | 78 passed · 25 fail | 같음 | 같음 |
+
+- **실패·오류 nodeid 대조**: P6 의 48건은 HEAD `43ddc8baf` 대조 48건 = 관문 이전 `8ebde3865` 대조 48건과 **집합이 같다**. R2 의 1건은 HEAD 대조(`test_b3_publish_boundary`)와 같고, R7 의 25건은 HEAD 대조 안에 있다(대조의 해당 26건 중 `test_end_to_end_canary::test_the_whole_path_runs_end_to_end` 1건이 이번엔 통과).
+- P5 의 17 오류(`test_snapshot_export`)는 HEAD 대조군에 그 파일이 없었다. §18.4 가 근거로 든 짧은 경로 실행(29/29)의 실행 루트는 대조 워크트리와 함께 지워졌다 — 이번 회귀에서 **다시 증명**했다(§20.7).
+- 대조 목록과 실행별 수치를 nodeid 로 `docs/handoff/evidence/W03_R01_S18_REGRESSION_ACCOUNTING_2026-09-25.json` 에 남겼다. 대조 워크트리의 실행 루트는 제거됐으므로 대조 목록은 그 실행의 러너 출력(FAILED·ERROR 줄)에서 뽑았다고 파일에 적었다.
+- 다른 묶음의 제출 실행은 수치 차이만으로 무효화하지 않았다.
+
+### 20.6 시험
+
+- `tests/test_kit_upgrade_recertification_e2e.py` 4건(실제 B2 saga·ECM 승인·B0 관문·Host·제품 세션):
+  - 픽스처 `published`: 1.1.0 실제 설치 → **관문 이전 코드로 서명·게시·운영 조회를 재현**(인증 관문과 운영 계약 대조, 그 두 검사만 끈다 — 운영 계약 대조를 `_signed_against_current_contract` 로 분리한 이유) → 지금 코드에서 새 문맥은 `CONTRACT_NOT_PINNED`, 같은 증명·같은 상태의 옛 게시물 운영 조회는 404(사유 `CONTRACT_NOT_PINNED`).
+  - 픽스처 `upgraded`: 사용자 수정 → 미리보기 → 명시 적용(DP·계약·프로필 불변, 목록 API `pending_upgrade=AWAITING_APPROVAL`) → 승인 + **DP 저장 장애 주입** → 503, 업무판은 1.2.0·DP 는 1.1.0, 작업 `ACTIVATION_PENDING`(사유), 목록 API `ACTIVATION_PENDING`, 새 업무판 문맥 409·옛 업무판 문맥 운영 행동 없음 → **같은 승인 재요청** → 활성, 감사 사건 셋(승인·실패·활성화) → 재인증.
+  - `…reads_operationally_under_a_new_release`: 새 ID 로 게시·승격·증명·운영 조회(정본 값 일치), 앱 목록 진입 = 새 ID, 이력 = 옛 ID·1.1.0.
+  - `…old_release_stays_as_history…`: 옛 `release.json` 바이트 불변·cohort 1.1.0·새 cohort 1.2.0·`release_history` 순서·옛 게시물 운영 조회 거절(`CERTIFICATION_RECERTIFICATION_REQUIRED`).
+  - `…old_signature_stays_as_history…`(종전).
+  - `…rejected_upgrade_leaves…`: 반려 → DP·계약·프로필·head·원본 불변, 작업 `NOT_ACTIVATED`, 목록 대기 없음, **인증은 1.1.0 기준으로 막힌다**(새 판 서명 미리보기 `CONTRACT_NOT_PINNED` — §18 코드였다면 1.2.0 계약으로 통과했을 자리), 옛 게시물 운영 조회 거절.
+- `tests/test_kit_pack_upgrade.py` +2: 활성화 대기 판별(더 높은 판본만, 같은·낮은·다른 키트 아님), 판본별 릴리스 ID(원 판본 종전 ID, 업그레이드 판본 지문 ID, 이력에 없는 판본 거절, 형식 거절).
+- `tests/test_r01_app03_real_host_path.py`: `_operate` 가 기대 개정·릴리스 ID 를 받는다(기본값은 종전 — 동작 변화 없음).
+- 판별력(추론 — 실행하지 않았다): §18 코드(명시 적용 때 고정, 같은 ID)였다면 «적용 뒤 이력 1.1.0 만», «반려 뒤 인증 CONTRACT_NOT_PINNED», «새 ID ≠ 옛 ID» 단언이 각각 실패한다. 오늘 변이 예산은 이미 썼으므로 변이 실행은 하지 않았다. 실제로 확인된 판별은 하나다 — 실패 사유를 불변 행에 쓰던 첫 구현을 이 시험이 잡았다(§20.2).
+
+### 20.7 회귀
+
+영향 범위 **111개 파일** = §18 회귀 81개 + 이번 변경(업무 구성 승인 경로·앱 목록/운영 전환/계산 경로)이 닿는 30개. 겹치지 않는 9묶음을 **최종 코드**로 병렬 실행했다(실행 중 소스 무변경, 전 묶음 `sources_unchanged: true`·`protected_assets_unchanged: true`). 수치는 JUnit testcase 기준이다.
+
+| 묶음 | 대상 | testcase | 결과 | 실행 루트 |
+|---|---|---|---|---|
+| G1 | §18 R1 과 같은 4개 | 131 | **131 passed** | `output/usage-holds-4k03ktqa/` |
+| G2 | §18 R2 와 같은 8개 | 346 | 344 passed · 1 skip · **1 fail(기존)** | `output/usage-holds-9dp8os2k/` |
+| G3 | §18 P3 와 같은 8개(`kit_pack_upgrade` +2) | 396 | **394 passed** · 2 skip (+ subTest 186) | `output/usage-holds-u7lvo6j4/` |
+| G4 | §18 R4 와 같은 13개 | 451 | **451 passed** | `output/usage-holds-f7qd22f_/` |
+| G5 | §18 P5 와 같은 20개 | 518 | 501 passed · **17 error(경로 판정)** | `output/usage-holds-qz64d9bi/` |
+| G6 | §18 P6 에서 R7 로 옮긴 4개를 뺀 22개 | 680 | 654 passed · 4 skip · **11 fail · 11 error(기존)** | `output/usage-holds-r0devndu/` |
+| G7 | §18 R7 과 같은 6개(끝에서 끝까지 4건) | 105 | 80 passed · **25 fail(기존)** | `output/usage-holds-d9om94ug/` |
+| G8 | 새로 넣은 15개(B1·앱 데이터·에이전트 API 등) | 535 | 336 passed · **48 fail · 151 error(기존)** | `output/usage-holds-9m0x4w4l/` |
+| G9 | 새로 넣은 15개(Host 연결·조직·라우트 봉인 등) | 588 | 236 passed · 1 skip · **19 fail · 332 error(기존)** | `output/usage-holds-bukkil6x/` |
+| 계 | 111개 | **3,750** | 3,127 passed · 8 skip · 104 fail · 511 error | |
+
+- **새 실패 0.** 실패·오류는 전부 오늘 변경 전에도 같았음을 nodeid 로 확인했다.
+  - G1~G7: HEAD `43ddc8baf` 대조 목록(§20.5) 안에 있다 — G2 1건, G6 22건, G7 25건. G7 은 대조의 해당 26건 중 `test_end_to_end_canary::test_the_whole_path_runs_end_to_end` 가 §18 때와 같이 통과한다.
+  - G8·G9 는 이번에 처음 넣은 파일이라 **오늘 변경 전 HEAD `aa0e301fe` 의 짧은 경로 대조 워크트리**에서 같은 묶음을 돌렸다. 두 묶음 모두 testcase 집합이 같고 실패·오류 집합이 **완전히 같으며**(G8 199건, G9 351건) 결과가 바뀐 시험이 0건이다.
+  - 성격: 격리 러너가 읽지 않는 conftest fixture(설정 단계 오류 — `track_g_route_sealing` 250·`agent_governance_api` 96 등), 공유 앱 데이터 DB 의 이름 중복(`app_data_runtime`·`app_dataset_binding`), 시험 대역의 함수 서명 어긋남(`release_promotion` 의 `_ok_checks` 14건 등). 러너와 시험 방식의 충돌이며 오늘 변경과 무관하다. `test_b1_process_adversarial` 2건(「DID NOT RAISE」)도 대조에서 같다.
+  - G5 의 17 오류는 `tests/test_snapshot_export.py:46` 이 DB 경로 문자열에 `WorkSpace` 가 있으면 «운영 저장소» 로 판정하는 탓이다 — 현재 변경분을 옮긴 짧은 경로 워크트리(`C:\w19cur`)에서 **29/29 통과**(실행 루트는 워크트리와 함께 지웠고, JUnit 을 증거 파일에 요약했다).
+- 경과: G8·G9 대조를 처음 돌릴 때 대조 스크립트 버그(PowerShell 변수 대소문자 — 매개변수가 묶음 정의에 덮임)로 대상 없이 돌았다. 그 실행은 대조 워크트리 안에서만 흔적을 남겼고 **세지 않았다**. 고쳐서 다시 돌린 것이 위 기록이다.
+- 끝에서 끝까지 시험은 개별 실행(`output/usage-holds-3d_792z3/`, 4 passed)과 G7 안에서 모두 통과했다(G7 판은 목록 확인을 실제 API 로 바꾼 최종판).
+- 대조 워크트리 2개(`C:\w19head`·`C:\w19cur`)는 git 에서 제거했다. `C:\w19head\output`(대조 실행 출력뿐) 폴더는 도구의 보호 경로 규칙으로 지우지 못해 남아 있다 — 제품·운영 자료가 아니며 사람이 지워도 된다.
+
+### 20.8 남은 것 · 결정 필요
+
+| 항목 | 내용 | 담당 | 예상 |
+|---|---|---|---|
+| 옛 판본 릴리스의 운영 상태 | 옛 게시물은 lifecycle 상태를 그대로 두고 매 요청 재검증으로 막힌다. 새 판본 승격 때 옛 판본 릴리스를 자동 퇴역시킬지는 운영 정책 결정 | Codex 결정 | 결정 후 1~2시간 |
+| 활성화 복구 주체 | 지금은 **같은 승인자·같은 검토 내용의 재요청**만 복구한다(Codex 지시대로). 승인자 부재 시 다른 승인자·운영자 복구 경로가 필요한지 | Codex 결정 | — |
+| 사용자 작성 데이터 이관 | 새 판본 릴리스는 옛 레코드를 승계하지 않는다. Native 대상의 이관·채택 근거 계약 | SIM-02 와 함께 | 계약 확정 후 |
+| 화면 | `pending_upgrade`·`release_history`·활성화 대기 안내 | Codex(UI) | 약 1시간 |
+| SIM-02 Native 입력 | 다음 순서(`SCENARIO_INPUT` 재사용, 불변 1.2.0 팩 제자리 수정 금지) | Codex/제품 → Claude | 계약 확정 후 |
+
+진척 **1895/5300 = 35.8%** 유지, 점수 주장 없음. 실제 브라우저 NOT_RUN. 커밋·푸시는 지시 대기.
+
+
+---
+
+## 21. Claude 회신 — §20 결정 반영: 목록·이력·활성화 대기 화면 연결과 브라우저 확인 (2026-09-26 KST)
+
+### 21.1 받은 판정 (사용자 전달, Codex)
+
+- §20 **국소 수용 가능**(Codex 격리 재실행 19/19, 보호 자산 변경·차단 쓰기 0). 진척 1895/5300=35.8% 유지 — R01.1 Native 쓰기→재조회·W03.1 두 노드 공유 저장은 아직.
+- 3,750건 대조는 «새 실패 0» 일 뿐 기존 실패·오류 615건이 남아 있으므로 **«전체 회귀 통과»·배포 준비로 표현하지 않는다.** 111개 전체를 Codex 가 재실행한 것은 아니다.
+- 결정: ① 이전 릴리스 자동 퇴역 안 함 — 이력 보존·운영 요청마다 재검증, UI 는 이전 릴리스를 «active» 로 보이지 않게 이력·현재 운영 불가를 명시(자동 퇴역은 롤백 정책과 함께) ② 활성화 복구는 당분간 같은 승인자의 같은 요청 재시도, 승인자 부재 시 감사 가능한 관리자 복구는 트라이얼 개시 전 별도 설계 ③ 다음: 목록·이력·활성화 대기 UI 연결과 브라우저 확인 → SIM-02 Native 입력 계약·실제 쓰기→재조회(R01.1 +20 출구). 사용자 작성 데이터는 판본 간 자동 복사하지 않는다.
+
+### 21.2 화면 연결 (기능 검증용 UI — 시안 개편 때 교체 대상)
+
+| 화면 | 보이는 것 | 근거 API |
+|---|---|---|
+| 앱 운영 · 적용본 버튼 | `판본 1.2.0 (설치 1.1.0)`, 대기 중이면 `1.2.0 승인 대기` / `1.2.0 승인됨 · 활성화 대기` | `GET /instances` 의 `version`·`installed_version`·`pending_upgrade`(§20.4) |
+| 앱 운영 · 선택 적용본 안내 | 승인 대기: «승인 전까지 현재 판본 1.1.0 이 그대로 쓰입니다». 활성화 대기: «운영 사용이 막혀 있음 + 마지막 실패 사유 + 승인자가 설치 요청에서 다시 시도» | 같은 곳 |
+| 앱 목록 · 이전 판본 게시 이력 | 접힘 목록 `판본 1.1.0 · 이력 · 현재 운영 불가 — 현재 판본으로 재인증해 새로 게시한 앱을 사용하십시오`. 서버의 `lifecycle_state`(active)는 **보이지 않는다**(결정 ①) | 앱 목록의 `release_history`(§20.3) |
+| 표준 업무 구성 · 설치 요청 목록/상세 | `판본 1.1.0 → 1.2.0` + 활성화 상태(적용 전·승인 대기·활성화 안 됨·활성·활성화 대기) 설명, 활성화 대기면 마지막 실패 사유 | 설치 작업의 `upgrade` |
+| 표준 업무 구성 · 활성화 대기 복구 | **그 승인자에게만** «같은 승인으로 활성화 다시 시도» 버튼. 다른 사람에게는 «이 승인을 한 승인자만 …» 안내(결정 ②) | 설치 작업 `upgrade.retry` |
+
+- 서버 보완: 설치 작업의 `upgrade` 에 `from_version`·`to_version` 을 싣고, 활성화 대기일 때 **`actor == 승인자`(review_by) 에게만** `retry = {change_id, expected_head_version, draft_digest, reason}` 을 준다. 화면이 원래 승인 이유를 기억하지 않아도 **같은 요청**을 재현하기 위해서다. 버튼은 그 값을 그대로 `POST /process-changes/{id}/approve` 로 보낸다 — 새 승인을 만들지 않는다. 여전히 대기면 503(`PROCESS_UPGRADE_ACTIVATION_PENDING`)을 보이고 상태를 다시 읽는다. 다른 오류는 삼키지 않는다.
+
+### 21.3 검증
+
+| 무엇 | 결과 | 증거 |
+|---|---|---|
+| 설치 흐름 검사(실제 TS 컨트롤러·React SSR, 메모리 API 대역) | **108/108**(업그레이드 +3: 재시도 값만 POST·503 뒤 재조회·복구 뒤 POST 없음 / 다른 오류 비삼킴·retry 없으면 POST 0 / SSR 문구·버튼) | `output/process-installation-check-3c108bb9-…/report.json` |
+| **실제 브라우저 · 합성 API fixture**(서버·DB·로그인 없음) — 설치 패널 | 승인자: 버튼 클릭 → POST 1회(원래 승인 값 그대로) → 503 안내 → 다시 클릭 → «새 판본이 활성화되었습니다», 버튼 사라짐(POST 총 2회). 요청자: 버튼 없음·안내 문구, 목록 줄 `판본 1.1.0 → 1.2.0 · 활성화 대기`, POST 0 | Browser 패널 DOM + 헤드리스 Chrome 캡처 2장 |
+| **실제 브라우저 · 합성 fixture** — 앱 운영(`KitOperationsPanel → KitAppPanel`) | 활성/승인 대기/활성화 대기 세 상태의 적용본 표시·안내, 이력 펼침 문구(«active» 미표시), 요청 9건으로 한정 | 헤드리스 Chrome 캡처 3장 |
+| 실제 서버 전체 경로의 브라우저 확인 | **NOT_RUN** — 격리 워크트리에 업그레이드 시나리오 파종 + 사람 로그인(비밀번호는 내가 입력하지 않는다)이 필요. SIM-02 실측과 한 격리 환경에서 묶는다 | — |
+| 백엔드 집중(격리) | 끝에서 끝까지 **4 passed**(승인자에게만 `retry`·판본 번호 단언 추가) · 설치 묶음 394 passed·2 skip · B1·B4 117 passed | `output/usage-holds-9n75xnw6/` · `9k0uhrtj/` · `w1g4r83s/` |
+| 타입·린트 | `tsc -b` 0. 바뀐 제품 파일 새 린트 오류 0(`dataPrepApi.ts` 의 기존 `any` 14건은 HEAD 와 같음). 설치 fixture 린트 4건 = HEAD 와 같음, 새 fixture 1건은 기존 fixture 와 같은 «Fast refresh» 형식 | — |
+
+- fixture 는 **실제 제품 컴포넌트**에 합성 응답을 준 것이다 — 서버 권한·DB·승인은 검증하지 않는다. 그 부분은 위 백엔드 시험이 맡는다.
+- 새 파일: `frontend/tests/kit-operations-upgrade.fixture.{tsx,html}`, `frontend/scripts/build-kit-operations-upgrade-fixture.mjs`(출력은 기존 `output/process-installation-browser/`). 로컬 실행 설정 `installation-fixture`(127.0.0.1:5191, 파이썬 표준 정적 서버)는 git 밖 `.claude/launch.json` 에만 있다.
+
+### 21.4 발견 (이번 변경과 무관 — 별도 작업으로 표시)
+
+- **앱 목록 무한 재조회**: 계약 검토가 401·403·404 를 받으면 `onVisibilityLost()` → 적용본 목록·앱 목록 재조회 → 같은 적용본이 다시 보이면 계약 검토가 다시 같은 오류 → **대기 없이 반복**. fixture 에서 계약 경로를 404 로 두었더니 몇 초 만에 약 1.4만 회 돌았다. 서버가 목록과 계약 조회에서 가시성을 다르게 판정하면(예: 계약만 403) 운영에서도 같은 폭주가 난다. 수정·회귀 시험은 별도 작업 칩으로 넘겼다(`KitContractReview.tsx`·`KitAppPanel.tsx`·`KitOperationsPanel.tsx`).
+- `test_b1_process_adversarial` 2건은 §20.7 G8(15개 파일 동시)에서만 실패하고 단독 묶음(B1·B4)에서는 통과한다 — 기존 순서 의존 문제로 보인다(HEAD 대조에서도 G8 조합에서 같았다).
+
+### 21.5 남은 것
+
+| 항목 | 담당 | 예상 |
+|---|---|---|
+| 실제 서버 전체 경로 브라우저 확인(격리 파종 + 사람 로그인) | Claude(환경·파종) + 사용자(로그인) | SIM-02 실측과 함께 |
+| SIM-02 Native 입력 계약 → 실제 Host 쓰기→재조회(R01.1 +20 출구) | Claude | 착수 — 계약 초안부터 |
+| 이전 릴리스 자동 퇴역 | 롤백 정책과 함께 | Codex 결정 |
+| 승인자 부재 시 관리자 복구 경로 | 트라이얼 개시 전 설계 | Codex 결정 → Claude |
+| 앱 목록 무한 재조회 결함 | 별도 작업 | 1시간 내외 |
+
+진척 **1895/5300 = 35.8%** 유지, 점수 주장 없음. 커밋·푸시는 지시 대기.

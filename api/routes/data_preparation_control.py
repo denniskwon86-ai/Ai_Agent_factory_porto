@@ -294,7 +294,15 @@ def _review_instances(p):
         for row in rows:
             if kac._visible_v2_instance(store, row["instance_id"], p.user_id, context) != row:
                 raise ProcessError("PROCESS_INSTANCE_CONFLICT", "조회 중 적용본 상태가 변경되었습니다.", 409)
-        return rows
+        return [_with_versions(row) for row in rows]
+
+
+def _with_versions(row):
+    """[2026-09-25 Codex §19.3] B2 적용본의 `version` 은 **승인된 활성 판본**이다(설치 판본은
+    `installed_version`). 승인 대기·활성화 대기 판본은 `pending_upgrade` 로 따로 준다. 1.0 행은 그대로."""
+    from core.enterprise_context.process_installation import instance_versions
+    view = instance_versions(store, row)
+    return {**row, **view} if view else row
 
 
 @router.get("/instances")
@@ -345,7 +353,8 @@ async def list_instances(p: Principal = Depends(current_principal)):
             for row in linked_rows:
                 if kac._visible_v2_instance(store, row["instance_id"], p.user_id, review_context) != row:
                     raise ProcessError("PROCESS_INSTANCE_CONFLICT", "조회 중 적용본 상태가 변경되었습니다.", 409)
-            rows = visible
+            linked_ids = {row["instance_id"] for row in linked_rows}
+            rows = [_with_versions(row) if row["instance_id"] in linked_ids else row for row in visible]
     except ProcessError as exc:
         _process_error(exc, p.user_id, "instances")
     return {"status": "success", "data": {"instances": rows}}
@@ -366,6 +375,10 @@ async def get_instance(instance_id: str, p: Principal = Depends(current_principa
     bound = {str(b.get("dataset_contract_key", "")) for b in bindings}
     required = [{"dataset_contract_key": k, "bound": k in bound, **labels.get(k, {})}
                 for k in keys]
+    try:
+        row = _with_versions(row)
+    except ProcessError as exc:
+        _process_error(exc, p.user_id, instance_id)
     return {"status": "success",
             "data": {**row, "bindings": bindings, "required_datasets": required,
                      "coverage": source_binding.coverage(store, instance_id, keys)}}
@@ -1109,7 +1122,10 @@ def _review_apps_v2(instance_id, p, *, runtime_visible):
             app_id = str(row.get("output") or "")
             contract = kac.read_v2(store, instance_id=instance_id, app_id=app_id,
                 actor_id=p.user_id, context=context) if app_id in contracts else None
-            release_id = kb.release_id_for(instance_id, app_id)
+            #: ★ [2026-09-25 Codex §19.2] 앱 진입은 **현재 활성 판본**의 릴리스를 가리킨다. 옛 판본의
+            #:   게시물은 `release_history` 로 따로 보인다(운영 사용권이 아니라 이력).
+            release_id = kb.current_release_id(store, instance_id, app_id)
+            history = kb.release_history(store, instance_id, app_id)
             apps.append(dict(app_id=app_id, label=str(row.get("label") or ""),
                 readiness_state=str(row.get("state") or ""), user_message=str(row.get("user_message") or ""),
                 next_action=str(row.get("next_action") or ""), contract_schema_version="2.0",
@@ -1119,7 +1135,9 @@ def _review_apps_v2(instance_id, p, *, runtime_visible):
                 approved_by=contract["approved_by"] if contract else "",
                 permitted_actions=contract["permitted_actions"] if contract else [], release_id=release_id,
                 lifecycle_state=_lifecycle_state(release_id) if runtime_visible else None,
-                built_datasets=_built_count(gate, plane, instance_id, app_id) if runtime_visible else None))
+                built_datasets=_built_count(gate, plane, instance_id, app_id, release_id) if runtime_visible else None,
+                release_history=[{**item, "lifecycle_state": _lifecycle_state(item["release_id"]) if runtime_visible else None}
+                                 for item in history if item["release_id"] != release_id]))
         if kac._visible_v2_instance(store, instance_id, p.user_id, context) != inst:
             raise ProcessError("PROCESS_INSTANCE_CONFLICT", "조회 중 적용본 상태가 변경되었습니다.", 409)
         with authority.transaction() as conn:
@@ -1335,7 +1353,11 @@ async def promote_app(instance_id: str, app_id: str, req: AppPromoteRequest,
     from core import kit_app_builder as kb
     from core.program_lifecycle import program_lifecycle
 
-    release_id = kb.release_id_for(instance_id, app_id)
+    #: ★ [2026-09-25 Codex §19.2] 운영 전환은 **현재 활성 판본**의 릴리스다(1.0 적용본은 종전 ID).
+    try:
+        release_id = kb.current_release_id(store, instance_id, app_id)
+    except ProcessError as exc:
+        _process_error(exc, p.user_id, instance_id)
     path = library_paths.release_json(release_id)
     if not os.path.exists(path):
         #: ⚠️ 「아직 안 만들었다」는 409 다 — 404 로 답하면 앱 자체가 없는 것으로 읽힌다.
@@ -1480,12 +1502,12 @@ def _lifecycle_state(release_id: str) -> str:
         return ""
 
 
-def _built_count(gate: Any, plane: Any, instance_id: str, app_id: str) -> Optional[int]:
+def _built_count(gate: Any, plane: Any, instance_id: str, app_id: str, release_id: str = "") -> Optional[int]:
     """이 앱의 릴리스에 **실제로 결속된 데이터셋 수**. 못 읽으면 `None`."""
     from core import kit_app_builder as kb
 
     try:
-        return len(gate._materialized(kb.release_id_for(instance_id, app_id), plane))
+        return len(gate._materialized(release_id or kb.release_id_for(instance_id, app_id), plane))
     except Exception:
         return None
 

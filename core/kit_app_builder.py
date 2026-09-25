@@ -304,12 +304,71 @@ def fields_from_certified(store: Any, instance_id: str, contract_key: str) -> Li
     return kept
 
 
-def release_id_for(instance_id: str, app_id: str) -> str:
+def release_id_for(instance_id: str, app_id: str, artifact_digest: str = "") -> str:
     """이 인스턴스의 이 앱이 쓰는 릴리스 식별자.
 
     ★ 결정론적이다 — 같은 인스턴스·같은 앱을 다시 만들면 **같은 자리를 이어받는다**
-      (`adopt_dataset`). 새로 만들면 현업이 쌓은 레코드가 승계되지 않는다."""
-    return f"kitapp_{str(instance_id).strip()}_{str(app_id).strip()}"
+      (`adopt_dataset`). 새로 만들면 현업이 쌓은 레코드가 승계되지 않는다.
+    ★★ [2026-09-25 Codex §19.2] **판본별 릴리스.** 업그레이드한 판본의 앱은 번들 지문(앞 16자)을
+      넣은 새 ID 다. cohort 가 ID 마다 번들 지문을 불변으로 고정하므로, 같은 ID 를 다른 판본에
+      다시 쓰지 않는다 — 옛 판본의 ID·cohort·게시물은 이력으로 남는다. 설치 때 고정한 원 판본은
+      지문 없는 종전 ID 다(`release_id_for_version`) — 이미 게시된 릴리스의 ID 가 바뀌지 않는다.
+    ⚠️ 새 ID 는 옛 ID 의 레코드를 **승계하지 않는다.** 사용자 작성 데이터의 이관·채택은 자동으로
+      하지 않고 별도로 확인할 일이다(읽기 앱 APP-03 에는 작성 데이터가 없다)."""
+    base = f"kitapp_{str(instance_id).strip()}_{str(app_id).strip()}"
+    if not artifact_digest:
+        return base
+    if not re.fullmatch(r"[0-9a-f]{64}", str(artifact_digest)):
+        raise KitAppError("릴리스 식별자의 번들 지문 형식이 다릅니다.")
+    return f"{base}_{artifact_digest[:16]}"
+
+
+def release_id_for_version(store: Any, instance: Mapping[str, Any], app_id: str, artifact_digest: str) -> str:
+    """이 적용본의 **그 판본** 앱 릴리스 ID. 고정 이력에 없는 판본이면 막는다(추측하지 않는다)."""
+    from core.data_preparation.process_kit_instances import pin_for_store
+    from core.enterprise_context.process_schema import ProcessError
+    pin = pin_for_store(store, instance, artifact_digest)
+    if pin is None:
+        raise ProcessError("PROCESS_INSTANCE_UNAVAILABLE", "적용본의 고정 이력에 없는 판본입니다.", 503)
+    return release_id_for(instance["instance_id"], app_id, "" if pin["sequence"] == 0 else artifact_digest)
+
+
+def current_release_id(store: Any, instance_id: str, app_id: str) -> str:
+    """지금 **활성 판본**의 앱 릴리스 ID — 앱 목록·진입·운영 전환이 가리키는 곳.
+
+    B2 결속이 없는 적용본(1.0)이나 이력 0번(설치 원 판본)이면 종전 ID 그대로다."""
+    from core.data_preparation.process_kit_instances import current_pin
+    get = getattr(store, "get_instance", None)
+    instance = get(instance_id) if callable(get) and callable(getattr(store, "transaction", None)) else None
+    if not instance:
+        return release_id_for(instance_id, app_id)
+    with store.transaction() as conn:
+        pin = current_pin(conn, dict(instance))
+    if not pin or pin["sequence"] == 0:
+        return release_id_for(instance_id, app_id)
+    return release_id_for(instance_id, app_id, pin["artifact_digest"])
+
+
+def release_history(store: Any, instance_id: str, app_id: str) -> List[Dict[str, Any]]:
+    """[§19.2] 이 앱의 **판본별 게시물**(오래된 것부터). 게시 파일이 있는 판본만 — 옛 게시물 조회용.
+
+    ⚠️ 목록에 있다는 것은 «이력으로 볼 수 있다» 는 뜻이지 운영 사용권이 아니다. 운영 조회는 매번
+      그 릴리스의 고정 문맥을 다시 검증한다(`studio_release_context`)."""
+    import os
+    from core import library_paths
+    from core.data_preparation.process_kit_instances import pins
+    instance = store.get_instance(instance_id)
+    if not instance:
+        return []
+    with store.transaction() as conn:
+        history = pins(conn, dict(instance))
+    out = []
+    for pin in history:
+        release_id = release_id_for(instance_id, app_id, "" if pin["sequence"] == 0 else pin["artifact_digest"])
+        if os.path.exists(library_paths.release_json(release_id)):
+            out.append(dict(release_id=release_id, kit_version=pin["identity"]["version"],
+                            artifact_digest=pin["artifact_digest"], current=pin is history[-1]))
+    return out
 
 
 def _now_iso() -> str:
@@ -724,7 +783,16 @@ def build_v2(*, store, app_data, instance_id, app_id, revision, expected_fingerp
     kac.validated_v2(store, instance_id=instance_id, app_id=app_id, revision=revision,
         expected_fingerprint=expected_fingerprint, actor_id=actor_id, context=context,
         for_action="GENERATE", require_approved=True, repo=repo)
-    release_id = release_id_for(instance_id, app_id)
+    #: ★★ [2026-09-25 Codex §19.2] 판본별 릴리스 — **현재 활성 판본**의 계약으로만 만든다. 옛 판본의
+    #:   계약으로 만들면 옛 ID 의 불변 cohort 와 겹치거나 현재 고정과 어긋난 cohort 가 생긴다.
+    from core.data_preparation.process_kit_instances import current_pin
+    with store.transaction() as conn:
+        active = current_pin(conn, dict(instance))
+    if active and active["artifact_digest"] != bundle["artifact_digest"]:
+        raise ProcessError("STUDIO_RELEASE_VERSION_NOT_ACTIVE",
+                           "현재 활성 판본의 계약으로만 앱을 만듭니다. 새 판본으로 계약을 다시 작성·승인하십시오.", 409)
+    release_id = (release_id_for_version(store, instance, app_id, bundle["artifact_digest"]) if active
+                  else release_id_for(instance_id, app_id))
     from core.studio_release_cohort import pin_release_cohort
     pin_release_cohort(store, release_id=release_id, instance_id=instance_id, app_id=app_id,
                        context_key=contract["process_context"]["context_key"])

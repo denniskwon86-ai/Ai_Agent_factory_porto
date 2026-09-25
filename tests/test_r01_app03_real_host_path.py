@@ -232,17 +232,20 @@ def _ok(response):
     return response.json()["data"]
 
 
-def _operate(h):
-    """승인 → 실제 build → 실제 운영 전환 → 열람자 증명. 앱을 «연» 상태를 돌려준다."""
+def _operate(h, *, expected_revision=0, release_id=None):
+    """승인 → 실제 build → 실제 운영 전환 → 열람자 증명. 앱을 «연» 상태를 돌려준다.
+
+    `release_id` 를 주지 않으면 설치 원 판본의 종전 ID 를 기대한다(판본별 릴리스, Codex §19.2)."""
     from core import kit_app_builder as kb, library_paths
     from core.program_lifecycle import program_lifecycle
     c, url = h["client"], PREFIX.format(instance_id=h["instance_id"])
-    row = approve(h, draft(h))
+    row = approve(h, draft(h, expected_revision=expected_revision))
     assert row["drafted_by"] == org.MEMBER_A and row["approved_by"] == org.ADMIN
     built = _ok(c.post(url + "build/v2", headers=h["session"](org.MEMBER_A),
                        json={"revision": row["revision"], "expected_fingerprint": row["semantic_fingerprint"]}))
+    expected = release_id or kb.release_id_for(h["instance_id"], APP)
     release_id = built["release_id"]
-    assert release_id == kb.release_id_for(h["instance_id"], APP)
+    assert release_id == expected
     #: 게시는 실제 파일이다 — 격리한 library 아래에 있다.
     published = Path(library_paths.release_json(release_id)).resolve()
     assert published.is_file() and published.is_relative_to(h["library"].resolve()), published

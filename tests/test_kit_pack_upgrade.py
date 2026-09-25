@@ -157,3 +157,41 @@ def test_an_old_release_stays_verifiable_but_is_not_rebuilt_after_upgrade(store)
     assert fresh["artifact_digest"] == V120["artifact_digest"]
     assert json.loads(_raw(store, "SELECT identity_json FROM kit_process_release_cohorts WHERE release_id=?",
                            ("kitapp_old_APP-03",))[0]["identity_json"])["instance_id"] == instance["instance_id"]
+
+
+def test_an_approved_but_not_yet_activated_version_is_told_apart_from_corruption(store):
+    """[Codex §19.1] 승인판이 가리키는 더 높은 판본이 이력에 없으면 «활성화 대기» 다 — 손상이 아니다.
+    같은 판본·낮은 판본·다른 키트는 대기로 보지 않는다(그건 대기가 아니라 어긋남이다)."""
+    instance = _installed(store)
+    other_kit = {**V120, "kit_id": "KIT-SOMETHING-ELSE"}
+    with store.transaction() as conn:
+        row = _row(conn, instance["instance_id"])
+        assert pki.activation_pending(conn, row, V120) is True
+        assert pki.activation_pending(conn, row, V110) is False
+        assert pki.activation_pending(conn, row, other_kit) is False
+    _upgrade(store, instance)
+    with store.transaction() as conn:
+        row = _row(conn, instance["instance_id"])
+        assert pki.activation_pending(conn, row, V120) is False
+        assert pki.activation_pending(conn, row, V110) is False
+
+
+def test_each_version_of_an_app_gets_its_own_release_id(store):
+    """[Codex §19.2] 설치 원 판본은 종전 ID(이미 게시된 릴리스의 ID 가 바뀌지 않는다), 업그레이드한 판본은
+    번들 지문을 넣은 새 ID. 현재 활성 판본이 앱 진입의 ID 다. 이력에 없는 판본은 추측하지 않고 막는다."""
+    from core import kit_app_builder as kb
+    instance = _installed(store)
+    iid = instance["instance_id"]
+    legacy = f"kitapp_{iid}_APP-03"
+    assert kb.release_id_for(iid, "APP-03") == legacy
+    assert kb.release_id_for_version(store, instance, "APP-03", V110["artifact_digest"]) == legacy
+    assert kb.current_release_id(store, iid, "APP-03") == legacy
+    with pytest.raises(ProcessError):
+        kb.release_id_for_version(store, instance, "APP-03", V120["artifact_digest"])
+    _upgrade(store, instance)
+    upgraded = kb.release_id_for_version(store, instance, "APP-03", V120["artifact_digest"])
+    assert upgraded == f"{legacy}_{V120['artifact_digest'][:16]}" != legacy
+    assert kb.current_release_id(store, iid, "APP-03") == upgraded
+    assert kb.release_id_for_version(store, instance, "APP-03", V110["artifact_digest"]) == legacy
+    with pytest.raises(kb.KitAppError):
+        kb.release_id_for(iid, "APP-03", "not-a-digest")

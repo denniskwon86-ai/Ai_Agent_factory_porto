@@ -1663,6 +1663,80 @@ test('STATIC: 두 진입 버튼의 단일 패널·닫기 재조회 배선 / DOM�
 });
 
 const originalFetch = globalThis.fetch;
+// [2026-09-26 Codex §20] 판본 업그레이드 — 활성화 대기의 복구는 같은 승인자의 같은 승인 재요청뿐이다.
+const upgradeRetry = { change_id: 'synthetic-upgrade-change', expected_head_version: 7,
+  draft_digest: 'e'.repeat(64), reason: '합성 원래 승인 이유' };
+const pendingUpgrade = { instance_id: 'synthetic-instance', from_artifact_digest: 'a'.repeat(64),
+  to_artifact_digest: 'b'.repeat(64), from_version: '1.1.0', to_version: '1.2.0',
+  activation: 'ACTIVATION_PENDING', activation_error: 'PROCESS_STORAGE_UNAVAILABLE', retry: upgradeRetry };
+function renderUpgrade(h, upgrade) {
+  const { UpgradeActivation } = loadTs('../src/components/ProcessInstallationPanel.tsx', {
+    '../lib/processInstallationApi': apiModule, '../lib/processInstallationFlow': flowModule,
+    './process-installation.css': {},
+  });
+  return renderToStaticMarkup(React.createElement(UpgradeActivation, { flow: h.flow, state: h.flow.getSnapshot(), upgrade }));
+}
+
+test('업그레이드: 활성화 재시도는 서버가 준 같은 승인 값만 POST / 아직 대기면 503 을 보이고 다시 읽음 / 복구 뒤에는 POST 없음', async () => {
+  let attempts = 0;
+  const h = followup({ approve: (_boundary, changeId, body) => {
+    attempts += 1;
+    if (attempts === 1) throw new ProcessApiError(503, '합성 활성화 대기', 'PROCESS_UPGRADE_ACTIVATION_PENDING');
+    const { retry: _retry, activation_error: _error, ...rest } = h.live.operation.upgrade;
+    h.live.operation.upgrade = { ...rest, activation: 'ACTIVE' };
+    return { change_id: changeId, configuration_id: resolved.configuration_id, status: 'APPLIED',
+      profile_id: 'synthetic-upgrade-profile', head_version: body.expected_head_version + 1,
+      digest: body.draft_digest, event_id: 'synthetic-approval-event', audit_delivery: 'PENDING' };
+  } });
+  Object.assign(h.live.operation, { stage: 'APPLIED', change_id: upgradeRetry.change_id, permitted_actions: [],
+    upgrade: copy(pendingUpgrade) });
+  await openedOperation(h);
+  await h.flow.retryActivation();
+  assert.deepEqual(writeCalls(h).map((call) => call.args), [[boundary, upgradeRetry.change_id, {
+    expected_head_version: 7, draft_digest: 'e'.repeat(64), reason: '합성 원래 승인 이유' }]]);
+  assert.equal(h.flow.getSnapshot().error.reasonCode, 'PROCESS_UPGRADE_ACTIVATION_PENDING');
+  assert.equal(h.flow.getSnapshot().operation.upgrade.activation, 'ACTIVATION_PENDING');
+  await h.flow.retryActivation();
+  assert.equal(writeCalls(h).length, 2);
+  assert.equal(h.flow.getSnapshot().error, null);
+  assert.equal(h.flow.getSnapshot().operation.upgrade.activation, 'ACTIVE');
+  await h.flow.retryActivation();
+  assert.equal(writeCalls(h).length, 2, '활성화된 뒤에는 다시 보내지 않는다');
+  assert.equal(h.flow.getSnapshot().error.status, 409);
+});
+
+test('업그레이드: 다른 오류는 삼키지 않는다 / retry 값이 없으면(승인자가 아님) POST 없음', async () => {
+  const h = followup({ approve: () => { throw new ProcessApiError(409, '합성 기준판 충돌', 'PROCESS_HEAD_CONFLICT'); } });
+  Object.assign(h.live.operation, { stage: 'APPLIED', change_id: upgradeRetry.change_id, permitted_actions: [],
+    upgrade: copy(pendingUpgrade) });
+  await openedOperation(h);
+  await h.flow.retryActivation();
+  assert.equal(h.flow.getSnapshot().error.reasonCode, 'PROCESS_HEAD_CONFLICT');
+  const other = followup();
+  const { retry: _retry, ...withoutRetry } = pendingUpgrade;
+  Object.assign(other.live.operation, { stage: 'APPLIED', change_id: upgradeRetry.change_id, permitted_actions: [],
+    upgrade: copy(withoutRetry) });
+  await openedOperation(other);
+  await other.flow.retryActivation();
+  assert.equal(writeCalls(other).length, 0);
+  assert.equal(other.flow.getSnapshot().error.status, 409);
+});
+
+test('업그레이드 SSR: 활성화 대기는 사유와 (승인자에게만) 재시도 버튼 / 승인 대기는 현재 판본 유지 안내', async () => {
+  const h = followup(); await h.flow.load();
+  const pendingHtml = renderUpgrade(h, pendingUpgrade);
+  assert.ok(pendingHtml.includes('판본 업그레이드 1.1.0 → 1.2.0'));
+  assert.ok(pendingHtml.includes('마지막 활성화 실패 사유: PROCESS_STORAGE_UNAVAILABLE'));
+  assert.ok(pendingHtml.includes('>같은 승인으로 활성화 다시 시도</button>'));
+  const { retry: _retry, ...withoutRetry } = pendingUpgrade;
+  const othersHtml = renderUpgrade(h, withoutRetry);
+  assert.ok(!othersHtml.includes('</button>'));
+  assert.ok(othersHtml.includes('이 승인을 한 승인자만'));
+  const waitingHtml = renderUpgrade(h, { ...withoutRetry, activation: 'AWAITING_APPROVAL', activation_error: undefined });
+  assert.ok(waitingHtml.includes('승인 전까지 현재 판본이 그대로 활성입니다'));
+  assert.ok(!waitingHtml.includes('</button>') && !waitingHtml.includes('실패 사유'));
+});
+
 const passedCases = [];
 let failed = false;
 globalThis.fetch = async () => { throw new Error('격리 시험: 실제 네트워크 요청 금지'); };

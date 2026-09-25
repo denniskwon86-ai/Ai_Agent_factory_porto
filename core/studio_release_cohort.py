@@ -236,6 +236,8 @@ def pin_release_cohort(store, *, release_id, instance_id, app_id, context_key) -
             if existing and existing["artifact_digest"] != _references(conn, identity, stored=True):
                 #: ★ [2026-09-25] 업그레이드 **전** 판본에 고정된 릴리스를 같은 ID 로 다시 만들지 않는다.
                 #:   cohort 는 릴리스 ID 마다 불변이다 — 조용히 옛 판본으로 게시하거나 덮지 않고 멈춘다.
+                #: ★ [§19.2] 제품 경로(`build_v2`)는 이제 판본별 새 ID 를 쓰고 활성 판본으로만 만들어
+                #:   여기 오지 않는다. 이 거절은 ID 규칙이 어긋났을 때의 **안전망**으로 남긴다.
                 _error("STUDIO_RELEASE_REBUILD_AFTER_UPGRADE_UNSUPPORTED",
                        "업그레이드 전 판본에 고정된 릴리스는 같은 ID 로 다시 만들 수 없습니다. 기존 릴리스는 이력으로 남습니다.", 409)
             _ensure_table(conn)

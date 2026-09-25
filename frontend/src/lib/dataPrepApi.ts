@@ -239,6 +239,14 @@ export interface KitAppRow {
    *   올려야 한다 — 그 전에는 앱을 열어도 표만 있고 레코드가 0 이다.
    */
   lifecycle_state: string | null;
+  /**
+   * [2026-09-26] 이전 판본의 게시물(업그레이드 전 릴리스). **이력**이며 앱 진입이 아니다.
+   * 서버의 `lifecycle_state` 가 `active` 여도 운영 중으로 그리지 않는다(Codex §20 결정).
+   */
+  release_history?: {
+    release_id: string; kit_version: string; artifact_digest: string;
+    current: boolean; lifecycle_state: string | null;
+  }[];
 }
 
 export async function listKitApps(instanceId: string) {

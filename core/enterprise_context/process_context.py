@@ -347,14 +347,39 @@ class ProcessContextService:
         #: ★ [2026-09-25] 업그레이드한 적용본은 같은 인스턴스 ID 로 여러 판본에 고정된 이력을 갖는다.
         #:   인스턴스 행·원 링크는 원 정체성으로 검증하고(`pins` 안의 `_link`), 이 업무판이 가리키는
         #:   번들은 **그 이력 안에** 있어야 한다. 과거 승인판(옛 판본)도 이력에 있으므로 그대로 읽힌다.
-        from core.data_preparation.process_kit_instances import pin_for
+        #: ★ [2026-09-25 Codex §19.1] 새 판본은 업무판 승인 **뒤에** 활성화된다. 승인판이 이력에 없는
+        #:   더 높은 판본을 가리키면 손상이 아니라 «활성화 대기» 다 — 어느 쪽이든 소비는 막는다.
+        from core.data_preparation.process_kit_instances import activation_pending, pin_for
         try:
             pin = pin_for(conn, dict(instance), bundle["artifact_digest"])
+            pending = not pin and activation_pending(conn, dict(instance), bundle)
         except ProcessError as exc:
             raise _unavailable("PROCESS_INSTANCE_UNAVAILABLE") from exc
+        if pending:
+            raise _conflict("PROCESS_UPGRADE_ACTIVATION_PENDING")
         if not pin or pin["context_root_id"] != boundary.context_root_id or pin["identity"] != expected:
             raise _unavailable("PROCESS_INSTANCE_UNAVAILABLE")
         return dict(instance)
+
+    @staticmethod
+    def _signed_against_current_contract(conn, row, payload):
+        """★★ [2026-09-25 Codex 검토] **운영 사용은 현재 고정 계약으로 검증된 서명만.**
+
+        계약 관문 이전의 서명(계약 지문 없음)이나 업그레이드 전 계약의 서명은 서명·이력을 그대로
+        두되 운영에는 쓰지 않는다 — 재인증(새 판)으로만 다시 쓸 수 있다.
+        ⚠️ 새 문맥을 만들 때 이 충돌은 차단 항목으로 접혀 초안·열람은 되고 운영 행동만 빠진다.
+          이미 고정된 문맥을 다시 검증할 때는 그대로 막힌다(`_data` 의 409 처리)."""
+        from core.data_preparation import certification_authority as ca
+        from core.data_preparation.process_kit_instances import pinned_dataset_contract
+        instance = conn.execute("SELECT * FROM kit_instances WHERE instance_id=?", (row["instance_id"],)).fetchone()
+        try:
+            contract = pinned_dataset_contract(conn, dict(instance), row["dataset_contract_key"]) if instance else None
+        except ProcessError as exc:
+            raise _unavailable("PROCESS_CERTIFICATION_UNAVAILABLE") from exc
+        if contract is None:
+            raise _conflict("CONTRACT_NOT_PINNED")
+        if payload.get("dataset_contract_digest") != ca.digest(contract):
+            raise _conflict("CERTIFICATION_RECERTIFICATION_REQUIRED")
 
     @staticmethod
     def _owner_proof(conn, row, binding, owner, actor, context, *, held_history=False):
@@ -385,22 +410,8 @@ class ProcessContextService:
         if any(payload.get(k) != value for k, value in expected.items()):
             raise _conflict("REVIEW_STALE")
         if not held_history:
-            #: ★★ [2026-09-25 Codex 검토] **운영 사용은 현재 고정 계약으로 검증된 서명만.**
-            #:   계약 관문 이전의 서명(계약 지문 없음)이나 업그레이드 전 계약의 서명은 서명·이력을
-            #:   그대로 두되 운영에는 쓰지 않는다 — 재인증(새 판)으로만 다시 쓸 수 있다.
-            #: ⚠️ 새 문맥을 만들 때 이 충돌은 차단 항목으로 접혀 초안·열람은 되고 운영 행동만 빠진다.
-            #:   이미 고정된 문맥을 다시 검증할 때는 그대로 막힌다(`_data` 의 409 처리).
             #: ⚠️ 이력 조회(`held_history`)는 이 검사를 건너뛴다 — 역사 조회와 운영 사용을 가른다.
-            from core.data_preparation.process_kit_instances import pinned_dataset_contract
-            instance = conn.execute("SELECT * FROM kit_instances WHERE instance_id=?", (row["instance_id"],)).fetchone()
-            try:
-                contract = pinned_dataset_contract(conn, dict(instance), row["dataset_contract_key"]) if instance else None
-            except ProcessError as exc:
-                raise _unavailable("PROCESS_CERTIFICATION_UNAVAILABLE") from exc
-            if contract is None:
-                raise _conflict("CONTRACT_NOT_PINNED")
-            if payload.get("dataset_contract_digest") != ca.digest(contract):
-                raise _conflict("CERTIFICATION_RECERTIFICATION_REQUIRED")
+            ProcessContextService._signed_against_current_contract(conn, row, payload)
         signatures = [dict(s) for s in conn.execute(
             "SELECT * FROM certification_signatures WHERE subject_id=? ORDER BY review_kind", (head["subject_id"],))]
         document = policy["document"]

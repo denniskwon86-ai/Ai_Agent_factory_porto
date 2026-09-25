@@ -49,12 +49,24 @@ export type InstallationPlan = {
   plan_digest: string; preview: ProcessDocument; state: string; warnings: string[];
   data_ready: boolean; apps_ready: boolean;
 };
+/**
+ * [2026-09-26] 판본 업그레이드 작업의 활성화 상태. 서버가 ECM 단계와 DP 고정 이력에서 유도한다.
+ * `retry` 는 활성화 대기일 때 **그 승인자에게만** 온다 — 같은 승인 재요청이 유일한 복구 경로다(Codex §20).
+ */
+export type InstallationUpgrade = {
+  instance_id: string; from_artifact_digest: string; to_artifact_digest: string;
+  from_version: string; to_version: string;
+  activation: 'NOT_REQUESTED' | 'AWAITING_APPROVAL' | 'NOT_ACTIVATED' | 'ACTIVE' | 'ACTIVATION_PENDING' | string;
+  activation_error?: string;
+  retry?: { change_id: string; expected_head_version: number; draft_digest: string; reason: string };
+};
 export type InstallationOperation = {
   operation_id: string; configuration_id: string; plan_digest: string; stage: string;
   error_code: string; kit_instance_ref: string; change_id: string; actor: string;
   installer: string; revision: number; applied_profile_id: string;
   data_ready: boolean; apps_ready: boolean;
   permitted_actions?: string[];
+  upgrade?: InstallationUpgrade;
 };
 export type InstallationPage = { items: InstallationOperation[]; next_offset: number | null };
 export type ProcessChangeSummary = {

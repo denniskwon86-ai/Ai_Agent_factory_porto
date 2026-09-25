@@ -574,6 +574,8 @@ function AppRow({
         </div>
       ))}
 
+      <ReleaseHistory items={row.release_history} />
+
       {notice && isLegacy && (
         <div style={{
           marginTop: 8, padding: '6px 10px', fontSize: 13, borderRadius: 6,
@@ -591,6 +593,41 @@ function AppRow({
         </div>
       )}
     </li>
+  );
+}
+
+/**
+ * [2026-09-26 Codex §20 결정] 이전 판본의 게시물 — **이력**이다.
+ *
+ * ★ 앱 진입(`release_id`)은 현재 활성 판본의 릴리스만 가리킨다. 여기 있는 것은 업그레이드 전에
+ *   게시한 옛 릴리스다. 운영 요청은 매번 현재 판본·인증으로 다시 검증되고, 이력에서 여는 길은
+ *   두지 않는다.
+ * ⚠️ 서버의 운영 상태(`lifecycle_state`)가 `active` 로 남아 있어도 «운영 중» 으로 그리지 않고 그
+ *   값 자체도 보이지 않는다 — «active» 라는 글자가 운영 가능으로 읽힌다(Codex §20 결정). 자동 퇴역은
+ *   아직 정하지 않았다(롤백 정책과 함께).
+ */
+function ReleaseHistory({ items }: { items?: KitAppRow['release_history'] }) {
+  if (!items || !items.length) return null;
+  return (
+    <details style={{ marginTop: 8, fontSize: 13 }}>
+      <summary style={{ cursor: 'pointer', color: 'var(--surface-text-muted)' }}>
+        이전 판본 게시 이력 {items.length}건
+      </summary>
+      <ul style={{ margin: '6px 0 0', paddingLeft: 18, display: 'grid', gap: 4 }}>
+        {items.map((item) => (
+          <li key={item.release_id}>
+            <b>판본 {item.kit_version}</b>
+            <span style={{ marginLeft: 6, color: 'var(--state-warn-fg)' }}>
+              이력 · 현재 운영 불가
+            </span>
+            <span style={{ marginLeft: 6, color: 'var(--surface-text-muted)', fontSize: 12 }}>
+              현재 판본으로 재인증해 새로 게시한 앱을 사용하십시오.
+            </span>
+            <div style={{ color: 'var(--surface-text-muted)', fontSize: 11 }}>{item.release_id}</div>
+          </li>
+        ))}
+      </ul>
+    </details>
   );
 }
 

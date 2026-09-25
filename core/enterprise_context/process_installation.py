@@ -11,6 +11,12 @@ from core.enterprise_context.process_configuration import KEY_WHERE, ProcessConf
 from core.enterprise_context.process_schema import ProcessBoundary, ProcessDocument, ProcessError, ProcessNode, canonical, fingerprint, validate_document
 
 
+def _activation_pending_error():
+    return ProcessError("PROCESS_UPGRADE_ACTIVATION_PENDING",
+                        "업무판은 새 판본으로 승인됐지만 적용본의 판본 활성화가 끝나지 않았습니다. "
+                        "승인자가 같은 승인을 다시 요청하면 활성화를 다시 시도합니다.")
+
+
 class ProcessInstallationService(ProcessConfigurationService):
     def __init__(self, repo=None, store=None):
         super().__init__(repo, store)
@@ -36,11 +42,15 @@ class ProcessInstallationService(ProcessConfigurationService):
 
         ★ [2026-09-25] 업그레이드한 적용본은 같은 ID 로 여러 판본에 고정된 이력을 갖는다 —
           판본 동등이 아니라 이력 소속으로 본다(과거 승인판의 원본도 그대로 검증된다)."""
-        from core.data_preparation.process_kit_instances import pin_for_store
+        from core.data_preparation.process_kit_instances import activation_pending, pin_for_store
         row = self._instance_row(instance_id, boundary)
         if row["status"] != "active" or row["kit_id"] != bundle["kit_id"]:
             raise ProcessError("PROCESS_INSTANCE_CONFLICT", "선택한 인스턴스의 상태·판본이 설치 계획과 다릅니다.")
         pin = pin_for_store(self.store, row, bundle["artifact_digest"])
+        if not pin:
+            with self.store.transaction() as conn:
+                if activation_pending(conn, row, bundle):
+                    raise _activation_pending_error()
         if (not pin or pin["context_root_id"] != boundary.context_root_id
                 or pin["identity"]["version"] != bundle["version"]):
             raise ProcessError("PROCESS_INSTANCE_MIGRATION_REQUIRED", "기존 인스턴스의 불변 원본 대응을 먼저 검토해야 합니다.")
@@ -508,15 +518,57 @@ class ProcessInstallationService(ProcessConfigurationService):
         self._authorize(conn, boundary, actor, context, "read")
         return actions
 
+    def upgrade_view(self, row, plan, conn, actor=None):
+        """[§19.1] 업그레이드 작업의 판본 활성화 상태. 업그레이드가 아니면 `None`. `conn` 은 ECM 연결.
+
+        ECM 단계와 DP 고정 이력에서 **유도**한다(따로 저장한 상태가 없다):
+        승인 전 `NOT_REQUESTED`·`AWAITING_APPROVAL`, 반려·취소 `NOT_ACTIVATED`,
+        승인 뒤 이 작업의 고정이 이력에 있으면 `ACTIVE`, 없으면 `ACTIVATION_PENDING`
+        (+ 마지막 활성화 실패 사유 `activation_error` — 감사 사건에서 읽는다. 시도 전이면 빈 문자열).
+
+        ★ [2026-09-26 Codex §20 결정] 복구는 **같은 승인자의 같은 승인 재요청**만이다. 그래서 활성화
+          대기일 때 그 승인자(`actor == review_by`)에게만 다시 보낼 값(`retry`)을 준다 — 화면이 원래
+          승인 이유를 기억하지 않아도 같은 요청을 재현할 수 있게. 다른 사람에게는 주지 않는다."""
+        from core.data_preparation.process_kit_instances import pin_for_store
+        if not plan.get("upgrade_from_artifact_digest"):
+            return None
+        stage = row["stage"]
+        view = {"instance_id": plan["instance_id"], "from_artifact_digest": plan["upgrade_from_artifact_digest"],
+                "to_artifact_digest": plan["artifact_digest"],
+                "from_version": self._bundle(plan["upgrade_from_artifact_digest"])["version"],
+                "to_version": self._bundle(plan["artifact_digest"])["version"]}
+        if stage == "APPLIED":
+            instance = self.store.get_instance(plan["instance_id"])
+            pin = pin_for_store(self.store, instance, plan["artifact_digest"]) if instance else None
+            if pin and pin["operation_id"] == row["operation_id"]:
+                return {**view, "activation": "ACTIVE"}
+            last = conn.execute("SELECT payload_json FROM enterprise_process_outbox WHERE change_id=? AND event_type=? "
+                                "ORDER BY created_at DESC, event_id DESC LIMIT 1",
+                                (row["change_id"], ACTIVATION_FAILED)).fetchone()
+            view.update(activation="ACTIVATION_PENDING",
+                        activation_error=json.loads(last["payload_json"])["reason_code"] if last else "")
+            change = conn.execute("SELECT * FROM enterprise_process_changes WHERE change_id=?", (row["change_id"],)).fetchone()
+            if actor and change and change["status"] == "APPLIED" and change["review_by"] == actor:
+                view["retry"] = {"change_id": change["change_id"], "expected_head_version": change["base_head_version"],
+                                 "draft_digest": change["draft_digest"], "reason": change["review_reason"]}
+            return view
+        return {**view, "activation": {"AWAITING_APPROVAL": "AWAITING_APPROVAL", "FAILED_BLOCKED": "NOT_ACTIVATED",
+                                       "CANCELLED": "NOT_ACTIVATED"}.get(stage, "NOT_REQUESTED")}
+
+    def _with_upgrade(self, result, row, boundary, conn, actor=None):
+        view = self.upgrade_view(row, self._read_plan(row, boundary), conn, actor)
+        return {**result, "upgrade": view} if view else result
+
     def _response(self, row, conn, actor, context):
         boundary = ProcessBoundary(**{k: row[k] for k in ProcessBoundary.model_fields})
-        return {**self._result(row, conn),
-                "permitted_actions": self._operation_actions(row, conn, boundary, actor, context)}
+        return self._with_upgrade({**self._result(row, conn),
+                                   "permitted_actions": self._operation_actions(row, conn, boundary, actor, context)},
+                                  row, boundary, conn, actor)
 
     def get(self, *, operation_id, actor, context):
         with self.transaction() as conn:
             row, boundary = self._operation(conn, operation_id, actor, context)
-            result = self._verified_result(row, conn, boundary)
+            result = self._with_upgrade(self._verified_result(row, conn, boundary), row, boundary, conn, actor)
             result["permitted_actions"] = self._operation_actions(row, conn, boundary, actor, context)
             self._authorize(conn, boundary, actor, context, "read")
             return result
@@ -531,8 +583,9 @@ class ProcessInstallationService(ProcessConfigurationService):
             rows = conn.execute(f"SELECT * FROM enterprise_process_installations WHERE {KEY_WHERE} "
                                 "ORDER BY created_at DESC, operation_id DESC LIMIT ? OFFSET ?",
                                 (*boundary.key(), limit + 1, offset)).fetchall()
-            items = [{**self._verified_result(dict(row), conn, boundary),
-                      "permitted_actions": self._operation_actions(dict(row), conn, boundary, actor, context)}
+            items = [self._with_upgrade({**self._verified_result(dict(row), conn, boundary),
+                                         "permitted_actions": self._operation_actions(dict(row), conn, boundary, actor, context)},
+                                        dict(row), boundary, conn, actor)
                      for row in rows[:limit]]
             # 조회 중 다른 연결에서 회수한 권한도 응답 직전에 재조회한다.
             self._authorize(conn, boundary, actor, context, "read")
@@ -570,15 +623,15 @@ class ProcessInstallationService(ProcessConfigurationService):
         try:
             bundle = self._bundle(plan["artifact_digest"])
             if plan.get("upgrade_from_artifact_digest"):
-                from core.data_preparation.process_kit_instances import upgrade_or_get
-                #: ★ [2026-09-25] 명시 적용: 검토한 계획(현재 고정 지문 CAS)대로 같은 적용본을 새 판본에
-                #:   고정한다(이력 한 줄 추가). 인스턴스·결속·판·인증은 지우지도 새로 만들지도 않는다.
+                #: ★★ [2026-09-25 Codex §19.1] 명시 적용은 **승인 대기 기록만** 만든다 — 이 작업의
+                #:   AWAITING_APPROVAL 과 초안이 그 기록이다. DP 고정 판본은 바꾸지 않는다(검토한 현재
+                #:   고정 지문 CAS 만 다시 확인). 활성 판본 전환은 업무판 승인이 커밋된 **뒤**
+                #:   `activate_approved_upgrade` 가 한다 — 반려·취소·승인 전에는 옛 판본이 그대로 활성이다.
                 with self.transaction() as conn:
                     if not self._authorize(conn, boundary, actor, context, "edit").has(PROJECT_CREATE):
                         raise ProcessError("PROCESS_INSTALLER_REQUIRED", "적용본을 업그레이드할 현재 권한이 필요합니다.", 403)
-                self._instance_row(plan["instance_id"], boundary)
-                instance = upgrade_or_get(self.store, operation_id=operation_id, instance_id=plan["instance_id"],
-                                          bundle=bundle, expected_from=plan["upgrade_from_artifact_digest"], actor=actor)
+                instance = self._upgradable_instance(plan["instance_id"], boundary,
+                                                     plan["upgrade_from_artifact_digest"], bundle)
             elif plan["instance_id"]:
                 instance = self._existing_instance(plan["instance_id"], boundary, bundle)
             else:
@@ -635,13 +688,22 @@ class ProcessInstallationService(ProcessConfigurationService):
             return self._response(row, conn, actor, context)
 
 
-def validate_installation_references(payload, boundary, *, repo=None, store=None):
+def validate_installation_references(payload, boundary, *, repo=None, store=None, upgrade=None):
+    """초안·승인판의 설치 참조가 DP 에 실제로 고정돼 있는가.
+
+    ★ [2026-09-25 Codex §19.1] `upgrade` 는 **이 변경안이 승인을 기다리는** 업그레이드다
+      (`pending_upgrade`). 그 원본 하나만은 아직 활성 판본이 아니므로 «지금 고정이 검토한 옛
+      판본이고, 같은 키트의 더 높은 판본인가» 로 본다. 그 밖의 원본은 이미 고정돼 있어야 한다."""
     if not payload["template_sources"]:
         return
     service = ProcessInstallationService(repo, store)
     for source in payload["template_sources"]:
         bundle = service._bundle(source["artifact_digest"])
-        service._existing_instance(source["kit_instance_ref"], boundary, bundle)
+        if (upgrade and source["kit_instance_ref"] == upgrade["instance_id"]
+                and source["artifact_digest"] == upgrade["to_artifact_digest"]):
+            service._upgradable_instance(source["kit_instance_ref"], boundary, upgrade["from_artifact_digest"], bundle)
+        else:
+            service._existing_instance(source["kit_instance_ref"], boundary, bundle)
         if (source["kit_id"] != bundle["kit_id"] or source["kit_version"] != bundle["version"] or
                 source["pack_id"] != bundle["pack"]["pack_id"] or source["pack_version"] != bundle["pack"]["version"] or
                 source["accepted_standard_digest"] != bundle["pack_digest"]):
@@ -660,3 +722,120 @@ def finish_installation(conn, change, result, now, *, rejected=False):
     else:
         conn.execute("UPDATE enterprise_process_installations SET stage='APPLIED',applied_profile_id=?,applied_at=?,result_json=?,updated_at=? WHERE operation_id=?",
                      (result["profile_id"], now, canonical(result), now, row["operation_id"]))
+
+
+# ── [2026-09-25 Codex §19.1] 업그레이드: 명시 적용 = 승인 대기, 활성 판본 전환 = 승인 뒤 ──────────
+#
+# ★ 반려·취소·승인 전: DP 고정 이력에 아무것도 쓰지 않았으므로 옛 판본이 그대로 활성이다
+#   (현재 계약·인증·프로필 불변).
+# ★ 승인: ECM 승인 트랜잭션이 커밋된 **뒤** 별도 DP 트랜잭션으로 활성화한다. 두 DB 사이 원자
+#   커밋을 가정하지 않는다.
+# ⚠️ 승인 직후 활성화 실패: 감사 사건(`PROCESS_UPGRADE_ACTIVATION_FAILED`)에 사유를 남기고 503. 그동안 승인판은 새 판본,
+#   DP 는 옛 판본이라 소비는 «활성화 대기»(409)로 막힌다. **같은 승인을 다시 요청**하면
+#   (승인의 멱등 경로) 같은 operation 으로 다시 활성화한다 — `upgrade_or_get` 이 멱등이다.
+# ★ 활성화 상태는 따로 저장하지 않는다 — ECM 단계와 DP 이력에서 유도한다(`upgrade_view`).
+
+def pending_upgrade(conn, change):
+    """이 변경안이 **업그레이드 설치 작업**의 초안이면 그 판본 쌍, 아니면 `None`. ECM 연결에서 읽는다."""
+    try:
+        patch = json.loads(change["patch_json"])
+    except (TypeError, ValueError):
+        return None
+    if not isinstance(patch, dict) or patch.get("op") != "INSTALL_PACK":
+        return None
+    row = conn.execute("SELECT * FROM enterprise_process_installations WHERE change_id=?", (change["change_id"],)).fetchone()
+    if not row or patch != {"op": "INSTALL_PACK", "operation_id": row["operation_id"]}:
+        return None
+    row = dict(row)
+    plan = ProcessInstallationService._read_plan(row, ProcessBoundary(**{k: row[k] for k in ProcessBoundary.model_fields}))
+    if not plan.get("upgrade_from_artifact_digest"):
+        return None
+    return dict(operation_id=row["operation_id"], instance_id=plan["instance_id"],
+                from_artifact_digest=plan["upgrade_from_artifact_digest"], to_artifact_digest=plan["artifact_digest"])
+
+
+def instance_versions(store, instance, *, repo=None):
+    """[2026-09-25 Codex §19.3] 적용본 목록의 판본 표시. B2 결속이 없으면 `None`(1.0 행은 그대로).
+
+    `version` = **승인된 활성 판본**(DP 마지막 고정 — 승인 뒤에만 쌓인다), `installed_version` = 설치
+    때 판본. 승인 대기·활성화 대기 판본은 `pending_upgrade` 로 **따로** 준다 — 현재 판본으로
+    오인시키지 않는다. 대기 판본은 지금 활성 판본에서 올라가는 것만 센다(다른 기준의 낡은 초안은
+    검토 화면이 HEAD 충돌로 막는다)."""
+    from core.data_preparation.process_kit_instances import pins
+    with store.transaction() as conn:
+        history = pins(conn, dict(instance))
+    if not history:
+        return None
+    active = history[-1]
+    service = ProcessInstallationService(repo, store)
+    pending = None
+    with service.transaction() as conn:
+        rows = conn.execute("SELECT * FROM enterprise_process_installations WHERE tenant_id=? AND context_root_id=? "
+                            "AND entity_mode=? AND stage IN ('AWAITING_APPROVAL','APPLIED') "
+                            "ORDER BY created_at DESC, operation_id DESC",
+                            (instance["tenant_id"], active["context_root_id"], instance["entity_mode"])).fetchall()
+        for row in map(dict, rows):
+            plan = service._read_plan(row, ProcessBoundary(**{k: row[k] for k in ProcessBoundary.model_fields}))
+            if plan.get("instance_id") != instance["instance_id"] or not plan.get("upgrade_from_artifact_digest"):
+                continue
+            view = service.upgrade_view(row, plan, conn)
+            if (view["activation"] == "ACTIVATION_PENDING"
+                    or (view["activation"] == "AWAITING_APPROVAL"
+                        and plan["upgrade_from_artifact_digest"] == active["artifact_digest"])):
+                pending = {"operation_id": row["operation_id"], "state": view["activation"],
+                           "version": service._bundle(plan["artifact_digest"])["version"],
+                           "artifact_digest": plan["artifact_digest"]}
+                if "activation_error" in view:
+                    pending["activation_error"] = view["activation_error"]
+                break
+    return {"version": active["identity"]["version"], "active_artifact_digest": active["artifact_digest"],
+            "installed_version": instance["version"], "pending_upgrade": pending}
+
+
+def activate_approved_upgrade(service, change_id, *, actor):
+    """승인이 커밋된 업그레이드의 활성 판본 전환(DP 고정 이력 한 줄). 업그레이드가 아니면 아무것도 안 한다."""
+    from core.data_preparation.process_kit_instances import upgrade_or_get
+    with service.transaction() as conn:
+        change = conn.execute("SELECT * FROM enterprise_process_changes WHERE change_id=?", (change_id,)).fetchone()
+        upgrade = pending_upgrade(conn, dict(change)) if change and change["status"] == "APPLIED" else None
+        if not upgrade:
+            return None
+        row = dict(conn.execute("SELECT * FROM enterprise_process_installations WHERE operation_id=?",
+                                (upgrade["operation_id"],)).fetchone())
+    if row["stage"] != "APPLIED":
+        raise ProcessError("PROCESS_INSTALLATION_CONFLICT", "업무 승인과 설치 단계가 일치하지 않습니다.")
+    installer = ProcessInstallationService(service.repo, service.store)
+    try:
+        upgrade_or_get(installer.store, operation_id=upgrade["operation_id"], instance_id=upgrade["instance_id"],
+                       bundle=installer._bundle(upgrade["to_artifact_digest"]),
+                       expected_from=upgrade["from_artifact_digest"], actor=actor)
+    except (ProcessError, sqlite3.Error) as exc:
+        try:
+            _record_activation(service, row, upgrade, ACTIVATION_FAILED, actor,
+                               getattr(exc, "reason_code", "PROCESS_STORAGE_UNAVAILABLE"))
+        except ProcessError:
+            pass
+        raise ProcessError("PROCESS_UPGRADE_ACTIVATION_PENDING",
+                           "업무판 승인은 기록됐고 새 판본 활성화는 끝나지 않았습니다. 같은 승인을 다시 요청하면 활성화를 다시 시도합니다.",
+                           503) from exc
+    _record_activation(service, row, upgrade, ACTIVATED, actor)
+    return upgrade
+
+
+#: ⚠️ APPLIED 설치 작업 행은 불변이다(`process_installation_immutable_update`). 활성화의 실패·성공은
+#:   그 행을 고치지 않고 **추가만 되는** ECM 감사 outbox 사건으로 남긴다.
+ACTIVATED, ACTIVATION_FAILED = "PROCESS_UPGRADE_ACTIVATED", "PROCESS_UPGRADE_ACTIVATION_FAILED"
+
+
+def _record_activation(service, row, upgrade, event_type, actor, reason_code=""):
+    event = {"operation_id": upgrade["operation_id"], "change_id": row["change_id"],
+             "instance_id": upgrade["instance_id"], "from_artifact_digest": upgrade["from_artifact_digest"],
+             "to_artifact_digest": upgrade["to_artifact_digest"], "actor": actor, "reason_code": reason_code}
+    with service.transaction(write=True) as conn:
+        if event_type == ACTIVATED and conn.execute(
+                "SELECT 1 FROM enterprise_process_outbox WHERE change_id=? AND event_type=?",
+                (row["change_id"], ACTIVATED)).fetchone():
+            return
+        conn.execute("INSERT INTO enterprise_process_outbox(event_id,configuration_id,change_id,event_type,payload_json,payload_digest,created_at) VALUES(?,?,?,?,?,?,?)",
+                     (uid("process_event"), row["configuration_id"], row["change_id"], event_type,
+                      canonical(event), fingerprint(event), service._now()))
