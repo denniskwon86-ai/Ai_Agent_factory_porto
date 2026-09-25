@@ -151,13 +151,22 @@ def resolve_process_binding(store: Any, *, process_context: Any, contract_key: s
         binding = store.get_binding(ref["binding_id"])
     except Exception as exc:
         raise MaterializeError("고정 업무 데이터 저장소를 읽을 수 없습니다.") from exc
-    instance_expected = {**expected, "instance_id": ref["instance_id"],
-                         "kit_fingerprint": ref["artifact_digest"], "status": "active"}
+    instance_expected = {**expected, "instance_id": ref["instance_id"], "status": "active"}
     binding_expected = {**expected, "instance_id": ref["instance_id"],
                         "binding_id": ref["binding_id"], "dataset_contract_key": contract_key,
                         "fingerprint": ref["binding_fingerprint"], "state": dpm.ACTIVE}
     if not isinstance(instance, dict) or any(instance.get(k) != v for k, v in instance_expected.items()):
         raise MaterializeError("고정 instance의 정체성·경계·artifact가 다르거나 사용할 수 없습니다.")
+    #: ★ [2026-09-25] 참조 원본이 인스턴스의 원 지문과 같으면 종전 그대로다. 다르면 업그레이드한
+    #:   적용본일 수 있다 — 같은 인스턴스 ID 의 **고정 이력 안에** 이 원본이 있어야 한다.
+    if instance.get("kit_fingerprint") != ref["artifact_digest"]:
+        try:
+            from core.data_preparation.process_kit_instances import pin_for_store
+            pinned = pin_for_store(store, instance, ref["artifact_digest"])
+        except Exception as exc:
+            raise MaterializeError("고정 instance의 원본 이력을 확인할 수 없습니다.") from exc
+        if not pinned:
+            raise MaterializeError("고정 instance의 정체성·경계·artifact가 다르거나 사용할 수 없습니다.")
     if not isinstance(binding, dict) or any(binding.get(k) != v for k, v in binding_expected.items()):
         raise MaterializeError("고정 binding의 정체성·경계·지문이 다르거나 활성 상태가 아닙니다.")
     return copy.deepcopy(ref)

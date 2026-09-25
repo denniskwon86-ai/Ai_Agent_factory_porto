@@ -88,8 +88,12 @@ def _head(conn: Any, snapshot_id: str) -> dict | None:
     return {**result, "payload": payload}
 
 
+#: 관문이 새 서명을 막는 사유(4xx). 이력 조회(`read`)는 이것들을 상태로 보여 주고 멈추지 않는다.
+_CONTRACT_GATE_CODES = frozenset({"CONTRACT_NOT_PINNED", "CONTRACT_CONFORMANCE_FAILED",
+                                  "RAW_CHECKSUM_MISMATCH", "RAW_UNAVAILABLE"})
 _ISSUE_LABELS = {"MISSING_FIELD": "필수 필드 누락", "EMPTY_BUSINESS_KEY": "빈 업무키",
-                 "DUPLICATE_BUSINESS_KEY": "업무키 중복"}
+                 "DUPLICATE_BUSINESS_KEY": "업무키 중복", "TENANT_MISMATCH": "테넌트 불일치",
+                 "SCOPE_OUT_OF_BOUNDS": "조직 범위 밖"}
 
 
 def _conforming_contract(conn: Any, row: dict) -> str:
@@ -112,7 +116,14 @@ def _conforming_contract(conn: Any, row: dict) -> str:
             raise auth.CertificationError(
                 "CONTRACT_NOT_PINNED",
                 "설치가 고정한 데이터셋 계약이 없습니다 — 계약을 싣는 업무 팩으로 설치한 데이터만 실적 인증을 할 수 있습니다.")
-        issues = cc.inspect(contract, *cc.sealed_table(row))
+        #: ★ [2026-09-25] 행의 조직 경계: 테넌트는 판과 같아야 하고, 조직 범위는 판의 조직 노드와
+        #:   그 하위(ECM 운영 조직 관계 — 기존 권한 계약이 쓰는 전개)여야 한다.
+        from core.enterprise_context.resolver import EcmResolver
+        try:
+            scopes = EcmResolver().descendants(row["scope_node_id"])
+        except Exception as exc:  # ECM 저장소 장애 — 모르는 범위를 통과로 세지 않는다
+            raise auth.CertificationError("CONTRACT_UNAVAILABLE", "행의 조직 범위를 확인하지 못했습니다.", 503) from exc
+        issues = cc.inspect(contract, *cc.sealed_table(row), tenant_id=row["tenant_id"], scopes=scopes)
     except (ProcessError, cc.ContractShapeError) as exc:
         raise auth.CertificationError("CONTRACT_UNAVAILABLE", "고정된 데이터셋 계약을 확인하지 못했습니다.", 503) from exc
     if issues:
@@ -331,6 +342,10 @@ def read(store: Any, snapshot_id: str, *, actor: str, context: dict) -> dict:
             except auth.CertificationError as exc:
                 if exc.reason_code == "REVIEW_STALE":
                     review_status = "REVIEW_STALE"
+                    review_issue = {"reason_code": exc.reason_code, "message": str(exc)}
+                elif exc.reason_code in _CONTRACT_GATE_CODES and exc.status_code < 500:
+                    #: ★ [2026-09-25] 계약 관문은 **새 서명**을 막을 뿐 과거 이력 조회를 막지 않는다.
+                    review_status = "CONTRACT_BLOCKED"
                     review_issue = {"reason_code": exc.reason_code, "message": str(exc)}
                 else:
                     raise

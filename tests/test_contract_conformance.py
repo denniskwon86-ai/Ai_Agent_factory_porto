@@ -150,3 +150,39 @@ def test_a_missing_raw_blocks_instead_of_passing(tmp_path, damage):
     with pytest.raises(CertificationError) as caught:
         cc.sealed_table(snapshot)
     assert caught.value.reason_code == "RAW_UNAVAILABLE"
+
+
+# ── [2026-09-25] 행의 조직 경계 ─────────────────────────────────────────────────
+def _scoped(tenant="tenant_x", scope="node_a", n=3):
+    columns, rows = sample("INV-01", n)
+    for row in rows:
+        row.update(tenant_id=tenant, scope_node_id=scope)
+    return columns, rows
+
+
+def test_rows_inside_the_snapshot_scope_or_below_pass():
+    columns, rows = _scoped()
+    rows[1]["scope_node_id"] = "node_a_child"
+    assert cc.inspect(contract("INV-01"), columns, rows, tenant_id="tenant_x",
+                      scopes=["node_a", "node_a_child"]) == []
+
+
+def test_a_row_of_another_tenant_is_refused_by_line():
+    columns, rows = _scoped()
+    rows[2]["tenant_id"] = "tenant_other"
+    assert cc.inspect(contract("INV-01"), columns, rows, tenant_id="tenant_x", scopes=["node_a"]) == [
+        {"code": cc.TENANT_MISMATCH, "line": 4, "fields": ["tenant_id"]}]
+
+
+@pytest.mark.parametrize("scope", ["node_b_sibling", "", "   "])
+def test_a_row_outside_the_permitted_scope_is_refused_by_line(scope):
+    columns, rows = _scoped()
+    rows[0]["scope_node_id"] = scope
+    assert cc.inspect(contract("INV-01"), columns, rows, tenant_id="tenant_x", scopes=["node_a"]) == [
+        {"code": cc.SCOPE_OUT_OF_BOUNDS, "line": 2, "fields": ["scope_node_id"]}]
+
+
+def test_the_boundary_is_not_checked_unless_asked():
+    """경계 인자를 주지 않으면 종전 대조(필드·업무키)만 한다 — 호출자가 범위를 정한다."""
+    columns, rows = _scoped(tenant="tenant_other", scope="anywhere")
+    assert cc.inspect(contract("INV-01"), columns, rows) == []

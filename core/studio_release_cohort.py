@@ -155,8 +155,15 @@ class _ConnectionView:
         yield self.conn
 
 
-def _references(conn, identity: dict, *, stored: bool) -> str:
+def _references(conn, identity: dict, *, stored: bool, artifact_digest: str | None = None) -> str:
+    """cohort 가 가리킬 B2 원본 지문을 검증해 돌려준다.
+
+    ★ [2026-09-25] 업그레이드한 적용본은 같은 인스턴스 ID 로 여러 판본에 고정된 이력을 갖는다.
+      저장된 cohort(`artifact_digest` 가 주어짐)는 **자기가 고정한 판본이 그 이력 안에** 있으면
+      유효하다 — 업그레이드 전에 만든 릴리스도 이력으로 검증된다. 새 cohort 는 **현재 고정**이다."""
     from core.data_preparation.process_pack_artifacts import get_bundle, ProcessPackError
+    from core.data_preparation.process_kit_instances import pins
+    from core.enterprise_context.process_schema import ProcessError
     for table in ("kit_instances", "kit_process_instances", "kit_process_artifacts"):
         if not _table_exists(conn, table):
             _error("STUDIO_RELEASE_COHORT_REFERENCE_MISSING", "릴리스 cohort의 고정 B2 근거가 없습니다.")
@@ -176,9 +183,17 @@ def _references(conn, identity: dict, *, stored: bool) -> str:
                 or not isinstance(link["artifact_digest"], str) or not _HEX.fullmatch(link["artifact_digest"])
                 or link["artifact_digest"] != sealed["kit_fingerprint"]):
             raise ValueError("B2 identity mismatch")
-        artifact = get_bundle(_ConnectionView(conn), link["artifact_digest"])
-        if (instance["kit_id"] != artifact["kit_id"] or instance["version"] != artifact["version"]
-                or instance["kit_fingerprint"] != artifact["artifact_digest"]):
+        try:
+            history = pins(conn, instance)
+        except ProcessError as exc:
+            raise ValueError("B2 pin history") from exc
+        target = (next((p for p in history if p["artifact_digest"] == artifact_digest), None)
+                  if artifact_digest is not None else (history[-1] if history else None))
+        if target is None:
+            raise ValueError("artifact not in pin history")
+        artifact = get_bundle(_ConnectionView(conn), target["artifact_digest"])
+        if (target["identity"]["kit_id"] != artifact["kit_id"] or target["identity"]["version"] != artifact["version"]
+                or target["identity"]["kit_fingerprint"] != artifact["artifact_digest"]):
             raise ValueError("artifact mismatch")
         boundary = identity["context_key"]
         expected = {"tenant_id": boundary["tenant_id"], "entity_mode": boundary["entity_mode"],
@@ -214,9 +229,15 @@ def pin_release_cohort(store, *, release_id, instance_id, app_id, context_key) -
             existing = _read(conn, identity["release_id"])
             if existing and any(existing[k] != identity[k] for k in _IDENTITY_KEYS):
                 _error("STUDIO_RELEASE_COHORT_CONFLICT", "같은 release ID의 다른 정체성은 고정할 수 없습니다.", 409)
-            artifact_digest = _references(conn, identity, stored=existing is not None)
+            artifact_digest = _references(conn, identity, stored=existing is not None,
+                                          artifact_digest=existing["artifact_digest"] if existing else None)
             if existing and existing["artifact_digest"] != artifact_digest:
                 _error("STUDIO_RELEASE_COHORT_REFERENCE_CORRUPT", "저장된 cohort의 artifact가 B2 정체성과 다릅니다.")
+            if existing and existing["artifact_digest"] != _references(conn, identity, stored=True):
+                #: ★ [2026-09-25] 업그레이드 **전** 판본에 고정된 릴리스를 같은 ID 로 다시 만들지 않는다.
+                #:   cohort 는 릴리스 ID 마다 불변이다 — 조용히 옛 판본으로 게시하거나 덮지 않고 멈춘다.
+                _error("STUDIO_RELEASE_REBUILD_AFTER_UPGRADE_UNSUPPORTED",
+                       "업그레이드 전 판본에 고정된 릴리스는 같은 ID 로 다시 만들 수 없습니다. 기존 릴리스는 이력으로 남습니다.", 409)
             _ensure_table(conn)
             if existing:
                 return existing
@@ -240,7 +261,7 @@ def get_release_cohort(store, release_id) -> dict | None:
             existing = _read(conn, release_id)
             if existing is None:
                 return None
-            artifact_digest = _references(conn, existing, stored=True)
+            artifact_digest = _references(conn, existing, stored=True, artifact_digest=existing["artifact_digest"])
             if artifact_digest != existing["artifact_digest"]:
                 _error("STUDIO_RELEASE_COHORT_REFERENCE_CORRUPT", "저장된 cohort의 artifact가 B2 정체성과 다릅니다.")
             return existing

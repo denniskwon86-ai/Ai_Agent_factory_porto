@@ -1660,6 +1660,30 @@ def _certification_error(exc, *, actor: str = "", resource_id: str = ""):
     raise exc
 
 
+@router.post("/snapshots/{snapshot_id}/recertification")
+async def recertification_snapshot(snapshot_id: str, p: Principal = Depends(current_principal)):
+    """[2026-09-25] **재인증 판 만들기** — 인증된 판의 봉인 원문 그대로 새 판을 올리고 대사까지 한다.
+
+    ★ 원 판과 그 서명은 그대로 남는다(이력). 관문 이전 서명이거나 업그레이드로 고정 계약이 바뀌어
+      운영에 쓸 수 없는 판을, 새 판으로 **현재 고정 계약에 맞춰 다시 서명받는** 길이다.
+    ⚠️ 서명은 여기서 하지 않는다 — 새 판은 대사 완료(`RECONCILED`)까지이고 서명은 인증 경로를 탄다."""
+    require_caps(p, PROJECT_RUN, resource="data_preparation",
+                 action=f"snapshots:recertify:{snapshot_id}")
+    _snapshot_or_404(p, snapshot_id)
+    try:
+        row = snapshot_service.reissue_for_recertification(
+            store, snapshot_id, workspace_root=_raw_root(), created_by=p.user_id or "")
+    except m.StateConflict as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    except m.DataPreparationError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    _audit("DATA_REQUIREMENT_ACCEPTED", resource_id=snapshot_id, actor=p.user_id or "",
+           outcome="allowed", detail=f"recertification={row.get('snapshot_id')} state={row.get('state')}")
+    return {"status": "success",
+            "data": {**row, "recertifies": snapshot_id,
+                     "display_label": snapshot_service.display_label(row)}}
+
+
 @router.get("/snapshots/{snapshot_id}/certifications")
 async def list_actual_certifications(snapshot_id: str, p: Principal = Depends(current_principal)):
     from core.data_preparation import certification_subject as cert

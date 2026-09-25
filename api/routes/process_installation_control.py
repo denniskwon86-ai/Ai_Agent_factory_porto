@@ -95,6 +95,8 @@ class PlanIn(StrictModel):
     template_mapping: dict[str, str] = Field(default_factory=dict)
     instance_id: str = ""
     reason: str = Field(min_length=1, max_length=4000)
+    #: [2026-09-25] 설치된 적용본을 새 판본으로 올릴 때, 검토한 **현재 고정 판본**의 지문(CAS).
+    upgrade_from_artifact_digest: str = Field(default="", pattern=r"^([0-9a-f]{64})?$")
 
 
 class InstallIn(PlanIn):

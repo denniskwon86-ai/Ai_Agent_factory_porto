@@ -371,6 +371,62 @@ def display_label(snapshot: Dict[str, Any]) -> str:
     return base + f" · {state or '상태 미상'}"
 
 
+def _declared_control(snapshot: Dict[str, Any]) -> Dict[str, Any]:
+    """원 판이 대사에 쓴 **원천 선언 합계**(행 수·열 합계)를 되살린다. 지어내지 않는다."""
+    import json
+    try:
+        result = json.loads(snapshot.get("control_total_json") or "{}")
+    except ValueError as exc:
+        raise m.DataPreparationError("원 판의 대사 기록을 읽을 수 없습니다.") from exc
+    control: Dict[str, Any] = {}
+    for entry in result.get("checked") or []:
+        if entry.get("kind") == "row_count":
+            control["row_count"] = int(entry["expected"])
+        elif entry.get("kind") == "sum":
+            control.setdefault("sums", {})[str(entry["column"])] = float(entry["expected"])
+    return control
+
+
+def reissue_for_recertification(store: Any, snapshot_id: str, *, workspace_root: str,
+                                created_by: str = "") -> Dict[str, Any]:
+    """★ [2026-09-25] **재인증 판** — 인증된 판의 봉인 원문 그대로 새 판을 올리고 같은 원천 합계로 대사한다.
+
+    인증이 끝난 판은 바꾸지 않는다(서명·이력 보존 — 「인증 완료 후 변경은 새 Snapshot」). 관문 이전
+    서명이거나 업그레이드로 고정 계약이 바뀌어 운영에 쓸 수 없는 판을, 같은 원문으로 새 판을 만들어
+    **현재 고정 계약으로 다시 서명받는** 길이다. 결과는 대사까지 마친 판(`RECONCILED`) 또는 격리 판이다.
+
+    ⚠️ 원문 지문이 수집 때와 다르면 만들지 않는다. 원천 합계는 원 판이 대사에 쓴 값을 그대로 쓴다.
+    ⚠️ 결속이 활성이 아니면 만들지 않는다 — 폐지된 원천에 새 판을 올리지 않는다."""
+    source = store.get_snapshot(snapshot_id)
+    if not source:
+        raise m.DataPreparationError("판을 찾을 수 없습니다.")
+    if source["state"] not in m.CERTIFIED_STATES:
+        raise m.StateConflict("인증이 끝난 판만 재인증 판을 만듭니다 — 진행 중인 판은 그대로 서명을 마치십시오.")
+    path, checksum = str(source.get("raw_path") or ""), str(source.get("checksum") or "")
+    try:
+        with open(path, "rb") as stream:
+            payload = stream.read()
+    except OSError as exc:
+        raise m.DataPreparationError("원 판의 봉인 원문을 읽을 수 없습니다.") from exc
+    if not path or checksum_bytes(payload) != checksum:
+        raise m.StateConflict("원 판의 원문이 수집 때와 다릅니다 — 재인증 판을 만들 수 없습니다.")
+    binding = store.get_binding(source["binding_id"])
+    if not binding or binding.get("state") != m.ACTIVE:
+        raise m.StateConflict("활성 결속의 판만 재인증 판을 만듭니다.")
+    control = _declared_control(source)
+    name = os.path.basename(path).split("__", 1)[-1] or "recertification.csv"
+    fresh = ingest(store, binding=binding, payload=payload, file_name=name, workspace_root=workspace_root,
+                   created_by=created_by, data_kind=source["data_kind"])
+    parsed = parse_csv(payload, file_name=name)
+    row = profile(store, fresh["snapshot_id"], parsed.rows, parsed.columns)
+    if row["state"] == m.QUARANTINED:
+        return row
+    row = standardize(store, fresh["snapshot_id"], parsed.rows)
+    if row["state"] == m.QUARANTINED:
+        return row
+    return reconcile(store, fresh["snapshot_id"], parsed.rows, control)
+
+
 def run_pipeline(store: Any, snapshot_id: str, rows: List[Dict[str, str]],
                  columns: List[str], *, control: Optional[Dict[str, Any]] = None,
                  code_columns: Optional[Dict[str, List[str]]] = None,

@@ -571,7 +571,7 @@ def _review_event_v2(event_id):
 
 def _review_document_v2(store, row, instance, actor_id, context, repo):
     """저장 원문과 과거 승인 업무판을 검증한다. 현재 데이터 사용 허가와는 별개다."""
-    from core.data_preparation.process_kit_instances import binding_for_instance
+    from core.data_preparation.process_kit_instances import binding_for_instance, pin_for_store
     from core.enterprise_context.process_context import ProcessContextService
     from core.enterprise_context.process_schema import ProcessBoundary, ProcessError, fingerprint
     contract = row["contract"]
@@ -613,8 +613,10 @@ def _review_document_v2(store, row, instance, actor_id, context, repo):
     if (fixed["configuration_id"] != head["configuration_id"] or fixed["configuration_fingerprint"] != digest
             or fixed["process_semantic_fingerprint"] != description["semantic"]
             or fixed["data_requirements"] != description["requirements"] or fixed["sources"] != sources
-            or len(own) != 1 or own[0]["artifact_digest"] != link["artifact_digest"]
-            or instance["kit_fingerprint"] != link["artifact_digest"]):
+            or len(own) != 1
+            #: ★ [2026-09-25] 업그레이드한 적용본은 고정 이력을 갖는다 — 계약이 가리키는 원본이 그 이력
+            #:   안에 있어야 한다(인스턴스 행·원 링크의 원 정체성 검증은 `pin_for_store` 안에서 한다).
+            or not pin_for_store(store, instance, own[0]["artifact_digest"])):
         raise ProcessError("PROCESS_CONTRACT_UNAVAILABLE", "고정 업무판·원본과 저장 계약의 참조가 다릅니다.", 503)
     event = None
     if row["status"] == STATUS_REJECTED:

@@ -157,3 +157,50 @@ def test_a_raw_changed_after_reconciliation_is_not_inspected(company):
     raw.write_bytes(raw.read_bytes() + b"\n")
     error = _refused(company, company["sid"])
     assert error.reason_code == "RAW_CHECKSUM_MISMATCH"
+
+
+# ── [2026-09-25] 행의 조직 경계 · 이력 조회 ───────────────────────────────────────
+def test_a_row_of_another_tenant_is_refused(company):
+    policy(company)
+
+    def other_tenant(columns, table):
+        table[1]["tenant_id"] = "tenant_other"
+    error = _refused(company, _reconciled(company, _binding(company), _sample_bytes(company, other_tenant)))
+    assert error.reason_code == "CONTRACT_CONFORMANCE_FAILED"
+    assert error.issues == [{"code": "TENANT_MISMATCH", "line": 3, "fields": ["tenant_id"]}]
+    assert "tenant_other" not in str(error)
+
+
+def test_a_row_of_a_sibling_department_is_out_of_scope(company):
+    """판은 알파 부서 범위다 — 베타(형제) 부서의 행은 기존 권한 계약이 허용한 범위 밖이다."""
+    policy(company)
+    sibling = org.NODES[org.DEPT_B]
+
+    def sibling_scope(columns, table):
+        table[0]["scope_node_id"] = sibling
+    error = _refused(company, _reconciled(company, _binding(company), _sample_bytes(company, sibling_scope)))
+    assert error.issues == [{"code": "SCOPE_OUT_OF_BOUNDS", "line": 2, "fields": ["scope_node_id"]}]
+    assert sibling not in str(error)
+
+
+def test_a_blocked_in_progress_signature_is_still_readable_as_history(company, monkeypatch):
+    """관문은 새 서명을 막을 뿐이다 — 진행 중 서명의 이력 조회는 상태와 사유로 보여 준다."""
+    def install(store, context):
+        store.upsert_kit_version(kit_id="REGISTRY", version="1", name="등록부 키트", source_path="test",
+                                 fingerprint_value="registry-fp", profile={}, mode=m.DATA_KIND_DEMO)
+        return store.create_instance(kit_id="REGISTRY", version="1", kit_fingerprint="registry-fp", **context)
+    policy(company)
+    sid = _reconciled(company, _other_instance(company, install=install), _sample_bytes(company))
+    args = dict(actor=org.MANAGER_A, context=company["context"], use_kind="MANAGEMENT",
+                period_from="2026-08-01", period_to="2026-08-31")
+    with monkeypatch.context() as before_the_gate:
+        before_the_gate.setattr(cs, "_conforming_contract", lambda conn, row: "")
+        subject = cs.preview(company["store"], sid, **args)
+        partial = svc.sign_actual_certification(company["store"], sid, review_kind="DATA_OWNER",
+            reconciliation_evidence="합성 시험 ERP 마감본 2026/08 총계 대사 일치", subject_id=subject["subject_id"],
+            expected_subject_digest=subject["digest"], client_request_id="in-progress-before-gate", **args)
+    assert partial["certified"] is False
+    history = cs.read(company["store"], sid, actor=org.MANAGER_A, context=company["context"])
+    assert history["review_status"] == "CONTRACT_BLOCKED"
+    assert history["review_issue"]["reason_code"] == "CONTRACT_NOT_PINNED"
+    assert len(history["signatures"]) == 1

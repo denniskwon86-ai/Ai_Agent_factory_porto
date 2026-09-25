@@ -23,18 +23,43 @@ class ProcessInstallationService(ProcessConfigurationService):
         from core.data_preparation.process_pack_artifacts import get_bundle
         return get_bundle(self.store, digest)
 
-    def _existing_instance(self, instance_id, boundary, bundle):
-        from core.data_preparation.process_kit_instances import binding_for_instance
+    def _instance_row(self, instance_id, boundary):
         row = self.store.get_instance(instance_id)
         if not row or any(row[k] != v for k, v in {
                 "tenant_id": boundary.tenant_id, "entity_mode": boundary.entity_mode,
                 "scope_node_id": boundary.scope_node_id or boundary.context_root_id}.items()):
             raise missing()
-        if row["status"] != "active" or row["kit_id"] != bundle["kit_id"] or row["version"] != bundle["version"]:
+        return row
+
+    def _existing_instance(self, instance_id, boundary, bundle):
+        """이 번들에 **고정된 적이 있는** 기존 인스턴스.
+
+        ★ [2026-09-25] 업그레이드한 적용본은 같은 ID 로 여러 판본에 고정된 이력을 갖는다 —
+          판본 동등이 아니라 이력 소속으로 본다(과거 승인판의 원본도 그대로 검증된다)."""
+        from core.data_preparation.process_kit_instances import pin_for_store
+        row = self._instance_row(instance_id, boundary)
+        if row["status"] != "active" or row["kit_id"] != bundle["kit_id"]:
             raise ProcessError("PROCESS_INSTANCE_CONFLICT", "선택한 인스턴스의 상태·판본이 설치 계획과 다릅니다.")
-        link = binding_for_instance(self.store, row)
-        if not link or link["artifact_digest"] != bundle["artifact_digest"] or link["context_root_id"] != boundary.context_root_id:
+        pin = pin_for_store(self.store, row, bundle["artifact_digest"])
+        if (not pin or pin["context_root_id"] != boundary.context_root_id
+                or pin["identity"]["version"] != bundle["version"]):
             raise ProcessError("PROCESS_INSTANCE_MIGRATION_REQUIRED", "기존 인스턴스의 불변 원본 대응을 먼저 검토해야 합니다.")
+        return row
+
+    def _upgradable_instance(self, instance_id, boundary, from_digest, bundle):
+        """업그레이드 계획의 적용본: 현재 고정이 `from_digest` 이고, 같은 키트의 더 높은 판본이다."""
+        from core.data_preparation.process_kit_instances import current_pin, _version_key
+        row = self._instance_row(instance_id, boundary)
+        if row["status"] != "active" or row["kit_id"] != bundle["kit_id"]:
+            raise ProcessError("PROCESS_INSTANCE_CONFLICT", "선택한 인스턴스의 상태·키트가 업그레이드 계획과 다릅니다.")
+        with self.store.transaction() as conn:
+            pin = current_pin(conn, row)
+        if not pin or pin["context_root_id"] != boundary.context_root_id:
+            raise ProcessError("PROCESS_INSTANCE_MIGRATION_REQUIRED", "기존 인스턴스의 불변 원본 대응을 먼저 검토해야 합니다.")
+        if pin["artifact_digest"] != from_digest:
+            raise ProcessError("PROCESS_PACK_UPGRADE_CONFLICT", "적용본의 현재 고정 판본이 계획과 다릅니다. 현재 상태로 다시 계획하십시오.")
+        if _version_key(bundle["version"]) <= _version_key(pin["identity"]["version"]):
+            raise ProcessError("PROCESS_PACK_UPGRADE_INVALID", "더 높은 새 판본으로만 업그레이드합니다.", 422)
         return row
 
     def legacy_preview(self, *, boundary, actor, context):
@@ -91,7 +116,7 @@ class ProcessInstallationService(ProcessConfigurationService):
 
     def plan(self, *, boundary, actor, context, artifact_digest, business_kit_ids,
              expected_head_version, base_profile_id, base_fingerprint, legacy_decisions=None,
-             template_mapping=None, instance_id="", reason=""):
+             template_mapping=None, instance_id="", reason="", upgrade_from_artifact_digest=""):
         if not isinstance(reason, str) or not reason.strip():
             raise ProcessError("PROCESS_CHANGE_INVALID", "설치 이유가 필요합니다.", 422)
         if (not isinstance(business_kit_ids, list) or not business_kit_ids or
@@ -117,18 +142,31 @@ class ProcessInstallationService(ProcessConfigurationService):
             if boundary.entity_mode != "VIRTUAL" and (profile.get("mode") == "DEMO/SYNTHETIC" or
                     profile.get("data_class") == "SYNTHETIC" or profile.get("entity_mode") == "VIRTUAL"):
                 raise ProcessError("PROCESS_PACK_MODE_MISMATCH", "합성 Starter는 VIRTUAL 문맥에서만 적용할 수 있습니다.", 422)
-            if instance_id:
+            upgrade = bool(upgrade_from_artifact_digest)
+            if upgrade:
+                if not instance_id or not payload:
+                    raise ProcessError("PROCESS_PACK_UPGRADE_INVALID", "업그레이드는 승인 업무판에 설치된 적용본을 명시해야 합니다.", 422)
+                self._upgradable_instance(instance_id, boundary, upgrade_from_artifact_digest, bundle)
+            elif instance_id:
                 self._existing_instance(instance_id, boundary, bundle)
             plan = {"boundary": boundary.model_dump(), "configuration_id": head["configuration_id"] if head else "",
                     "artifact_digest": artifact_digest, "business_kit_ids": sorted(business_kit_ids),
                     "expected_head_version": version, "base_profile_id": pid, "base_fingerprint": base_fingerprint,
                     "legacy_token": token, "legacy_decisions": legacy_decisions or [],
                     "template_mapping": template_mapping or {}, "instance_id": instance_id, "reason": reason}
+            if upgrade:
+                #: 설치 계획의 지문은 종전과 같게 둔다 — 업그레이드일 때만 이 열쇠가 생긴다.
+                plan["upgrade_from_artifact_digest"] = upgrade_from_artifact_digest
             draft = self._document(plan, bundle, payload, legacy, head["configuration_id"] if head else "preview", "preview")
-            return {"plan": plan, "plan_digest": fingerprint(plan), "preview": draft,
-                    "state": "PLANNED", "data_ready": False, "apps_ready": False,
-                    "warnings": ["DOMAIN_REVIEW_REQUIRED", "DATA_BINDINGS_UNRESOLVED", "DISTINCT_PUBLISHER_REQUIRED"],
-                    "capabilities": sorted(rights.capabilities)}
+            result = {"plan": plan, "plan_digest": fingerprint(plan), "preview": draft,
+                      "state": "PLANNED", "data_ready": False, "apps_ready": False,
+                      "warnings": ["DOMAIN_REVIEW_REQUIRED", "DATA_BINDINGS_UNRESOLVED", "DISTINCT_PUBLISHER_REQUIRED"],
+                      "capabilities": sorted(rights.capabilities)}
+            if upgrade:
+                result["upgrade"] = self._upgrade_summary(plan, bundle, payload, draft)
+                #: 기존 인증은 이력으로 남지만 새 계약 지문이 없어 운영에는 재인증 뒤에 쓴다.
+                result["warnings"].append("RECERTIFICATION_REQUIRED")
+            return result
 
     def _document(self, plan, bundle, previous, legacy, configuration_id, instance_id):
         try:
@@ -138,7 +176,86 @@ class ProcessInstallationService(ProcessConfigurationService):
         except (KeyError, TypeError, ValueError) as exc:
             raise ProcessError("PROCESS_MAPPING_INVALID", "명시 이관·표준 대응의 형식과 원본 필드를 확인하십시오.", 422) from exc
 
+    # ── [2026-09-25] 판본 업그레이드 — 같은 적용본, 같은 업무 대응, 새 원본 ─────────────────
+    #
+    # ★ 업무판을 새로 짓지 않는다. 승인된 현재 판을 **그대로 복사**하고, 그 적용본의 원본 참조
+    #   (지문·판본·표준 지문)와 앱 후보의 판본 참조만 바꾼다 — 사용자가 고친 이름·사용 여부·
+    #   추가 업무·바로가기·데이터 요구 상태는 손대지 않는다.
+    # ⚠️ 설치된 표준 업무의 내용이 두 판본 사이에서 바뀌었으면 자동으로 옮기지 않는다
+    #   (`PROCESS_PACK_UPGRADE_REVIEW_REQUIRED`). 앱 후보의 판본 표기 외의 차이는 사람이 검토한다.
+
+    @staticmethod
+    def _comparable(template):
+        value = copy.deepcopy(template)
+        for ref in value.get("suggested_blueprint_refs") or []:
+            ref["version"] = ""
+        return value
+
+    def _upgrade_basis(self, plan, bundle, previous):
+        if not previous:
+            raise ProcessError("PROCESS_PACK_UPGRADE_INVALID", "업그레이드할 승인 업무판이 없습니다.", 422)
+        from_digest = plan["upgrade_from_artifact_digest"]
+        sources = [s for s in previous["template_sources"]
+                   if s["kit_instance_ref"] == plan["instance_id"] and s["artifact_digest"] == from_digest]
+        if len(sources) != 1:
+            raise ProcessError("PROCESS_PACK_UPGRADE_CONFLICT", "현재 승인 업무판에 그 판본의 적용본이 하나로 있지 않습니다.")
+        if plan["template_mapping"]:
+            raise ProcessError("PROCESS_MAPPING_INVALID", "업그레이드는 기존 업무 대응을 그대로 씁니다.", 422)
+        old = self._bundle(from_digest)
+        if old["kit_id"] != bundle["kit_id"] or sources[0]["kit_version"] != old["version"]:
+            raise ProcessError("PROCESS_PACK_UPGRADE_INVALID", "같은 키트의 설치 원본만 업그레이드합니다.", 422)
+        old_templates = {t["template_key"]: t for t in old["pack"]["templates"]}
+        new_templates = {t["template_key"]: t for t in bundle["pack"]["templates"]}
+        installed = sources[0]["template_process_ids"]
+        kits = sorted({old_templates[key]["business_kit_id"] for key in installed if key in old_templates})
+        if plan["business_kit_ids"] != kits:
+            raise ProcessError("PROCESS_PACK_SELECTION_INVALID", "업그레이드는 설치된 업무키트를 그대로 선택해야 합니다.", 422)
+        changed = sorted(key for key in installed if key not in new_templates or key not in old_templates
+                         or self._comparable(old_templates[key]) != self._comparable(new_templates[key]))
+        if changed:
+            raise ProcessError("PROCESS_PACK_UPGRADE_REVIEW_REQUIRED",
+                               f"설치된 표준 업무 {len(changed)}개가 새 판본에서 바뀌어 자동으로 옮기지 않습니다 — 업무 대응 검토가 필요합니다.")
+        return sources[0], old, installed
+
+    def _upgrade_document(self, plan, bundle, previous):
+        _, old, installed = self._upgrade_basis(plan, bundle, previous)
+        doc = copy.deepcopy(previous)
+        doc["base_profile_id"], doc["base_fingerprint"] = plan["base_profile_id"], plan["base_fingerprint"]
+        source = next(s for s in doc["template_sources"]
+                      if s["kit_instance_ref"] == plan["instance_id"] and s["artifact_digest"] == plan["upgrade_from_artifact_digest"])
+        source.update(artifact_digest=bundle["artifact_digest"], kit_version=bundle["version"],
+                      pack_id=bundle["pack"]["pack_id"], pack_version=bundle["pack"]["version"],
+                      accepted_standard_digest=bundle["pack_digest"])
+        process_ids = set(installed.values())
+        #: 표준 노드는 자기 원본 지문(`source_ref`)을 적어 둔다 — 같은 노드(같은 process_id)의 원본만 옮긴다.
+        for node in doc["nodes"]:
+            if node["process_id"] in process_ids and node["source_ref"] == plan["upgrade_from_artifact_digest"]:
+                node["source_ref"] = bundle["artifact_digest"]
+        for binding in doc["bindings"]:
+            if (binding["kind"] == "BLUEPRINT_SUGGESTION" and binding["process_id"] in process_ids
+                    and binding["kit_id"] == old["kit_id"] and binding["kit_version"] == old["version"]):
+                binding["kit_version"] = bundle["version"]
+        return validate_document(doc)
+
+    def _upgrade_summary(self, plan, bundle, previous, draft):
+        _, old, installed = self._upgrade_basis(plan, bundle, previous)
+        before = [b for b in previous["bindings"] if b["kind"] == "BLUEPRINT_SUGGESTION"]
+        after = [b for b in draft["bindings"] if b["kind"] == "BLUEPRINT_SUGGESTION"]
+        return {"instance_id": plan["instance_id"],
+                "from": {"version": old["version"], "artifact_digest": old["artifact_digest"],
+                         "pack_version": old["pack"]["version"]},
+                "to": {"version": bundle["version"], "artifact_digest": bundle["artifact_digest"],
+                       "pack_version": bundle["pack"]["version"]},
+                "templates_kept": len(installed),
+                "process_ids_preserved": sorted(installed.values()) == sorted(
+                    next(s for s in draft["template_sources"] if s["kit_instance_ref"] == plan["instance_id"]
+                         and s["artifact_digest"] == bundle["artifact_digest"])["template_process_ids"].values()),
+                "blueprint_suggestions_updated": sum(1 for x, y in zip(before, after) if x != y),
+                "dataset_contracts": len(((bundle.get("dataset_contracts") or {}).get("contracts")) or [])}
+
     def _build_document(self, plan, bundle, previous, legacy, configuration_id, instance_id):
+        if plan.get("upgrade_from_artifact_digest"):
+            return self._upgrade_document(plan, bundle, previous)
         boundary = ProcessBoundary(**plan["boundary"])
         doc = copy.deepcopy(previous) if previous else ProcessDocument(configuration_id=configuration_id).model_dump()
         doc["configuration_id"], doc["base_profile_id"], doc["base_fingerprint"] = configuration_id, plan["base_profile_id"], plan["base_fingerprint"]
@@ -452,7 +569,17 @@ class ProcessInstallationService(ProcessConfigurationService):
                          (uid("process_event"), row["configuration_id"], "", canonical(event), fingerprint(event), now))
         try:
             bundle = self._bundle(plan["artifact_digest"])
-            if plan["instance_id"]:
+            if plan.get("upgrade_from_artifact_digest"):
+                from core.data_preparation.process_kit_instances import upgrade_or_get
+                #: ★ [2026-09-25] 명시 적용: 검토한 계획(현재 고정 지문 CAS)대로 같은 적용본을 새 판본에
+                #:   고정한다(이력 한 줄 추가). 인스턴스·결속·판·인증은 지우지도 새로 만들지도 않는다.
+                with self.transaction() as conn:
+                    if not self._authorize(conn, boundary, actor, context, "edit").has(PROJECT_CREATE):
+                        raise ProcessError("PROCESS_INSTALLER_REQUIRED", "적용본을 업그레이드할 현재 권한이 필요합니다.", 403)
+                self._instance_row(plan["instance_id"], boundary)
+                instance = upgrade_or_get(self.store, operation_id=operation_id, instance_id=plan["instance_id"],
+                                          bundle=bundle, expected_from=plan["upgrade_from_artifact_digest"], actor=actor)
+            elif plan["instance_id"]:
                 instance = self._existing_instance(plan["instance_id"], boundary, bundle)
             else:
                 from core.data_preparation.process_kit_instances import create_or_get
@@ -483,7 +610,9 @@ class ProcessInstallationService(ProcessConfigurationService):
         except (ProcessError, sqlite3.Error) as exc:
             # 실패한 DP 단계는 보존. 복구 상태 기록마저 실패해도 원 요청 오류를 숨기지 않는다.
             code = getattr(exc, "reason_code", "PROCESS_STORAGE_UNAVAILABLE")
-            blocked = code in {"PROCESS_HEAD_CONFLICT", "PROCESS_LEGACY_CONFLICT", "PROCESS_PLAN_UNAVAILABLE", "IMMUTABLE_VERSION_CONFLICT"}
+            blocked = code in {"PROCESS_HEAD_CONFLICT", "PROCESS_LEGACY_CONFLICT", "PROCESS_PLAN_UNAVAILABLE", "IMMUTABLE_VERSION_CONFLICT",
+                               "PROCESS_PACK_UPGRADE_CONFLICT", "PROCESS_PACK_UPGRADE_INVALID",
+                               "PROCESS_PACK_UPGRADE_REVIEW_REQUIRED"}
             try:
                 with self.transaction(write=True) as conn:
                     conn.execute("UPDATE enterprise_process_installations SET stage=?,error_code=?,revision=revision+1,updated_at=? WHERE operation_id=? AND stage='PREPARING' AND attempt_id=?",

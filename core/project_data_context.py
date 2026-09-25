@@ -160,7 +160,7 @@ def render_agent_context(store: Any, binding: Mapping[str, Any],
 def process_instance(store, instance_id, *, actor_id, context, process_context,
                      for_action="GENERATE", repo=None):
     """B2 정확 인스턴스와 서버 고정 문맥을 읽는다. 레거시 registry 폴백은 없다."""
-    from core.data_preparation.process_kit_instances import binding_for_instance
+    from core.data_preparation.process_kit_instances import pin_for_store
     from core.data_preparation.process_pack_artifacts import get_bundle
     from core.enterprise_context.process_context import ProcessContextService
     from core.enterprise_context.process_schema import ProcessError
@@ -179,13 +179,14 @@ def process_instance(store, instance_id, *, actor_id, context, process_context,
                     "scope_node_id": boundary["scope_node_id"] or boundary["context_root_id"]}
         if any(instance.get(k) != v for k, v in expected.items()):
             raise ProcessError("PROCESS_INSTANCE_NOT_FOUND", "고정 업무 문맥의 적용본을 찾을 수 없습니다.", 404)
-        link = binding_for_instance(store, instance)
-        if (not link or instance.get("status") != "active" or link["context_root_id"] != boundary["context_root_id"]
-                or link["artifact_digest"] != source[0]["artifact_digest"]
-                or instance["kit_fingerprint"] != link["artifact_digest"]):
+        #: ★ [2026-09-25] 업그레이드한 적용본은 고정 이력을 갖는다 — 이 문맥이 가리키는 원본이
+        #:   그 이력 안에 있어야 한다(인스턴스 행·원 링크는 원 정체성으로 검증된다).
+        pin = pin_for_store(store, instance, source[0]["artifact_digest"])
+        if (not pin or instance.get("status") != "active" or pin["context_root_id"] != boundary["context_root_id"]
+                or pin["identity"]["kit_fingerprint"] != pin["artifact_digest"]):
             raise ProcessError("PROCESS_INSTANCE_CONFLICT", "고정 적용본·원본·현재 상태가 다릅니다.", 409)
-        bundle = get_bundle(store, link["artifact_digest"])
-        if instance["kit_id"] != bundle["kit_id"] or instance["version"] != bundle["version"]:
+        bundle = get_bundle(store, pin["artifact_digest"])
+        if pin["identity"]["kit_id"] != bundle["kit_id"] or pin["identity"]["version"] != bundle["version"]:
             raise ProcessError("PROCESS_ARTIFACT_UNAVAILABLE", "고정 키트 원본 정체성이 다릅니다.", 503)
         return instance, bundle, verified
 
@@ -238,7 +239,7 @@ def bind_process_instance(store, instance_id, *, actor_id, context, process_cont
     if not refs:
         raise ProcessError("CERTIFIED_BINDINGS_REQUIRED", "검증된 고정 데이터 참조가 필요합니다.", 409)
     body = dict(binding_version="v2", instance_id=instance_id, instance_label=instance["label"],
-        kit_id=instance["kit_id"], kit_version=instance["version"], kit_fingerprint=bundle["artifact_digest"],
+        kit_id=instance["kit_id"], kit_version=bundle["version"], kit_fingerprint=bundle["artifact_digest"],
         kit_mode=bundle["profile"]["mode"], context_key=verified["context_key"], process_context=verified,
         tenant_id=instance["tenant_id"], scope_node_id=instance["scope_node_id"], entity_mode=instance["entity_mode"],
         prompt_egress_policy="BLOCKED_UNTIL_APPROVED_MODEL_ROUTE",
@@ -259,7 +260,7 @@ def validate_process_binding(store, binding, *, actor_id, context, for_action="R
     instance, bundle, verified = process_instance(store, binding["instance_id"], actor_id=actor_id,
         context=context, process_context=binding["process_context"], for_action=for_action, repo=repo)
     refs = process_refs_for_instance(verified, instance["instance_id"])
-    expected = {"kit_id": instance["kit_id"], "kit_version": instance["version"],
+    expected = {"kit_id": instance["kit_id"], "kit_version": bundle["version"],
                 "kit_fingerprint": bundle["artifact_digest"], "kit_mode": bundle["profile"]["mode"],
                 "context_key": verified["context_key"], "tenant_id": instance["tenant_id"],
                 "scope_node_id": instance["scope_node_id"], "entity_mode": instance["entity_mode"],

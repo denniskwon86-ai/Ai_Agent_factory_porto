@@ -27,6 +27,9 @@ from core.data_preparation import models as m
 MISSING_FIELD = "MISSING_FIELD"
 EMPTY_BUSINESS_KEY = "EMPTY_BUSINESS_KEY"
 DUPLICATE_BUSINESS_KEY = "DUPLICATE_BUSINESS_KEY"
+#: [2026-09-25] 행의 조직 경계 — 행이 스스로 적은 범위가 판의 범위 밖이면 막는다.
+TENANT_MISMATCH = "TENANT_MISMATCH"
+SCOPE_OUT_OF_BOUNDS = "SCOPE_OUT_OF_BOUNDS"
 
 
 class ContractShapeError(m.DataPreparationError):
@@ -62,11 +65,16 @@ def requirements(contract: Any) -> Tuple[List[str], List[str]]:
 
 
 def inspect(contract: Any, columns: Sequence[str],
-            rows: Sequence[Dict[str, Any]]) -> List[Dict[str, Any]]:
+            rows: Sequence[Dict[str, Any]], *, tenant_id: Any = None,
+            scopes: Any = None) -> List[Dict[str, Any]]:
     """계약과 표를 대조해 **어긋남 목록**을 돌려준다. 비어 있으면 통과다.
 
     ★ 필수 열이 하나라도 없으면 행 검사는 하지 않는다 — 없는 열의 값은 전부 «빈 것» 으로
-      보여 같은 사실이 행 수만큼 반복된다."""
+      보여 같은 사실이 행 수만큼 반복된다.
+    ★ [2026-09-25] `tenant_id`·`scopes` 를 주면 **행의 조직 경계**도 본다(계약에 그 열이 있을 때).
+      테넌트는 판과 같아야 하고, 조직 범위는 `scopes`(판의 조직 노드와 기존 권한 계약이 허용한
+      하위 노드) 안이어야 한다. ⚠️ «모든 행의 부서가 같아야 한다» 같은 새 규칙이 아니다 —
+      하위 조직의 행은 그대로 받는다."""
     required, keys = requirements(contract)
     present = set(columns or [])
     missing = [name for name in required if name not in present]
@@ -74,7 +82,14 @@ def inspect(contract: Any, columns: Sequence[str],
         return [{"code": MISSING_FIELD, "fields": missing}]
     issues: List[Dict[str, Any]] = []
     first_seen: Dict[Tuple[str, ...], int] = {}
+    check_tenant = tenant_id is not None and "tenant_id" in present
+    check_scope = scopes is not None and "scope_node_id" in present
+    allowed = {str(s) for s in (scopes or ())}
     for line, row in enumerate(rows, 2):
+        if check_tenant and str(row.get("tenant_id") or "").strip() != str(tenant_id):
+            issues.append({"code": TENANT_MISMATCH, "line": line, "fields": ["tenant_id"]})
+        if check_scope and str(row.get("scope_node_id") or "").strip() not in allowed:
+            issues.append({"code": SCOPE_OUT_OF_BOUNDS, "line": line, "fields": ["scope_node_id"]})
         identity = tuple(str(row.get(k) or "").strip() for k in keys)
         empty = [k for k, value in zip(keys, identity) if not value]
         if empty:
